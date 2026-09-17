@@ -54,3 +54,17 @@ Work Log:
 
 Stage Summary:
 - Plan v3 (storage revised) presented to user for final approval. Dual storage: disk+git for project sources/history, SQLite for all platform data. Git binary + GitHub network confirmed working in sandbox.
+
+---
+Task ID: 0-d
+Agent: main
+Task: Write detailed textual UI/UX spec + user flows (guest → first note → idea-to-MVP; import; admin) for user alignment before approval. No coding yet.
+
+Work Log:
+- Described design system: OpenUI components + stone/emerald token layer, dark/light, Russian microcopy, minimal Cursor-like density in workspace.
+- Screen map: Landing (guest) → Auth → Onboarding → Shell (sidebar: Блокнот/Проекты/Уведомления/Профиль + Админка) → Notebook (capture + feed + note detail drawer with 4-block analysis & discussion) → Projects (list + create/import dialog) → Project Workspace (file tree left, agent chat center-primary, Monaco secondary via tabs, plan panel, modes Ask/Plan/Act/Review, diff cards, checkpoints, git history) → Admin (users/providers/settings/audit).
+- Flows: (A) guest registers → first note → WS notif → analysis; (B) note → project → interview → /spec → plan → act → export; (C) GitHub import → ask about code; (D) note↔project relation detector.
+- States: empty/loading/error, WS reconnect badge, mobile adaptations (bottom nav, chat-first, editor as sheet).
+
+Stage Summary:
+- UI/UX textual spec delivered to user for review/alignment. Awaiting approval (or edits) before Stage 0 start.
