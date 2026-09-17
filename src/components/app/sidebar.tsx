@@ -16,6 +16,7 @@ import {
   MessageSquarePlus,
   Moon,
   NotebookPen,
+  PenLine,
   Pencil,
   Shield,
   Sun,
@@ -56,6 +57,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
+import { useAppUi } from "@/lib/store";
 import type { ThreadListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -78,6 +80,9 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
     deleteThread,
     renameThread,
   } = useThreads();
+  const mainArea = useAppUi((s) => s.mainArea);
+  const setMainArea = useAppUi((s) => s.setMainArea);
+  const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -93,17 +98,29 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
 
   const handleSelect = (id: string) => {
     onNavigate?.();
+    setMainArea("chat");
     void selectThread(id);
   };
 
   const handleNewThread = async () => {
     onNavigate?.();
+    setMainArea("chat");
     setCreating(true);
     try {
       await newThread();
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleOpenNotebook = () => {
+    onNavigate?.();
+    setMainArea("notebook");
+  };
+
+  const handleOpenCapture = () => {
+    onNavigate?.();
+    setCaptureOpen(true);
   };
 
   const startRename = (thread: ThreadListItem) => {
@@ -156,16 +173,32 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
         </Tooltip>
       </div>
 
-      {/* ── New thread ── */}
-      <div className="p-3">
+      {/* ── New thread + quick capture ── */}
+      <div className="flex gap-2 p-3">
         <Button
-          className="w-full justify-center gap-2 rounded-xl"
+          className="min-w-0 flex-1 justify-center gap-2 rounded-xl"
           onClick={() => void handleNewThread()}
           disabled={creating}
         >
-          <MessageSquarePlus className="size-4" aria-hidden="true" />
-          {creating ? "Создаём…" : "Новый диалог"}
+          <MessageSquarePlus className="size-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">
+            {creating ? "Создаём…" : "Новый диалог"}
+          </span>
         </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-10 shrink-0 rounded-xl"
+              onClick={handleOpenCapture}
+              aria-label="Записать мысль (Ctrl+K)"
+            >
+              <PenLine className="size-4" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Записать мысль · Ctrl K</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* ── Threads ── */}
@@ -301,23 +334,26 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
         </h3>
         <ul className="space-y-1">
           <li>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  disabled
-                  aria-disabled="true"
-                  className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-muted-foreground opacity-70"
-                >
-                  <NotebookPen className="size-4 shrink-0" aria-hidden="true" />
-                  <span className="flex-1 text-left">Блокнот</span>
-                  <Badge variant="secondary" className="text-[10px]">
-                    скоро
-                  </Badge>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Блокнот появится в следующей версии</TooltipContent>
-            </Tooltip>
+            <button
+              type="button"
+              onClick={handleOpenNotebook}
+              aria-current={mainArea === "notebook" ? "true" : undefined}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
+                mainArea === "notebook"
+                  ? "bg-accent font-medium text-accent-foreground"
+                  : "text-foreground/90 hover:bg-accent/60",
+              )}
+            >
+              <NotebookPen
+                className={cn(
+                  "size-4 shrink-0 transition-colors duration-150",
+                  mainArea === "notebook" && "text-primary",
+                )}
+                aria-hidden="true"
+              />
+              <span className="flex-1 text-left">Блокнот</span>
+            </button>
           </li>
           <li>
             <Tooltip>

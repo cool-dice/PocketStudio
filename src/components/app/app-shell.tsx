@@ -2,21 +2,43 @@
 
 /**
  * AppShell — chat-first 3-zone layout:
- * left sidebar (threads, collections, profile) · center chat · right context.
- * Below md the sidebar lives in a Sheet opened from the chat header hamburger;
- * the context panel is a collapsible xl-only zone.
+ * left sidebar (threads, collections, profile) · center chat or notebook ·
+ * right context (note detail / placeholder).
+ * Below md the sidebar lives in a Sheet opened from the header hamburger;
+ * the context panel is an xl+ zone, below xl note details open in a Dialog.
+ * Also owns the global ⌘K / Ctrl+K quick-capture shortcut.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { CaptureDialog } from "@/components/app/capture-dialog";
 import { ChatArea } from "@/components/app/chat-area";
 import { ContextPanel } from "@/components/app/context-panel";
+import { MobileNoteDialog } from "@/components/app/mobile-note-dialog";
+import { NotebookScreen } from "@/components/app/notebook-screen";
 import { SidebarContent } from "@/components/app/sidebar";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { useAppUi } from "@/lib/store";
 
 export function AppShell() {
-  const [contextOpen, setContextOpen] = useState(true);
+  const mainArea = useAppUi((s) => s.mainArea);
+  const contextOpen = useAppUi((s) => s.contextOpen);
+  const setContextOpen = useAppUi((s) => s.setContextOpen);
+  const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
+
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Global ⌘K / Ctrl+K → quick capture (works in inputs; dialogs allowed).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        useAppUi.getState().setCaptureOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
@@ -43,15 +65,23 @@ export function AppShell() {
         </SheetContent>
       </Sheet>
 
-      {/* ── Center: chat ── */}
-      <ChatArea
-        contextOpen={contextOpen}
-        onToggleContext={() => setContextOpen((v) => !v)}
-        onOpenMobileNav={() => setMobileNavOpen(true)}
-      />
+      {/* ── Center: chat or notebook ── */}
+      {mainArea === "chat" ? (
+        <ChatArea
+          contextOpen={contextOpen}
+          onToggleContext={() => setContextOpen(!contextOpen)}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
+        />
+      ) : (
+        <NotebookScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      )}
 
       {/* ── Right: context (xl+) ── */}
       {contextOpen && <ContextPanel onClose={() => setContextOpen(false)} />}
+
+      {/* ── Overlays ── */}
+      <CaptureDialog />
+      <MobileNoteDialog />
     </div>
   );
 }

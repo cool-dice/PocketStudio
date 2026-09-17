@@ -4,7 +4,9 @@
  */
 
 import type {
+  Category,
   Message,
+  Note,
   Thread,
   ThreadListItem,
   ThreadMode,
@@ -122,6 +124,60 @@ export const api = {
     return request<{ ok: boolean }>(
       `/api/threads/${encodeURIComponent(id)}`,
       { method: "DELETE" },
+    );
+  },
+
+  /* ── Notes & categories (Stage 1) ── */
+
+  listNotes(params?: {
+    categoryId?: string;
+    favorite?: boolean;
+    q?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ notes: Note[]; total: number; hasMore: boolean }> {
+    const qs = new URLSearchParams();
+    if (params?.categoryId) qs.set("categoryId", params.categoryId);
+    if (params?.favorite) qs.set("favorite", "1");
+    if (params?.q) qs.set("q", params.q);
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return request(`/api/notes${query ? `?${query}` : ""}`);
+  },
+
+  createNote(data: { text: string; categoryId?: string }): Promise<Note> {
+    return request<{ note: Note }>("/api/notes", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => r.note);
+  },
+
+  getNote(id: string): Promise<Note> {
+    return request<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`).then(
+      (r) => r.note,
+    );
+  },
+
+  updateNote(
+    id: string,
+    patch: { favorite?: boolean; categoryId?: string | null; rawText?: string },
+  ): Promise<Note> {
+    return request<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }).then((r) => r.note);
+  },
+
+  deleteNote(id: string): Promise<void> {
+    return request<{ ok: boolean }>(`/api/notes/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  listCategories(): Promise<Category[]> {
+    return request<{ categories: Category[] }>("/api/categories").then(
+      (r) => r.categories,
     );
   },
 };

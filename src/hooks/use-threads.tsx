@@ -23,9 +23,12 @@ import {
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
 import type {
   ChatMessage,
   Message,
+  Note,
+  NoteStatus,
   ThreadListItem,
   WsAgentThinkingPayload,
   WsErrorPayload,
@@ -34,6 +37,8 @@ import type {
   WsMessageStartPayload,
   WsMessageUserPayload,
   WsThreadUpdatedPayload,
+  WsToolEndPayload,
+  WsToolStartPayload,
 } from "@/lib/types";
 import { useSocket } from "@/hooks/use-socket";
 
@@ -59,6 +64,45 @@ const ThreadsContext = createContext<ThreadsContextValue | null>(null);
 
 function tempId(): string {
   return `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Normalize an agent tool result (create_note / open_note) into a Note for
+ * the context panel. create_note nests the note under result.note with a
+ * sibling result.category; open_note returns the note itself.
+ */
+function noteFromToolResult(tool: string, result: unknown): Note | null {
+  if (typeof result !== "object" || result === null) return null;
+  const r = result as Record<string, unknown>;
+  const raw = tool === "create_note" ? r.note : r;
+  if (typeof raw !== "object" || raw === null) return null;
+  const n = raw as Record<string, unknown>;
+  if (typeof n.id !== "string") return null;
+
+  const cat = (tool === "create_note" ? r.category : n.category) as
+    | Record<string, unknown>
+    | null
+    | undefined;
+
+  return {
+    id: n.id,
+    rawText: typeof n.rawText === "string" ? n.rawText : null,
+    status: (typeof n.status === "string" ? n.status : "pending") as NoteStatus,
+    favorite: typeof n.favorite === "boolean" ? n.favorite : false,
+    createdAt:
+      typeof n.createdAt === "string"
+        ? n.createdAt
+        : new Date().toISOString(),
+    category:
+      cat && typeof cat === "object" && typeof cat.id === "string"
+        ? {
+            id: String(cat.id),
+            name: String(cat.name ?? ""),
+            color: String(cat.color ?? "stone"),
+            icon: String(cat.icon ?? "lightbulb"),
+          }
+        : null,
+  };
 }
 
 export function ThreadsProvider({ children }: { children: ReactNode }) {
@@ -389,6 +433,68 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       setThinkingThreadId(threadId);
     };
 
+    const onToolStart = ({
+      threadId,
+      messageId,
+      tool,
+      args,
+    }: WsToolStartPayload) => {
+      // Tool events for background threads are ignored — they will be loaded
+      // from the REST history when the thread becomes active.
+      if (threadId !== activeIdRef.current) return;
+      // The tool card spinner replaces the typing indicator.
+      setThinkingThreadId((cur) => (cur === threadId ? null : cur));
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === messageId)) return prev;
+        return [
+          ...prev,
+          {
+            id: messageId,
+            threadId,
+            role: "tool" as const,
+            content: "",
+            toolName: tool,
+            toolArgs: JSON.stringify(args ?? {}),
+            toolResult: null,
+            createdAt: new Date().toISOString(),
+            toolPending: true,
+          },
+        ];
+      });
+    };
+
+    const onToolEnd = ({
+      threadId,
+      messageId,
+      tool,
+      result,
+    }: WsToolEndPayload) => {
+      if (threadId !== activeIdRef.current) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                toolResult: JSON.stringify(result ?? {}),
+                toolPending: false,
+              }
+            : m,
+        ),
+      );
+
+      // create_note / open_note with a note payload → open it in the context
+      // panel (auto: never pops the mobile dialog). New notes refresh the
+      // notebook feed silently.
+      if (tool === "create_note" || tool === "open_note") {
+        const note = noteFromToolResult(tool, result);
+        if (note) {
+          const ui = useAppUi.getState();
+          ui.openNote(note, { auto: true });
+          if (tool === "create_note") ui.bumpNotes();
+        }
+      }
+    };
+
     const onMessageStart = ({ threadId, messageId }: WsMessageStartPayload) => {
       setThinkingThreadId((cur) => (cur === threadId ? null : cur));
       setStreaming({ threadId, messageId });
@@ -467,6 +573,13 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     const onError = ({ message }: WsErrorPayload) => {
       toast.error(message);
       setThinkingThreadId(null);
+      // A failed turn can leave tool cards stuck in the running state —
+      // finalize them without a result.
+      setMessages((prev) =>
+        prev.some((m) => m.toolPending)
+          ? prev.map((m) => (m.toolPending ? { ...m, toolPending: false } : m))
+          : prev,
+      );
       // If the turn failed before any content arrived, drop the empty
       // assistant bubble and clear the busy flag so the composer unlocks.
       const st = streamingRef.current;
@@ -491,6 +604,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     socket.on("message:delta", onMessageDelta);
     socket.on("message:end", onMessageEnd);
     socket.on("thread:updated", onThreadUpdated);
+    socket.on("tool:start", onToolStart);
+    socket.on("tool:end", onToolEnd);
     socket.on("error", onError);
 
     return () => {
@@ -500,6 +615,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       socket.off("message:delta", onMessageDelta);
       socket.off("message:end", onMessageEnd);
       socket.off("thread:updated", onThreadUpdated);
+      socket.off("tool:start", onToolStart);
+      socket.off("tool:end", onToolEnd);
       socket.off("error", onError);
     };
   }, [socket, bumpThread]);
@@ -511,6 +628,11 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
 
   const thinking = thinkingThreadId !== null && thinkingThreadId === activeThreadId;
 
+  // Tool cards in the running state also mean the agent is still working.
+  const toolBusy = messages.some(
+    (m) => m.role === "tool" && m.toolPending === true,
+  );
+
   const value = useMemo<ThreadsContextValue>(
     () => ({
       threads,
@@ -519,7 +641,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       activeThread,
       messages,
       messagesLoading,
-      busy: thinking || streaming?.threadId === activeThreadId,
+      busy:
+        thinking || streaming?.threadId === activeThreadId || toolBusy,
       thinking,
       selectThread,
       newThread,
@@ -536,6 +659,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       messagesLoading,
       thinking,
       streaming,
+      toolBusy,
       selectThread,
       newThread,
       deleteThread,

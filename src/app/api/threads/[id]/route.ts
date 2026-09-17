@@ -46,7 +46,7 @@ export async function GET(req: Request, ctx: RouteContext) {
     include: {
       messages: {
         orderBy: { createdAt: "asc" },
-        select: { id: true, role: true, content: true, toolName: true, createdAt: true },
+        select: { id: true, role: true, content: true, toolName: true, toolArgs: true, toolResult: true, createdAt: true },
       },
     },
   });

@@ -157,6 +157,14 @@
   background-clip: content-box;
 }
 
+/* ── Horizontal chip scroller (notebook filters) — scrollbar hidden ── */
+.vf-scroll-x {
+  scrollbar-width: none;
+}
+.vf-scroll-x::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Typing indicator dots ("VibeFlow печатает…") ── */
 @keyframes vf-bounce {
   0%,

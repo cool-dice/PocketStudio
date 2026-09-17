@@ -17,10 +17,12 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import { useThreads } from "@/hooks/use-threads";
+import { useAppUi } from "@/lib/store";
 
 export function Welcome() {
   const { user } = useAuth();
   const { sendMessage } = useThreads();
+  const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
 
   const firstName = (user?.name ?? "").trim().split(/\s+/)[0] || "друг";
 
@@ -37,15 +39,15 @@ export function Welcome() {
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="outline" size="sm" disabled className="gap-2">
-              <NotebookPen className="size-4" aria-hidden="true" />
-              Записать мысль
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Скоро</TooltipContent>
-        </Tooltip>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 gap-2 rounded-xl"
+          onClick={() => setCaptureOpen(true)}
+        >
+          <NotebookPen className="size-4" aria-hidden="true" />
+          Записать мысль
+        </Button>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="outline" size="sm" disabled className="gap-2">

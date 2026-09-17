@@ -217,3 +217,132 @@ Work Log:
 
 Stage Summary:
 - Stage 0 COMPLETE and browser-verified: landing → register/login → chat-first shell → live agent chat (WS :3003 + emulated streaming) → persistence → responsive + dark mode. One real bug found & fixed (first-message thread creation). DB clean for real first user (becomes admin).
+
+---
+Task ID: 4 (cron round 1 — Stage 1 kickoff)
+Agent: main
+Task: QA round (PASS: chat/streaming/console clean; real user game.puzzles.a1@gmail.com registered as admin — DO NOT TOUCH) + Stage 1 contracts for subagents.
+
+Work Log:
+- QA via agent-browser (qa-round1@vf.io, cleaned after): register → chat chip → streamed reply → console 0 errors. Services alive (:3000, :3003).
+- Stage 1 scope this round: agent tool-calling (notebook tools) + notes REST + minimal notebook UI (feed + note detail + ⌘K capture). Analysis pipeline (4 blocks) stays Stage 2.
+
+CONTRACTS Stage 1:
+
+Notes REST (Task 1-a, Next app):
+- GET /api/notes?categoryId=&favorite=1&q=&page=1&limit=20 → {notes:[{id,rawText,status,favorite,createdAt,category:{id,name,color,icon}|null}], total, hasMore}
+- POST /api/notes {text 1..5000, categoryId?} → 201 {note} (status 'pending')
+- GET /api/notes/[id] → {note} (with category)
+- PATCH /api/notes/[id] {favorite?,categoryId?,rawText?} → {note}
+- DELETE /api/notes/[id] → {ok:true}
+- GET /api/categories → {categories:[{id,name,color,icon,noteCount}]}
+- PATCH /api/categories/[id] {name?,color?,icon?} → {category}
+- DELETE /api/categories/[id] → {ok:true} (notes→null category)
+- COLOR allowlist: emerald amber rose sky violet stone teal orange pink cyan. ICON allowlist (lucide): lightbulb briefcase shopping-cart heart brain zap star book code rocket wallet coffee.
+- All routes: getUserFromRequest → 401; ownership scoping; Russian errors.
+
+Agent tools (Task 1-b, agent-service):
+- Tool JSON protocol (SDK has no native function calling): system prompt instructs model to answer EITHER plain text OR a single JSON object {"tool":"name","args":{...}} (no fences, no other text). Parser: trim → try JSON.parse → else extract {...} block → else treat as text.
+- Loop (max 6 iterations): LLM call → tool JSON? → execute → persist Message{role:'tool',toolName,toolArgs,toolResult} → emit events → feed result into next LLM call. Plain text → stream as before (message:start/delta/end).
+- History building: user/assistant text rows as-is; tool rows → pair [TOOL_CALL {name} {args}] as user msg + [TOOL_RESULT {result-json-truncated-2000}] as user msg (or single user msg with both lines).
+- NEW server→client events: "tool:start" {threadId,messageId,tool,args}; "tool:end" {threadId,messageId,tool,args,result}. Both also to room thread:<id>.
+- Tool registry (all userId-scoped, zod/manual validation, allowlist names):
+  - create_note {text 1..5000, category_name?, category_color?, category_icon?} → creates Note status 'pending'; category: find by name (case-insens) else create (validate color/icon allowlists, defaults stone/lightbulb) → returns {note, category, createdNewCategory}
+  - search_notes {query, limit?=10} → LIKE search on rawText, newest first → {notes:[{id,preview(140),category,createdAt}]}
+  - list_notes {limit?=10} → newest → same shape
+  - open_note {noteId} → full note or error string (client opens detail panel on tool:end of open_note/create_note)
+- System prompt (Russian) updated: cockpit assistant with tools; instructions when to use each; after create_note confirm briefly to user; keep replies concise.
+- Tool errors: caught, returned to LLM as {error: "..."} result (model can apologize), never crash loop.
+
+Frontend (Task 1-c):
+- ChatMessage type extended: role 'tool' rows from REST (GET /api/threads/[id] already returns them) + WS tool events.
+- MessageBubble tool card: icon per tool (NotebookPen create_note, Search search_notes, List list_notes, Eye open_note), title states (running spinner → done), collapsible args/result (pretty), subtle bg.
+- On tool:end (create_note|open_note) → open context panel with note detail (fetch REST).
+- Sidebar: Блокнот ENABLED → main area switches to NotebookScreen (chat stays in background state; clicking any thread/Новый диалог returns to chat). Projects stays "скоро".
+- NotebookScreen: sticky header (title + count + capture button), category chips row (Все / ⭐ / dynamic categories w/ color+icon), NoteCard feed (preview line-clamp-3, category chip, favorite star toggle, status badge "Анализ скоро" for pending, date, delete confirm), Load more btn, polished empty state.
+- Context panel note detail: full text, category chip, meta, actions (favorite, обсудить в чате → sends "Помоги мне разобраться с заметкой: <first 100 chars>" + switch to chat, delete).
+- ⌘K global palette: Dialog, textarea autosize, Enter submit (Shift+Enter newline), POST /api/notes → sonner toast "Мысль сохранена ✓" → refresh notebook if visible. Also sidebar quick-capture pen button (same dialog).
+- Styling: emerald accents, stone neutrals, rounded-xl, hover transitions 150-200ms, dark mode correctness, mobile (375px) touch ≥44px, a11y labels.
+
+Stage Summary:
+- Contracts written; dispatching 1-a (notes REST) and 1-b (agent tools) in parallel, then 1-c (frontend). REAL USER admin account exists — subagents must create own test users and clean up after.
+
+---
+Task ID: 1-a
+Agent: full-stack-developer
+Task: Notes + Categories REST API (main Next.js app) — Stage 1.
+
+Work Log:
+- Read worklog Task 1/2-a/4 contracts + threads routes (conventions) + schema (Note/Category already pushed, SetNull on category delete).
+- Created src/lib/note-utils.ts: COLORS (10) + ICONS (12) allowlists as const (+ type guards), noteWithCategory() → {id,rawText,status,favorite,createdAt,category:{id,name,color,icon}|null}. Client-safe structural types (no Prisma import) — 1-c can import COLORS/ICONS for UI.
+- GET /api/notes: filters categoryId / favorite=1 / q / page≥1 / limit 1..50 default 20; order createdAt desc; {notes, total, hasMore=page*limit<total}. DESIGN NOTE: SQLite LIKE/lower() are ASCII-only, so q is a Unicode-safe case-insensitive substring search implemented as JS toLowerCase().includes() over user-scoped candidates → id IN (...) + count/findMany (works for Cyrillic both directions, %/_ literal, no raw SQL). Invalid page/limit → 400 Russian (query params parsed manually, matching 2-a convention; bodies use zod).
+- POST /api/notes {text 1..5000 trimmed, categoryId?}: category ownership → 404 "Категория не найдена"; creates status "pending" → 201 {note} with nested category.
+- /api/notes/[id]: GET {note}; PATCH {favorite?, categoryId? string|null (null clears), rawText 1..5000} → {note} (update include category); DELETE → {ok:true}. All ownership-scoped → 404 "Заметка не найдена".
+- GET /api/categories → {categories:[{id,name,color,icon,noteCount}]} (_count, name asc). PATCH /api/categories/[id] {name? 1..40, color?/icon? z.enum allowlists} → {category:{id,name,color,icon,createdAt,noteCount}} (superset of list item — frontend can update state without refetch); duplicate name (P2002) → 409 "Категория с таким названием уже существует"; DELETE → {ok:true} (notes → null categoryId via SetNull, verified live). 404 "Категория не найдена".
+- No POST /api/categories by contract — categories are born via 1-b agent tool create_note (tests created them via direct Prisma inserts).
+- curl verification via localhost:3000, 2 test users (test-notes@vf.io + test-notes-2@vf.io for ownership tests): ALL PASS — 401s without cookie; POST 201 pending/null-category + nested category variant; 400s (empty/5001-char text, broken JSON, invalid color/icon/name>40, page=0/abc, limit=51) with Russian messages; q=кофе↔КОФЕ and q=ИДЕЯ↔Идея Cyrillic case-insensitive both directions; favorite/q/categoryId filters + combined; pagination hasMore true/false; cross-user GET/PATCH/DELETE → 404 + per-user list isolation; category rename/409/foreign-404; category delete → attached notes category:null (SetNull) with favorite preserved; note delete → 404 after.
+- dev.log: zero compile/type/runtime errors across all requests. bun run lint: 0 problems.
+- Cleanup: deleted ONLY the two test users via Prisma deleteMany (cascaded → notes/categories counts 0). Real admin game.puzzles.a1@gmail.com untouched. NOTE for main: leftover user qa-round1@vf.io (client) from Task 4 QA exists — not mine, may want cleanup.
+
+Stage Summary:
+- Files: src/lib/note-utils.ts, src/app/api/notes/route.ts, src/app/api/notes/[id]/route.ts, src/app/api/categories/route.ts, src/app/api/categories/[id]/route.ts — exact contract shapes, Russian errors, ownership everywhere, lint clean, curl-verified end to end. Nothing else touched (no hooks/components/mini-services/schema changes).
+- For 1-c: import COLORS/ICONS from @/lib/note-utils; favorite filter is literal favorite=1; PATCH category returns createdAt+noteCount superset. For 1-b: reuse @/lib/note-utils allowlists for category validation (colors/icons identical).
+
+---
+Task ID: 1-b
+Agent: full-stack-developer (crashed mid-task; verified & logged by main)
+Task: Agent tool-calling in agent-service (tools.ts, loop in server.ts, prompts, agent.ts rework)
+
+Work Log:
+- Subagent wrote all files (tools.ts 12KB, server.ts reworked with tool loop, agent.ts, prompts.ts) but crashed on network timeout BEFORE verification/worklog.
+- Main verified independently: service restarted (bun --hot, pid alive), full E2E script run:
+  - register → ws-token → thread → WS "message:send" ("Запиши... корм коту") 
+  - [tool:start] create_note {text, category_name:"Домашние дела", category_color:"amber", icon shopping-cart-ish} (LLM-chosen dynamic category!)
+  - [tool:end] note created in DB, category auto-created
+  - [message:end] streamed text confirmation "Заметка сохранена в категории «Домашние дела»…"
+  - REST /api/notes confirms note + category — ALL PASS
+- Lint agent-service: 0 problems. Test users cleaned (verify-1b-*, qa-round1).
+
+Stage Summary:
+- Tool-calling LIVE: JSON protocol parser, 6-iteration loop, tool events (tool:start/tool:end) to thread rooms, notebook tools (create_note/search_notes/list_notes/open_note) with dynamic categories. 1-a + 1-b done → frontend 1-c next.
+
+---
+Task ID: 1-c
+Agent: full-stack-developer
+Task: Frontend Stage 1 — tool cards in chat, NotebookScreen, note detail in context panel, ⌘K quick capture.
+
+Work Log:
+- Read worklog (Tasks 1, 2-a/b/c, 4, 1-a, 1-b) + all existing frontend (page.tsx, hooks, lib, app components) + notes REST routes + agent-service tools.ts/server.ts (result shapes: create_note → {note,category,createdNewCategory}; open_note → note at top level; tool events {threadId,messageId,tool,args[,result]}).
+- types.ts: MessageRole +"tool", tool fields optional on Message (REST history returns only toolName — no toolArgs/toolResult despite task STATE saying otherwise; frontend handles both), ChatMessage +toolPending, Note/NoteStatus/NoteCategoryRef/Category, WsToolStart/EndPayload, MAX_NOTE_LENGTH. api.ts: listNotes (categoryId/favorite/q/page/limit → {notes,total,hasMore}), createNote, getNote, updateNote, deleteNote, listCategories.
+- New lib/store.ts (zustand useAppUi): mainArea chat|notebook, contextOpen, contextNote + openNote(note,{auto})/closeNote/updateContextNote/refreshNote, noteDialogOpen (mobile), captureOpen, notesVersion/bumpNotes — deep UI wiring (WS handlers → panel/dialog/notebook) without prop drilling.
+- use-threads.tsx: tool:start (active thread only; appends toolPending row, hides typing indicator), tool:end (fills toolResult JSON, clears pending; create_note/open_note with note payload → openNote(auto:true) + bumpNotes on create), error finalizes stuck cards, busy = thinking || streaming || any toolPending (composer lock during tools). noteFromToolResult normalizes both tool result shapes.
+- tool-card.tsx: compact muted card (border, bg-muted/40, rounded-xl, xs text) — icon map (NotebookPen/Search/List/Eye/Wrench), running = Loader2 spin + animate-pulse, done = emerald Check (framer 150ms pop), readable summaries (note preview / «N заметок: …» / error), raw JSON behind native details «подробнее», sr-only status. message-bubble routes role 'tool'.
+- notebook-screen.tsx: sticky header (📓 + total badge + capture btn), vf-scroll-x chip row (Все/⭐ Избранные/dynamic categories: colored dot + CategoryGlyph + name + count; active = filled emerald), NoteCard feed max-w-3xl (framer 150ms opacity+4px; pre-wrap line-clamp-3; category chip; amber pulse «Анализ скоро»; optimistic star; ru date «17 сент, 14:32»; trash → AlertDialog; click → panel/dialog), «Загрузить ещё», 4 skeletons, empty state (icon circle + ⌘K hint + CTA). use-notes.ts: skeleton load on mount/filter change, SILENT refresh on notesVersion (no flash), optimistic favorite/delete with rollback, loadMore pagination w/ race guards, delete closes open panel note + refreshes category counts.
+- context-panel.tsx placeholder|note modes; note-detail.tsx (full text, chip, «Создана …», favorite/«Обсудить» («Помоги мне разобраться с этой заметкой: «≤120 chars»» + to chat)/delete-confirm); mobile-note-dialog.tsx same detail in Dialog <xl (agent auto-open never pops it — only explicit clicks). capture-dialog.tsx: ⌘K/Ctrl+K global (app-shell keydown), auto-grow 2→12 rows, 5000 counter, Enter save/Shift+Enter newline/Esc, toast «Мысль сохранена ✓» + action «Открыть блокнот»; inner form component = natural reset on Radix unmount (no reset effects).
+- sidebar: «Блокнот» ENABLED (active state, switches mainArea; thread select/«Новый диалог» returns to chat, mobile Sheet included), pen quick-capture button next to «Новый диалог». welcome.tsx «Записать мысль» chip enabled. category-style.tsx (10 colors × {chip,dot} static classes light+dark via /10-/30, 12 icons, stable CategoryGlyph — satisfies react-hooks/static-components). format.ts, use-media-query.ts (useIsNarrow <xl), globals.css .vf-scroll-x.
+- Lint fixes en route: set-state-in-effect in capture dialog (solved by remount-on-open architecture), static-components for icon maps (module-scope CategoryGlyph).
+
+Stage Summary:
+- Files: NEW src/lib/{store.ts,category-style.tsx,format.ts}, src/hooks/{use-notes.ts,use-media-query.ts}, src/components/app/{tool-card.tsx,notebook-screen.tsx,note-detail.tsx,capture-dialog.tsx,mobile-note-dialog.tsx}; MODIFIED src/lib/{types.ts,api.ts}, src/hooks/use-threads.tsx, src/components/app/{app-shell,sidebar,context-panel,message-bubble,welcome}.tsx, src/app/globals.css. NOT touched: api/**, auth*, mini-services/**, prisma/**.
+- Verification (gateway :81, ui-1c@vf.io, agent-browser 1440×900 + 375×812, dark+light, VLM screenshot audits): 1) register → shell PASS; 2) Ctrl+K → «Тестовая мысль из палитры» → toast+note PASS; 3) Блокнот → note + «Анализ скоро» + chips PASS; 4) «Запиши… трекинга привычек» → tool card spinner→done + reply + panel AUTO-OPEN + dynamic category «Идеи приложений» PASS; 5) notebook refresh w/ category chip PASS; 6) favorite/star filter + delete confirm + empty state PASS; 7) «Обсудить в чате» desktop + mobile PASS; 8) mobile 375: chips scroll (395>375px), capture fits (341px w/ margins), note dialog usable PASS; 9) dark mode notebook/panel/chat/tool cards PASS; 10) console 0 errors, page errors 0, dev.log clean (only prisma query noise), `bun run lint` 0 problems PASS. Reload persistence: REST tool rows render as done cards (no args/result — graceful). «подробнее» JSON toggle verified on live list_notes card. Delete-from-feed closes the panel note + refreshes category counts.
+- Issues for main (not 1-c scope): (a) agent-service 1-b quirk — LLM sometimes answers with the HISTORY FORMAT text ("\n[TOOL_CALL search_notes] {json}") instead of clean JSON → streamed as a plain reply and shown in sidebar preview; suggest history pairs mirror the JSON protocol exactly or add a parser fallback for "[TOOL_CALL name] {json}". (b) GET /api/threads/[id] omits toolArgs/toolResult (task description said they're included) — 1-c treats them optional; add 2 fields to the select if richer reloads wanted.
+- Cleanup: all test notes/threads deleted via UI (counts 0/0), user ui-1c@vf.io removed via Prisma cascade. Real admin game.puzzles.a1@gmail.com untouched. Orphan AuditLog rows predate this task.
+
+---
+Task ID: 5 (cron round 1 — Stage 1 COMPLETE)
+Agent: main
+Task: Integrate + harden Stage 1 (fixes from 1-c review), verify, close the round.
+
+Work Log:
+- Fixes applied by main after 1-c review:
+  1. History-format leak (LLM mimicking "[TOOL_CALL …]" in replies): buildLLMHistory now renders tool rows EXACTLY as the wire protocol (assistant: {"tool":...,"args":...} + user: [TOOL_RESULT] …); parseToolCall gained bracket-format fallback; NEW sanitizeTextAnswer() strips leaked markers/pure tool-JSON from would-be text answers (empty after strip → loop continues, never streams garbage); system prompt explains [TOOL_RESULT] delivery + forbids emitting markers.
+  2. GET /api/threads/[id] now returns toolArgs/toolResult (richer reloads of tool cards).
+  3. Busy-flag race (next message right after message:end → "Агент ещё отвечает…"): auto-title moved to turn START (before streaming), so nothing slow remains after the final emit; flag clears synchronously after return.
+- Verification: multi-turn E2E (register → create-note turn → search turn → plain-question turn, immediate next-message sends): tools used 3, marker leaks 0, busy errors 0, 3 clean answers — ALL PASS (re-run after race fix: clean).
+- Lint (full project): 0 problems. dev.log: no runtime errors (73 grep hits = HTTP status codes in request logs only).
+- Cleanup: final-qa-* and leftover qa-round1 users deleted; 1 real user remains (admin).
+
+Stage Summary:
+- STAGE 1 COMPLETE: agent creates notes with LLM-invented dynamic categories straight from chat; tool cards in UI; NotebookScreen with filters/favorites/delete; context panel note detail; ⌘K quick capture; leaks and races eliminated.
+- NEXT (Stage 2): analysis pipeline for notes (4 blocks: positive/negative/final/recommendations, dynamic category assignment on ⌘K captures too), note discussion in chat, audio capture (voice), note↔project relevance detector (needs Stage 3 projects first — so pipeline + voice are the right Stage 2 scope).
+- Risks/notes: agent-service still a background process (restart cmd in worklog); tool-calling is single-LLM JSON protocol (no native function calling) — robust now but watch for new leak patterns; threads list preview may show tool-card JSON — minor, cosmetic (didn't reproduce).

@@ -35,7 +35,7 @@ export interface ThreadListItem extends Thread {
   lastMessage: ThreadLastMessage | null;
 }
 
-export type MessageRole = "user" | "assistant";
+export type MessageRole = "user" | "assistant" | "tool";
 
 export interface Message {
   id: string;
@@ -43,6 +43,12 @@ export interface Message {
   role: MessageRole;
   content: string;
   createdAt: string;
+  /** Tool rows (role "tool"): tool name (present in REST history). */
+  toolName?: string | null;
+  /** Tool arguments as JSON string (present in live WS events). */
+  toolArgs?: string | null;
+  /** Tool result as JSON string (present in live WS events). */
+  toolResult?: string | null;
 }
 
 /** Client-side message with optimistic/streaming flags. */
@@ -51,9 +57,51 @@ export interface ChatMessage extends Message {
   pending?: boolean;
   /** Assistant message currently being streamed. */
   streaming?: boolean;
+  /** Tool call is currently executing (agent still working). */
+  toolPending?: boolean;
+}
+
+/* ── Notes & categories (Stage 1 REST contract) ── */
+
+export type NoteStatus = "pending" | "processing" | "processed" | "error";
+
+/** Category subset embedded in note responses. */
+export interface NoteCategoryRef {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+}
+
+export interface Note {
+  id: string;
+  rawText: string | null;
+  status: NoteStatus;
+  favorite: boolean;
+  createdAt: string;
+  category: NoteCategoryRef | null;
+}
+
+export interface Category extends NoteCategoryRef {
+  noteCount: number;
 }
 
 /* ── WS payloads (mini-services/agent-service contract) ── */
+
+export interface WsToolStartPayload {
+  threadId: string;
+  messageId: string;
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+export interface WsToolEndPayload {
+  threadId: string;
+  messageId: string;
+  tool: string;
+  args: Record<string, unknown>;
+  result: unknown;
+}
 
 export interface WsMessageUserPayload {
   message: Message;
@@ -99,3 +147,4 @@ export const MODE_LABELS: Record<ThreadMode, string> = {
 };
 
 export const MAX_MESSAGE_LENGTH = 20000;
+export const MAX_NOTE_LENGTH = 5000;

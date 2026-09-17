@@ -1,15 +1,25 @@
-// VibeFlow agent — Stage-0 stub: single LLM turn, no tools yet.
+// VibeFlow agent — LLM access layer + tool-call parsing.
 // LLM access via z-ai-web-dev-sdk (backend-only). The SDK has no native
-// streaming, so the full reply is fetched and then chunked by the transport
-// layer (server.ts) for a streaming feel.
+// streaming and no native function calling, so:
+//   - the full reply is fetched here and chunked by the transport layer
+//     (server.ts) for a streaming feel;
+//   - tools are called through a JSON protocol: the system prompt
+//     (prompts.ts) tells the model to answer with a single JSON object
+//     {"tool":"<name>","args":{...}} when it wants a tool, and parseToolCall
+//     below detects that shape. The tool-calling loop lives in server.ts.
 
 import ZAI from "z-ai-web-dev-sdk";
-import { AGENT_SYSTEM_PROMPT } from "./prompts";
 
-/** LLM conversation turn (system prompt is prepended automatically). */
+/** LLM conversation turn (system prompt is passed separately). */
 export interface LlmMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+/** A tool invocation parsed from an LLM reply. */
+export interface ToolCall {
+  tool: string;
+  args: Record<string, unknown>;
 }
 
 type ZaiInstance = Awaited<ReturnType<typeof ZAI.create>>;
@@ -42,17 +52,21 @@ const MAX_ATTEMPTS = 3; // initial call + 2 retries
 const RETRY_BACKOFF_MS = 800;
 
 /**
- * Run one Stage-0 agent turn: [systemPrompt, ...history] → reply text.
+ * One raw LLM call: [systemPrompt, ...history] → reply text (may be either a
+ * plain-text answer or a JSON tool call — parsing is the caller's job).
  * Retries up to 2 times with 800ms backoff. Throws on final failure.
  */
-export async function generateReply(history: LlmMessage[]): Promise<string> {
+export async function generateLLMResponse(
+  systemPrompt: string,
+  history: LlmMessage[],
+): Promise<string> {
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const zai = await getZai();
       const completion = await zai.chat.completions.create({
-        messages: [{ role: "system", content: AGENT_SYSTEM_PROMPT }, ...history],
+        messages: [{ role: "system", content: systemPrompt }, ...history],
         thinking: { type: "disabled" },
       });
       const content = extractContent(completion);
@@ -69,6 +83,73 @@ export async function generateReply(history: LlmMessage[]): Promise<string> {
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/** Strip a leading ```lang fence and trailing ``` if present. */
+function stripFences(text: string): string {
+  const m = text.match(/^```[a-zA-Z0-9_-]*\s*([\s\S]*?)\s*```\s*$/);
+  return m ? m[1] : text;
+}
+
+/**
+ * Detect a tool call in an LLM reply.
+ *   1. trim; strip markdown fences when the reply starts with ```
+ *   2. try JSON.parse (then, as a fallback, extract the outermost {...} block)
+ *   3. accept only objects with a string "tool" and an object "args"
+ * Anything else is a plain-text answer → null.
+ */
+export function parseToolCall(text: string): ToolCall | null {
+  if (typeof text !== "string") return null;
+  let trimmed = stripFences(text.trim());
+  if (!trimmed) return null;
+
+  // Fallback: the model occasionally mimics the legacy bracket format
+  // "[TOOL_CALL name] {json}" — normalize it to pure JSON first.
+  const bracket = trimmed.match(/^\s*\[TOOL_CALL\s+([a-zA-Z_]+)\s*\]\s*([\s\S]+)$/i);
+  if (bracket) {
+    try {
+      const args = JSON.parse(bracket[2].trim());
+      if (typeof args === "object" && args !== null) {
+        return { tool: bracket[1], args: args as Record<string, unknown> };
+      }
+    } catch {
+      // fall through to the regular candidates
+    }
+  }
+
+  const candidates: string[] = [trimmed];
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first > 0 || (first === 0 && last < trimmed.length - 1)) {
+    if (first !== -1 && last > first) candidates.push(trimmed.slice(first, last + 1));
+  }
+
+  for (const candidate of candidates) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      const obj = parsed as Record<string, unknown>;
+      if (typeof obj.tool === "string" && obj.tool.trim()) {
+        if (
+          typeof obj.args === "object" &&
+          obj.args !== null &&
+          !Array.isArray(obj.args)
+        ) {
+          return { tool: obj.tool.trim(), args: obj.args as Record<string, unknown> };
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 /**

@@ -10,6 +10,7 @@ import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { Sparkles } from "lucide-react";
 
+import { ToolCard } from "@/components/app/tool-card";
 import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -87,6 +88,11 @@ export const MessageBubble = memo(function MessageBubble({
 }) {
   const isUser = message.role === "user";
   const time = formatTime(message.createdAt);
+
+  // Agent tool call → compact system card (never looks like chat text).
+  if (message.role === "tool") {
+    return <ToolCard message={message} />;
+  }
 
   if (isUser) {
     return (

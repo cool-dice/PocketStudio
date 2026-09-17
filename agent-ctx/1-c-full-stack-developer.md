@@ -1,0 +1,26 @@
+# Task 1-c — Frontend Stage 1 (tool cards, NotebookScreen, note detail, ⌘K)
+
+Agent: full-stack-developer (subagent, Task ID 1-c)
+
+## What was built
+
+- **Types/API**: `src/lib/types.ts` extended (Note, NoteStatus, NoteCategoryRef, Category, MessageRole + "tool", tool fields on Message/ChatMessage + toolPending, WsToolStartPayload/WsToolEndPayload, MAX_NOTE_LENGTH); `src/lib/api.ts` + listNotes/createNote/getNote/updateNote/deleteNote/listCategories.
+- **Store**: `src/lib/store.ts` (zustand `useAppUi`): mainArea chat|notebook, contextOpen/contextNote/openNote(auto flag suppresses mobile dialog)/closeNote/updateContextNote/refreshNote, noteDialogOpen, captureOpen, notesVersion+bumpNotes.
+- **Chat tool cards**: `src/hooks/use-threads.tsx` handles "tool:start"/"tool:end" (active thread only; tool:start clears thinking, appends toolPending row; tool:end fills result, clears pending; create_note/open_note results normalized → openNote(auto) + bumpNotes for create_note; error event finalizes stuck pending cards; busy = thinking || streaming || any toolPending). New `src/components/app/tool-card.tsx`: icon/title map per tool, spinner+pulse running / emerald check done, readable result summaries (note preview, "N заметок: «…»", error text), raw args/result JSON behind native «подробнее» details. `message-bubble.tsx` routes role "tool" → ToolCard.
+- **NotebookScreen** (`src/components/app/notebook-screen.tsx`): sticky header (📓 + count + PenLine capture), horizontally scrollable filter chips (Все / ⭐ Избранные / dynamic categories with colored dot + icon + count; active = filled emerald), NoteCard feed (framer-motion 150ms opacity+4px, line-clamp-3 pre-wrap text, category chip via color/icon maps, amber "Анализ скоро" pending badge, optimistic favorite star, date "17 сент, 14:32" (ru), trash → AlertDialog, click → note detail), «Загрузить ещё», skeletons, polished empty state. Hook `src/hooks/use-notes.ts`: filters/pagination/optimistic favorite+delete with rollback, silent refresh on notesVersion (skeleton only for mount/filter change; version bump = silent), delete also closes the note in the panel + refreshes category counts.
+- **Context panel**: `context-panel.tsx` placeholder|note modes (header «Заметка» + X close-note, panel collapse kept); shared `note-detail.tsx` (full pre-wrap text, chip, «Создана …», favorite toggle, «Обсудить» → sendMessage "Помоги мне разобраться с этой заметкой: «≤120 chars»" + back to chat, delete with confirm). `mobile-note-dialog.tsx` renders the same detail in a Dialog below xl (explicit clicks only; agent auto-open never pops it mid-chat).
+- **⌘K capture**: global keydown (meta/ctrl+k) in app-shell; `capture-dialog.tsx` (auto-grow textarea 2→12 rows, 5000 counter, Enter/Shift+Enter/Esc hints, sonner success "Мысль сохранена ✓" with «Открыть блокнот» action). Sidebar pen button next to «Новый диалог», notebook header + empty state buttons, welcome chip now enabled.
+- **Styling**: `src/lib/category-style.tsx` (10 color chips + dots, 12 lucide icons, static Tailwind classes valid light/dark; CategoryGlyph stable component for the react-hooks/static-components rule), `src/lib/format.ts` (ru date, preview, plural), `.vf-scroll-x` scrollbar-less chip scroller in globals.css, `use-media-query.ts` (useIsNarrow <xl).
+
+## Verification (agent-browser via gateway :81, user ui-1c@vf.io)
+
+All scenarios PASS: register → shell; Ctrl+K → "Тестовая мысль из палитры" → toast + note; Блокнот → note + «Анализ скоро» + chips; chat "Запиши… трекинга привычек" → tool card spinner→done + streamed reply + context panel AUTO-OPEN with note + dynamic category «Идеи приложений»; notebook refresh shows it; favorite toggle (star + ⭐ filter); delete confirm → empty state; «Обсудить в чате» (desktop + mobile dialog); reload → tool rows from REST render as done cards (REST returns no toolArgs/toolResult — handled gracefully); list_notes live card + «подробнее» JSON; mobile 375px (chips scroll horizontally, capture dialog fits, note dialog, sheet nav); dark mode (notebook/panel/chat/tool cards — VLM-checked screenshots); console zero errors; page errors zero; dev.log clean; `bun run lint` 0 problems.
+
+## Issues found (NOT mine to fix — for main)
+
+1. **agent-service (1-b) quirk**: on the mobile «Обсудить» turn the LLM emitted the *history format* as its answer — assistant message content literally `"\n[TOOL_CALL search_notes] {\"query\":...}"` (persisted + streamed as a normal reply, sidebar preview shows it). parseToolCall can't catch this. Suggest 1-b: make history pairs look like the exact JSON protocol from the system prompt, or add a parser fallback for `[TOOL_CALL name] {json}`.
+2. **GET /api/threads/[id]** selects only {id,role,content,toolName,createdAt} — no toolArgs/toolResult, although the 1-c task description claimed they're returned. Frontend treats them as optional (done cards without «подробнее» after reload). If richer reloads are wanted, the route's select needs two more fields (api/** was off-limits for me).
+
+## Cleanup
+
+All test notes/threads deleted via UI (verified counts 0), user ui-1c@vf.io deleted via Prisma (cascade verified). Real admin game.puzzles.a1@gmail.com untouched. Remaining orphaned AuditLog register rows predate this task (from earlier QA users).

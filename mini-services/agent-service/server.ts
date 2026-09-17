@@ -1,14 +1,23 @@
-// agent-service — socket.io transport + Stage-0 agent turn orchestration.
+// agent-service — socket.io transport + Stage-1 agent turn orchestration
+// (tool-calling loop over the notebook tools).
 //
-// Contract (worklog Task 1):
+// Contract (worklog Tasks 1 & 4):
 //   Client→server: "thread:join" {threadId}; "thread:leave" {threadId};
 //                  "message:send" {threadId, content}
 //   Server→client: "message:user" {message}; "agent:thinking" {threadId};
 //                  "message:start" {threadId, messageId};
 //                  "message:delta" {threadId, messageId, delta};
 //                  "message:end" {threadId, message};
+//                  "tool:start" {threadId, messageId, tool, args};
+//                  "tool:end" {threadId, messageId, tool, args, result};
 //                  "thread:updated" {thread}; "error" {message}
 //   Message shape: {id, threadId, role: 'user'|'assistant', content, createdAt}
+//
+// Agent turn = up to 6 LLM iterations. Each LLM reply is either plain text
+// (→ streamed to the client via message:start/delta/end, loop ends) or a JSON
+// tool call (→ tool row persisted, tool executed, tool:start/tool:end emitted,
+// result fed back into the next LLM call via [TOOL_CALL]/[TOOL_RESULT]
+// history markers).
 //
 // Path MUST be "/" (Caddy gateway requirement), port 3003 (hardcoded).
 
@@ -16,12 +25,24 @@ import { createServer } from "http";
 import { Server, type Socket } from "socket.io";
 import { db } from "./db-client";
 import { verifyWsToken, type WsUser } from "./auth";
-import { generateReply, chunkText, type LlmMessage } from "./agent";
-import { deriveThreadTitle } from "./prompts";
+import {
+  generateLLMResponse,
+  parseToolCall,
+  chunkText,
+  type LlmMessage,
+} from "./agent";
+import { AGENT_SYSTEM_PROMPT, deriveThreadTitle } from "./prompts";
+import { getTool } from "./tools";
 
 const PORT = 3003;
 const MAX_CONTENT_LENGTH = 20000;
-const HISTORY_LIMIT = 30;
+const HISTORY_LIMIT = 30; // last N message rows fed to the LLM (all roles)
+const MAX_TOOL_ITERATIONS = 6; // hard cap on LLM round-trips per turn
+const TURN_TIMEOUT_MS = 120000; // total turn budget
+const MAX_TOOL_RESULT_CHARS = 8000; // stored toolResult JSON cap
+const TOOL_RESULT_HISTORY_CHARS = 2000; // toolResult cap inside LLM history
+const FALLBACK_REPLY =
+  "Я обработал запрос, но что-то пошло не так — попробуйте переформулировать.";
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
@@ -46,6 +67,9 @@ interface MessageRow {
   threadId: string;
   role: string;
   content: string;
+  toolName?: string | null;
+  toolArgs?: string | null;
+  toolResult?: string | null;
   createdAt: Date;
 }
 
@@ -66,17 +90,122 @@ const runningThreads = new Map<string, true>();
 // ─────────────────────────── agent turn ───────────────────────────
 
 /**
- * Stage-0 agent turn:
- *  1. persist user message → emit "message:user"
- *  2. emit "agent:thinking"
- *  3. load last 30 messages (user/assistant only)
- *  4. LLM call (2 retries / 800ms backoff inside agent.ts)
- *  5. create assistant row → "message:start" → simulated stream deltas
- *     → persist final content → "message:end"
- *  6. auto-title brand-new threads → "thread:updated" to the user room
+ * LLM history from the last HISTORY_LIMIT message rows of the thread:
+ *  - user/assistant rows → {role, content} as-is (empty assistant stubs skipped)
+ *  - tool rows → rendered in the SAME shape as the wire protocol so the
+ *    model never sees a second format it could mimic:
+ *      assistant: {"tool":"<name>","args":{...}}
+ *      user:      [TOOL_RESULT] <toolResult ≤2000 chars>
+ *    Tool rows still marked "pending" (crashed turn) are skipped entirely.
+ */
+async function buildLLMHistory(threadId: string): Promise<LlmMessage[]> {
+  const rows = await db.message.findMany({
+    where: { threadId },
+    orderBy: { createdAt: "asc" },
+    take: -HISTORY_LIMIT, // last 30 rows, still ascending
+  });
+
+  const history: LlmMessage[] = [];
+  for (const row of rows) {
+    if (row.role === "user" || row.role === "assistant") {
+      if (!row.content.trim()) continue;
+      history.push({ role: row.role, content: row.content });
+    } else if (row.role === "tool") {
+      if (!row.toolResult || row.toolResult === "pending") continue;
+      const result =
+        row.toolResult.length > TOOL_RESULT_HISTORY_CHARS
+          ? row.toolResult.slice(0, TOOL_RESULT_HISTORY_CHARS)
+          : row.toolResult;
+      // The call, exactly as the model itself would emit it (assistant role) …
+      history.push({
+        role: "assistant",
+        content: `{"tool":${JSON.stringify(row.toolName ?? "unknown")},"args":${row.toolArgs ?? "{}"}}`,
+      });
+      // … and the result as a user-role system-ish message.
+      history.push({
+        role: "user",
+        content: `[TOOL_RESULT] ${result}`,
+      });
+    }
+  }
+  return history;
+}
+
+/**
+ * Clean a would-be plain-text LLM answer: strip leaked protocol artifacts
+ * ([TOOL_CALL …] / [TOOL_RESULT …] lines, bare tool-JSON objects). Returns
+ * null when nothing human-readable remains (caller should keep looping).
+ */
+function sanitizeTextAnswer(raw: string): string | null {
+  let text = raw;
+  // 1. Remove whole-line protocol markers.
+  text = text
+    .split("\n")
+    .filter((line) => !/^\s*\[(TOOL_CALL|TOOL_RESULT)/i.test(line))
+    .join("\n");
+  // 2. Remove a bare JSON tool object if it is the entire message.
+  const trimmed = text.trim();
+  if (/^\{\s*"tool"\s*:/.test(trimmed)) {
+    try {
+      const obj = JSON.parse(trimmed);
+      if (typeof obj?.tool === "string") return null; // pure tool JSON → not text
+    } catch {
+      // fall through — partial JSON mixed with prose, keep going
+    }
+  }
+  const cleaned = text.trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/**
+ * Stream a final text answer to the thread room (emulated streaming):
+ * assistant row (empty) → message:start → message:delta ×N → persist →
+ * message:end.
+ */
+async function streamFinalResponse(
+  room: string,
+  threadId: string,
+  text: string,
+): Promise<void> {
+  let assistantMessage = await db.message.create({
+    data: { threadId, role: "assistant", content: "" },
+  });
+  io.to(room).emit("message:start", { threadId, messageId: assistantMessage.id });
+
+  const chunks = chunkText(text);
+  for (const delta of chunks) {
+    io.to(room).emit("message:delta", { threadId, messageId: assistantMessage.id, delta });
+    await sleep(25 + Math.random() * 10); // ~25–35ms per chunk
+  }
+
+  assistantMessage = await db.message.update({
+    where: { id: assistantMessage.id },
+    data: { content: text },
+  });
+  io.to(room).emit("message:end", {
+    threadId,
+    message: serializeMessage(assistantMessage),
+  });
+}
+
+/**
+ * Stage-1 agent turn (tool-calling loop):
+ *  1. persist user message → emit "message:user" → bump thread.updatedAt
+ *  2. up to MAX_TOOL_ITERATIONS LLM iterations:
+ *       - "agent:thinking" (before every LLM call, incl. the first)
+ *       - history = last 30 rows (user/assistant + [TOOL_CALL]/[TOOL_RESULT])
+ *       - LLM reply parses as a tool call? → persist tool row ("pending") →
+ *         emit "tool:start" → execute tool → persist result (≤8000 chars) →
+ *         emit "tool:end" → next iteration sees the result in history
+ *       - plain text? → streamFinalResponse, loop ends
+ *  3. loop exhausted / turn timeout (>120s) without a text answer →
+ *     stream a fallback message
+ *  4. auto-title brand-new threads → "thread:updated" to the user room
+ * Never throws — failures emit "error" to the triggering socket.
  */
 async function runAgentTurn(socket: Socket, user: WsUser, threadId: string, content: string): Promise<void> {
   const room = `thread:${threadId}`;
+  const turnStart = Date.now();
 
   try {
     // 1. Persist user message.
@@ -86,45 +215,91 @@ async function runAgentTurn(socket: Socket, user: WsUser, threadId: string, cont
     await db.thread.update({ where: { id: threadId }, data: { updatedAt: new Date() } });
     io.to(room).emit("message:user", { message: serializeMessage(userMessage) });
 
-    // 2. Thinking indicator.
-    io.to(room).emit("agent:thinking", { threadId });
+    // 1b. Auto-title fresh threads EARLY (before any answer streams) so
+    // that nothing slow remains after the final message:end emit — this
+    // keeps the busy-flag race window at effectively zero.
+    await maybeAutoTitle(threadId, user.sub);
 
-    // 3. History for the LLM (user/assistant only, oldest → newest).
-    const rows = await db.message.findMany({
-      where: { threadId, role: { in: ["user", "assistant"] } },
-      orderBy: { createdAt: "asc" },
-      take: -HISTORY_LIMIT, // last 30, still ascending
-    });
-    const history: LlmMessage[] = rows
-      .filter((r) => r.content.trim().length > 0)
-      .map((r) => ({ role: r.role as "user" | "assistant", content: r.content }));
+    // 2. Tool-calling loop.
+    let answered = false;
 
-    // 4. LLM call.
-    const reply = await generateReply(history);
+    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      if (Date.now() - turnStart > TURN_TIMEOUT_MS) break;
 
-    // 5. Assistant row first (empty) → stream → persist → end.
-    let assistantMessage = await db.message.create({
-      data: { threadId, role: "assistant", content: "" },
-    });
-    io.to(room).emit("message:start", { threadId, messageId: assistantMessage.id });
+      // Thinking indicator (before the first LLM call and between iterations).
+      io.to(room).emit("agent:thinking", { threadId });
 
-    const chunks = chunkText(reply);
-    for (const delta of chunks) {
-      io.to(room).emit("message:delta", { threadId, messageId: assistantMessage.id, delta });
-      await sleep(25 + Math.random() * 10); // ~25–35ms per chunk
+      const history = await buildLLMHistory(threadId);
+      const raw = await generateLLMResponse(AGENT_SYSTEM_PROMPT, history);
+
+      const call = parseToolCall(raw);
+      if (!call) {
+        // Would-be plain text: strip leaked protocol artifacts first.
+        const clean = sanitizeTextAnswer(raw);
+        if (clean) {
+          await streamFinalResponse(room, threadId, clean);
+          answered = true;
+          break;
+        }
+        // Nothing human-readable left (model emitted protocol garbage) —
+        // keep looping; the model gets another chance to answer properly.
+        continue;
+      }
+
+      // Tool call → persist a "pending" tool row first (it becomes the
+      // message id reported to the client).
+      const toolMessage = await db.message.create({
+        data: {
+          threadId,
+          role: "tool",
+          content: "",
+          toolName: call.tool,
+          toolArgs: JSON.stringify(call.args),
+          toolResult: "pending",
+        },
+      });
+      io.to(room).emit("tool:start", {
+        threadId,
+        messageId: toolMessage.id,
+        tool: call.tool,
+        args: call.args,
+      });
+
+      // Execute (never throws into the loop — errors become tool results).
+      let result: unknown;
+      try {
+        const tool = getTool(call.tool);
+        result = tool
+          ? await tool.execute(call.args, user.sub)
+          : { error: `Неизвестный инструмент: ${call.tool}` };
+      } catch (err) {
+        result = { error: err instanceof Error ? err.message : String(err) };
+      }
+
+      const resultJson = (JSON.stringify(result) ?? "{}").slice(0, MAX_TOOL_RESULT_CHARS);
+      await db.message.update({
+        where: { id: toolMessage.id },
+        data: { toolResult: resultJson },
+      });
+      io.to(room).emit("tool:end", {
+        threadId,
+        messageId: toolMessage.id,
+        tool: call.tool,
+        args: call.args,
+        result,
+      });
+      // Loop continues — the next iteration sees [TOOL_CALL]/[TOOL_RESULT].
     }
 
-    assistantMessage = await db.message.update({
-      where: { id: assistantMessage.id },
-      data: { content: reply },
-    });
-    io.to(room).emit("message:end", {
-      threadId,
-      message: serializeMessage(assistantMessage),
-    });
+    // 3. Loop exhausted or timed out without a text answer → fallback.
+    if (!answered) {
+      await streamFinalResponse(room, threadId, FALLBACK_REPLY);
+    }
 
-    // 6. Auto-title for fresh threads.
-    await maybeAutoTitle(threadId, user.sub);
+    // NOTE: nothing slow may happen after the final message:end emit —
+    // the busy flag clears right after this function returns, and a
+    // client that sends its next message on message:end would otherwise
+    // race into "Агент ещё отвечает…". Auto-title moved to the turn start.
   } catch (err) {
     console.error(
       `[agent] turn failed (thread ${threadId}):`,
