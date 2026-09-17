@@ -33,3 +33,24 @@ Work Log:
 
 Stage Summary:
 - Plan v2 presented. Key architecture: Next.js 16 on :3000 (REST + UI), socket.io mini-service on :3003 (chat transport + agent orchestrator runs there), shared SQLite (Prisma, WAL), z-ai-web-dev-sdk LLM in WS service, virtual project FS in DB (files+snapshots+commits), WS auth via short-lived token endpoint. Deferred cron setup until development actually starts (user explicitly wants approval first).
+
+---
+Task ID: 0-c
+Agent: main
+Task: Storage revision per user feedback — real files + real Git instead of DB virtual FS; project import (GitHub/ZIP); base Next.js template; deploy deferred (Vercel later). Plan v3 for final approval. No coding yet.
+
+Work Log:
+- User feedback: no DB virtual FS — wants real Git + real files so users can import existing projects (GitHub or ZIP). Wants a ready app template (like this sandbox's Next.js stack) as the base for new projects. Autodeploy deferred; later maybe Vercel push. Asks whether a DB should still be laid out.
+- Verified in sandbox: git 2.47.3 present; network access to GitHub works (git ls-remote ok); /home/z/my-project is itself a git repo.
+- Revised storage architecture (v3):
+  - Disk: workspace/<projectId>/ real folders with real .git; templates/ vendored in repo; public/uploads for media; projects excluded from Next.js src watching.
+  - Git ops server-side via fixed-argv child_process (init/add/commit/log/diff/revert/stash) — no shell interpolation, agent never runs raw git.
+  - Import: GitHub https clone (public now, token later) + ZIP upload (unzip, sanitize paths, size limits).
+  - Template: vendored Next.js 16 + TS + Tailwind 4 + shadcn + Prisma/SQLite starter; new project = copy + git init + initial commit; template versioned & upgradable.
+  - SQLite (Prisma) REMAINS essential for platform data: users/sessions/roles, notes/categories/tags/favorites, project metadata (rootPath, remoteUrl, templateVersion), chat threads/messages, agent runs + event journal, plans/tasks, settings, AI providers, audit. Files+history live in git; DB indexes/caches search metadata.
+  - Checkpoints = git commits/stash; diff/revert native git; Monaco edits real files; agent file tools sandboxed to project root.
+  - Vercel later: real git repo makes it a plain integration (vercel CLI / API or git push to user remote).
+- Stage plan updated: Stage 0 adds workspace layout + template vendoring + git-ops lib; Stage 3 file tools on real FS; Stage 5 import flows + zip export (exclude node_modules) + Vercel stub.
+
+Stage Summary:
+- Plan v3 (storage revised) presented to user for final approval. Dual storage: disk+git for project sources/history, SQLite for all platform data. Git binary + GitHub network confirmed working in sandbox.
