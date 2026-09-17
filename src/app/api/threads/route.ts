@@ -25,8 +25,11 @@ export async function GET(req: Request) {
     orderBy: { updatedAt: "desc" },
     include: {
       messages: {
-        take: 1,
+        // Last few messages: the newest USER/ASSISTANT entry becomes the
+        // sidebar preview (tool JSON must never leak into the sidebar).
+        take: 5,
         orderBy: { createdAt: "desc" },
+        where: { role: { in: ["user", "assistant"] } },
         select: { content: true, role: true, createdAt: true },
       },
     },

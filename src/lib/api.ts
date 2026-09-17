@@ -6,6 +6,7 @@
 import type {
   Category,
   CheckpointResult,
+  CommitDiff,
   CommitInfo,
   FileEntry,
   Message,
@@ -14,6 +15,7 @@ import type {
   Project,
   ProjectListItem,
   ProjectOrigin,
+  SearchResults,
   Thread,
   ThreadListItem,
   ThreadMode,
@@ -345,6 +347,26 @@ export const api = {
         body: JSON.stringify({ message }),
       },
     ).then((r) => r.checkpoint);
+  },
+
+  /** Diff of one checkpoint (Stage 4). */
+  getProjectDiff(id: string, commit: string): Promise<CommitDiff> {
+    const qs = new URLSearchParams({ commit });
+    return request<{ diff: CommitDiff }>(
+      `/api/projects/${encodeURIComponent(id)}/diff?${qs.toString()}`,
+    ).then((r) => r.diff);
+  },
+
+  /** URL for downloading the project as a zip (cookie-auth navigation). */
+  projectExportUrl(id: string): string {
+    return `/api/projects/${encodeURIComponent(id)}/export`;
+  },
+
+  /* ── Global search (Stage 4) ── */
+
+  search(q: string): Promise<SearchResults> {
+    const qs = new URLSearchParams({ q });
+    return request<SearchResults>(`/api/search?${qs.toString()}`);
   },
 
   /* ── Note ↔ project links ── */

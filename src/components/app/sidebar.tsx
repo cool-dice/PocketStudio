@@ -18,6 +18,7 @@ import {
   NotebookPen,
   PenLine,
   Pencil,
+  Search,
   Shield,
   Sun,
   Trash2,
@@ -86,6 +87,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const mainArea = useAppUi((s) => s.mainArea);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
+  const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const activeProjectId = useAppUi((s) => s.activeProjectId);
   const openProject = useAppUi((s) => s.openProject);
 
@@ -138,6 +140,11 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
     setCaptureOpen(true);
   };
 
+  const handleOpenSearch = () => {
+    onNavigate?.();
+    setSearchOpen(true);
+  };
+
   const startRename = (thread: ThreadListItem) => {
     setRenamingId(thread.id);
     setRenameValue(thread.title);
@@ -188,7 +195,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
         </Tooltip>
       </div>
 
-      {/* ── New thread + quick capture ── */}
+      {/* ── New thread + quick capture + search ── */}
       <div className="flex gap-2 p-3">
         <Button
           className="min-w-0 flex-1 justify-center gap-2 rounded-xl"
@@ -200,6 +207,20 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             {creating ? "Создаём…" : "Новый диалог"}
           </span>
         </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-10 shrink-0 rounded-xl"
+              onClick={handleOpenSearch}
+              aria-label="Поиск по VibeFlow (Ctrl+P)"
+            >
+              <Search className="size-4" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Поиск · Ctrl P</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

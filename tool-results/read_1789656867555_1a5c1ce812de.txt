@@ -1,0 +1,1218 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * ProjectScreen — project detail (center zone, mainArea === "project"):
+     5→ * header (back, name + origin badge + stats chips, checkpoint / discuss /
+     6→ * history actions, kebab menu with rename + delete), left file tree
+     7→ * (collapsible folders, colored file glyphs, dirty dots; a Sheet on <md)
+     8→ * and the editor area (tab bar + Monaco, ⌘S/Ctrl+S save with toasts).
+     9→ *
+    10→ * Refetches the tree + open file + stats when projectFilesVersion bumps
+    11→ * (WS project:updated for THIS project) — dirty buffers are never clobbered.
+    12→ */
+    13→
+    14→import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+    15→import { AnimatePresence, motion } from "framer-motion";
+    16→import {
+    17→  ArrowLeft,
+    18→  ChevronRight,
+    19→  File,
+    20→  FileCode2,
+    21→  Folder,
+    22→  FolderOpen,
+    23→  GitCommitHorizontal,
+    24→  Loader2,
+    25→  Menu,
+    26→  MessageSquare,
+    27→  MoreHorizontal,
+    28→  Pencil,
+    29→  Save,
+    30→  Trash2,
+    31→} from "lucide-react";
+    32→import { toast } from "sonner";
+    33→
+    34→import { MonacoEditor } from "@/components/app/monaco-editor";
+    35→import {
+    36→  AlertDialog,
+    37→  AlertDialogAction,
+    38→  AlertDialogCancel,
+    39→  AlertDialogContent,
+    40→  AlertDialogDescription,
+    41→  AlertDialogFooter,
+    42→  AlertDialogHeader,
+    43→  AlertDialogTitle,
+    44→} from "@/components/ui/alert-dialog";
+    45→import { Badge } from "@/components/ui/badge";
+    46→import { Button } from "@/components/ui/button";
+    47→import {
+    48→  Dialog,
+    49→  DialogContent,
+    50→  DialogDescription,
+    51→  DialogHeader,
+    52→  DialogTitle,
+    53→} from "@/components/ui/dialog";
+    54→import {
+    55→  DropdownMenu,
+    56→  DropdownMenuContent,
+    57→  DropdownMenuItem,
+    58→  DropdownMenuSeparator,
+    59→  DropdownMenuTrigger,
+    60→} from "@/components/ui/dropdown-menu";
+    61→import { Input } from "@/components/ui/input";
+    62→import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+    63→import { Skeleton } from "@/components/ui/skeleton";
+    64→import { Textarea } from "@/components/ui/textarea";
+    65→import { useProjects } from "@/hooks/use-projects";
+    66→import { useThreads } from "@/hooks/use-threads";
+    67→import { api, ApiError } from "@/lib/api";
+    68→import { pluralFiles, relativeTime } from "@/lib/format";
+    69→import { languageFromPath, OriginBadge, fileDotStyle } from "@/lib/project-style";
+    70→import { useAppUi } from "@/lib/store";
+    71→import type { CommitInfo, FileEntry, Project } from "@/lib/types";
+    72→import { cn } from "@/lib/utils";
+    73→
+    74→interface ProjectScreenProps {
+    75→  projectId: string;
+    76→  onOpenMobileNav: () => void;
+    77→}
+    78→
+    79→/* ── Open-file buffer ── */
+    80→
+    81→interface OpenFile {
+    82→  path: string;
+    83→  content: string;
+    84→  original: string;
+    85→  language: string;
+    86→}
+    87→
+    88→/* ── Nested tree ── */
+    89→
+    90→interface TreeNode {
+    91→  name: string;
+    92→  path: string;
+    93→  type: "file" | "dir";
+    94→  size: number;
+    95→  children: TreeNode[];
+    96→}
+    97→
+    98→function buildTree(entries: FileEntry[]): TreeNode[] {
+    99→  const root: TreeNode = { name: "", path: "", type: "dir", size: 0, children: [] };
+   100→  for (const entry of entries) {
+   101→    const segments = entry.path.split("/");
+   102→    let node = root;
+   103→    segments.forEach((seg, i) => {
+   104→      const isLeaf = i === segments.length - 1;
+   105→      const path = segments.slice(0, i + 1).join("/");
+   106→      let child = node.children.find((c) => c.name === seg);
+   107→      if (!child) {
+   108→        child = {
+   109→          name: seg,
+   110→          path,
+   111→          type: isLeaf ? entry.type : "dir",
+   112→          size: isLeaf ? entry.size : 0,
+   113→          children: [],
+   114→        };
+   115→        node.children.push(child);
+   116→      }
+   117→      node = child;
+   118→    });
+   119→  }
+   120→  const sortRec = (n: TreeNode) => {
+   121→    n.children.sort((a, b) => {
+   122→      if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+   123→      return a.name.localeCompare(b.name, "ru");
+   124→    });
+   125→    n.children.forEach(sortRec);
+   126→  };
+   127→  sortRec(root);
+   128→  return root.children;
+   129→}
+   130→
+   131→export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps) {
+   132→  const { remove } = useProjects();
+   133→  const { startProjectThread } = useThreads();
+   134→
+   135→  const closeProject = useAppUi((s) => s.closeProject);
+   136→  const setMainArea = useAppUi((s) => s.setMainArea);
+   137→  const projectFilesVersion = useAppUi((s) => s.projectFilesVersion);
+   138→
+   139→  const [project, setProject] = useState<Project | null>(null);
+   140→  const [projectLoading, setProjectLoading] = useState(true);
+   141→
+   142→  const [tree, setTree] = useState<FileEntry[]>([]);
+   143→  const [treeTruncated, setTreeTruncated] = useState(false);
+   144→  const [treeLoading, setTreeLoading] = useState(true);
+   145→
+   146→  const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
+   147→  const [activePath, setActivePath] = useState<string | null>(null);
+   148→  const [fileLoading, setFileLoading] = useState(false);
+   149→  const [saving, setSaving] = useState(false);
+   150→
+   151→  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+   152→  const [mobileTreeOpen, setMobileTreeOpen] = useState(false);
+   153→
+   154→  const [checkpointOpen, setCheckpointOpen] = useState(false);
+   155→  const [commitsOpen, setCommitsOpen] = useState(false);
+   156→  const [renameOpen, setRenameOpen] = useState(false);
+   157→  const [deleteOpen, setDeleteOpen] = useState(false);
+   158→  const [deleting, setDeleting] = useState(false);
+   159→  const [discussing, setDiscussing] = useState(false);
+   160→
+   161→  // Version-bump bookkeeping: the first render does the initial load itself.
+   162→  const versionSeenRef = useRef(projectFilesVersion);
+   163→  // Separate stale-guards: a project fetch and a tree fetch run in parallel,
+   164→  // so they must not invalidate each other's responses.
+   165→  const projectSeqRef = useRef(0);
+   166→  const treeSeqRef = useRef(0);
+   167→
+   168→  const activeFile = openFiles.find((f) => f.path === activePath) ?? null;
+   169→  const activeDirty = activeFile !== null && activeFile.content !== activeFile.original;
+   170→
+   171→  /* ── Data loading ── */
+   172→
+   173→  const loadProject = useCallback(async () => {
+   174→    const seq = ++projectSeqRef.current;
+   175→    setProjectLoading(true);
+   176→    try {
+   177→      const loaded = await api.getProject(projectId);
+   178→      if (seq === projectSeqRef.current) setProject(loaded);
+   179→    } catch (err) {
+   180→      if (seq === projectSeqRef.current) {
+   181→        toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить проект");
+   182→        closeProject();
+   183→      }
+   184→    } finally {
+   185→      if (seq === projectSeqRef.current) setProjectLoading(false);
+   186→    }
+   187→  }, [projectId, closeProject]);
+   188→
+   189→  const loadTree = useCallback(
+   190→    async (silent: boolean) => {
+   191→      const seq = ++treeSeqRef.current;
+   192→      if (!silent) setTreeLoading(true);
+   193→      try {
+   194→        const res = await api.getProjectTree(projectId);
+   195→        if (seq !== treeSeqRef.current) return;
+   196→        setTree(res.tree);
+   197→        setTreeTruncated(res.truncated);
+   198→      } catch (err) {
+   199→        if (seq === treeSeqRef.current) {
+   200→          toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить файлы");
+   201→        }
+   202→      } finally {
+   203→        if (seq === treeSeqRef.current) setTreeLoading(false);
+   204→      }
+   205→    },
+   206→    [projectId],
+   207→  );
+   208→
+   209→  useEffect(() => {
+   210→    setProject(null);
+   211→    setTree([]);
+   212→    setOpenFiles([]);
+   213→    setActivePath(null);
+   214→    void loadProject();
+   215→    void loadTree(false);
+   216→  }, [loadProject, loadTree]);
+   217→
+   218→  // WS / store version bump → refresh tree + stats (+ active file when clean).
+   219→  useEffect(() => {
+   220→    if (versionSeenRef.current === projectFilesVersion) return;
+   221→    versionSeenRef.current = projectFilesVersion;
+   222→    void loadTree(true);
+   223→    void loadProject();
+   224→    // Active file refetch — only when the buffer has no unsaved edits.
+   225→    const current = openFiles.find((f) => f.path === activePath);
+   226→    if (activePath && current && current.content === current.original) {
+   227→      void api
+   228→        .getProjectFile(projectId, activePath)
+   229→        .then((file) => {
+   230→          setOpenFiles((prev) =>
+   231→            prev.map((f) =>
+   232→              f.path === file.path && f.content === f.original
+   233→                ? { ...f, content: file.content, original: file.content }
+   234→                : f,
+   235→            ),
+   236→          );
+   237→        })
+   238→        .catch(() => {
+   239→          // File may have been deleted by the agent — drop the tab quietly.
+   240→          setOpenFiles((prev) => prev.filter((f) => f.path !== activePath));
+   241→          setActivePath((prev) => (prev === activePath ? null : prev));
+   242→        });
+   243→    }
+   244→  }, [projectFilesVersion]);
+   245→
+   246→  /* ── File open / close / save ── */
+   247→
+   248→  const openFile = useCallback(
+   249→    async (path: string) => {
+   250→      const existing = openFiles.find((f) => f.path === path);
+   251→      if (existing) {
+   252→        setActivePath(path);
+   253→        setMobileTreeOpen(false);
+   254→        return;
+   255→      }
+   256→      setFileLoading(true);
+   257→      setActivePath(path);
+   258→      setMobileTreeOpen(false);
+   259→      try {
+   260→        const file = await api.getProjectFile(projectId, path);
+   261→        setOpenFiles((prev) =>
+   262→          prev.some((f) => f.path === file.path)
+   263→            ? prev
+   264→            : [
+   265→                ...prev,
+   266→                {
+   267→                  path: file.path,
+   268→                  content: file.content,
+   269→                  original: file.content,
+   270→                  language: languageFromPath(file.path),
+   271→                },
+   272→              ],
+   273→        );
+   274→      } catch (err) {
+   275→        toast.error(err instanceof ApiError ? err.message : "Не удалось открыть файл");
+   276→        setActivePath(null);
+   277→      } finally {
+   278→        setFileLoading(false);
+   279→      }
+   280→    },
+   281→    [openFiles, projectId],
+   282→  );
+   283→
+   284→  const closeFile = useCallback(
+   285→    (path: string) => {
+   286→      const idx = openFiles.findIndex((f) => f.path === path);
+   287→      const next = openFiles.filter((f) => f.path !== path);
+   288→      setOpenFiles(next);
+   289→      if (activePath === path) {
+   290→        const neighbor = next[Math.min(idx, next.length - 1)];
+   291→        setActivePath(neighbor?.path ?? null);
+   292→      }
+   293→    },
+   294→    [openFiles, activePath],
+   295→  );
+   296→
+   297→  const saveActiveFile = useCallback(async () => {
+   298→    if (!activeFile || activeFile.content === activeFile.original || saving) return;
+   299→    setSaving(true);
+   300→    try {
+   301→      const res = await api.saveProjectFile(
+   302→        projectId,
+   303→        activeFile.path,
+   304→        activeFile.content,
+   305→      );
+   306→      setOpenFiles((prev) =>
+   307→        prev.map((f) =>
+   308→          f.path === res.path ? { ...f, original: f.content } : f,
+   309→        ),
+   310→      );
+   311→      toast.success("Сохранено", { description: res.path });
+   312→      if (res.created) void loadTree(true);
+   313→    } catch (err) {
+   314→      toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить файл");
+   315→    } finally {
+   316→      setSaving(false);
+   317→    }
+   318→  }, [activeFile, projectId, saving, loadTree]);
+   319→
+   320→  // ⌘S / Ctrl+S save (bound to the active buffer).
+   321→  useEffect(() => {
+   322→    const onKeyDown = (e: KeyboardEvent) => {
+   323→      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+   324→        e.preventDefault();
+   325→        void saveActiveFile();
+   326→      }
+   327→    };
+   328→    window.addEventListener("keydown", onKeyDown);
+   329→    return () => window.removeEventListener("keydown", onKeyDown);
+   330→  }, [saveActiveFile]);
+   331→
+   332→  const onChangeContent = useCallback(
+   333→    (value: string) => {
+   334→      setOpenFiles((prev) =>
+   335→        prev.map((f) => (f.path === activePath ? { ...f, content: value } : f)),
+   336→      );
+   337→    },
+   338→    [activePath],
+   339→  );
+   340→
+   341→  /* ── Actions ── */
+   342→
+   343→  const discuss = async () => {
+   344→    if (!project || discussing) return;
+   345→    setDiscussing(true);
+   346→    setMainArea("chat");
+   347→    await startProjectThread(project.id, `Проект «${project.name}»`);
+   348→    setDiscussing(false);
+   349→  };
+   350→
+   351→  const doDelete = async () => {
+   352→    if (!project) return;
+   353→    setDeleting(true);
+   354→    try {
+   355→      await remove(project.id);
+   356→      toast.success("Проект удалён");
+   357→      closeProject();
+   358→    } catch (err) {
+   359→      toast.error(err instanceof Error ? err.message : "Не удалось удалить проект");
+   360→    } finally {
+   361→      setDeleting(false);
+   362→      setDeleteOpen(false);
+   363→    }
+   364→  };
+   365→
+   366→  const treeNodes = useMemo(() => buildTree(tree), [tree]);
+   367→  const dirtyPaths = useMemo(
+   368→    () =>
+   369→      new Set(
+   370→        openFiles.filter((f) => f.content !== f.original).map((f) => f.path),
+   371→      ),
+   372→    [openFiles],
+   373→  );
+   374→
+   375→  const headerStats = project?.stats;
+   376→
+   377→  return (
+   378→    <section
+   379→      aria-label="Проект"
+   380→      className="flex min-w-0 flex-1 flex-col bg-background"
+   381→    >
+   382→      {/* ── Header ── */}
+   383→      <header className="flex h-14 shrink-0 items-center gap-1.5 border-b px-2 sm:px-4">
+   384→        <Button
+   385→          variant="ghost"
+   386→          size="icon"
+   387→          className="size-9 md:hidden"
+   388→          onClick={onOpenMobileNav}
+   389→          aria-label="Открыть меню"
+   390→        >
+   391→          <Menu className="size-4" aria-hidden="true" />
+   392→        </Button>
+   393→        <Button
+   394→          variant="ghost"
+   395→          size="icon"
+   396→          className="size-9 shrink-0"
+   397→          onClick={closeProject}
+   398→          aria-label="Назад к проектам"
+   399→        >
+   400→          <ArrowLeft className="size-4" aria-hidden="true" />
+   401→        </Button>
+   402→
+   403→        <div className="flex min-w-0 flex-1 items-center gap-2">
+   404→          <h1 className="truncate text-sm font-semibold sm:text-[15px]">
+   405→            {projectLoading && !project ? "Загрузка…" : project?.name}
+   406→          </h1>
+   407→          {project && <OriginBadge origin={project.origin} className="hidden sm:inline-flex" />}
+   408→          {headerStats && (
+   409→            <span className="hidden items-center gap-2.5 text-[11px] text-muted-foreground lg:flex">
+   410→              <span className="inline-flex items-center gap-1">
+   411→                <File className="size-3" aria-hidden="true" />
+   412→                {headerStats.filesCount} {pluralFiles(headerStats.filesCount)}
+   413→              </span>
+   414→              <span className="inline-flex items-center gap-1">
+   415→                <GitCommitHorizontal className="size-3" aria-hidden="true" />
+   416→                {headerStats.commitsCount}
+   417→              </span>
+   418→            </span>
+   419→          )}
+   420→        </div>
+   421→
+   422→        <div className="flex shrink-0 items-center gap-1">
+   423→          <Button
+   424→            variant="outline"
+   425→            size="sm"
+   426→            className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
+   427→            onClick={() => setCheckpointOpen(true)}
+   428→            aria-label="Создать чекпоинт"
+   429→          >
+   430→            <GitCommitHorizontal className="size-4" aria-hidden="true" />
+   431→            <span className="hidden md:inline">Чекпоинт</span>
+   432→          </Button>
+   433→          <Button
+   434→            variant="outline"
+   435→            size="sm"
+   436→            className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
+   437→            onClick={() => void discuss()}
+   438→            disabled={!project || discussing}
+   439→            aria-label="Обсудить проект в чате"
+   440→          >
+   441→            {discussing ? (
+   442→              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+   443→            ) : (
+   444→              <MessageSquare className="size-4" aria-hidden="true" />
+   445→            )}
+   446→            <span className="hidden md:inline">Обсудить</span>
+   447→          </Button>
+   448→          <Button
+   449→            variant="outline"
+   450→            size="sm"
+   451→            className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
+   452→            onClick={() => setCommitsOpen(true)}
+   453→            aria-label="История коммитов"
+   454→          >
+   455→            <GitCommitHorizontal className="size-4" aria-hidden="true" />
+   456→            <span className="hidden md:inline">История</span>
+   457→          </Button>
+   458→          <DropdownMenu>
+   459→            <DropdownMenuTrigger asChild>
+   460→              <Button
+   461→                variant="ghost"
+   462→                size="icon"
+   463→                className="size-9"
+   464→                aria-label="Меню проекта"
+   465→              >
+   466→                <MoreHorizontal className="size-4" aria-hidden="true" />
+   467→              </Button>
+   468→            </DropdownMenuTrigger>
+   469→            <DropdownMenuContent align="end" className="w-52">
+   470→              <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+   471→                <Pencil className="size-4" aria-hidden="true" />
+   472→                Переименовать
+   473→              </DropdownMenuItem>
+   474→              <DropdownMenuSeparator />
+   475→              <DropdownMenuItem
+   476→                variant="destructive"
+   477→                onSelect={() => setDeleteOpen(true)}
+   478→              >
+   479→                <Trash2 className="size-4" aria-hidden="true" />
+   480→                Удалить проект
+   481→              </DropdownMenuItem>
+   482→            </DropdownMenuContent>
+   483→          </DropdownMenu>
+   484→        </div>
+   485→      </header>
+   486→
+   487→      {/* ── Body: tree + editor ── */}
+   488→      <div className="flex min-h-0 flex-1">
+   489→        {/* Desktop tree (≥ md) */}
+   490→        <nav
+   491→          aria-label="Файлы проекта"
+   492→          className="vf-scroll hidden w-56 shrink-0 flex-col overflow-y-auto border-r py-2 md:flex"
+   493→        >
+   494→          <FileTreeBody
+   495→            nodes={treeNodes}
+   496→            truncated={treeTruncated}
+   497→            loading={treeLoading}
+   498→            collapsed={collapsed}
+   499→            onToggleFolder={(path) =>
+   500→              setCollapsed((prev) => {
+   501→                const next = new Set(prev);
+   502→                if (next.has(path)) next.delete(path);
+   503→                else next.add(path);
+   504→                return next;
+   505→              })
+   506→            }
+   507→            activePath={activePath}
+   508→            dirtyPaths={dirtyPaths}
+   509→            onOpenFile={(path) => void openFile(path)}
+   510→          />
+   511→        </nav>
+   512→
+   513→        {/* Mobile tree (< md, Sheet) */}
+   514→        <Sheet open={mobileTreeOpen} onOpenChange={setMobileTreeOpen}>
+   515→          <SheetContent
+   516→            side="left"
+   517→            className="w-72 gap-0 border-r p-0 sm:max-w-xs"
+   518→            aria-describedby={undefined}
+   519→          >
+   520→            <SheetTitle className="sr-only">Файлы проекта</SheetTitle>
+   521→            <div className="flex h-14 items-center gap-2 border-b px-4">
+   522→              <Button
+   523→                variant="outline"
+   524→                size="icon"
+   525→                className="size-9 shrink-0 rounded-xl"
+   526→                onClick={() => setMobileTreeOpen(false)}
+   527→                aria-label="Закрыть файлы"
+   528→              >
+   529→                <ArrowLeft className="size-4" aria-hidden="true" />
+   530→              </Button>
+   531→              <p className="truncate text-sm font-semibold">
+   532→                {project?.name ?? "Файлы"}
+   533→              </p>
+   534→            </div>
+   535→            <div className="vf-scroll min-h-0 flex-1 overflow-y-auto py-2">
+   536→              <FileTreeBody
+   537→                nodes={treeNodes}
+   538→                truncated={treeTruncated}
+   539→                loading={treeLoading}
+   540→                collapsed={collapsed}
+   541→                onToggleFolder={(path) =>
+   542→                  setCollapsed((prev) => {
+   543→                    const next = new Set(prev);
+   544→                    if (next.has(path)) next.delete(path);
+   545→                    else next.add(path);
+   546→                    return next;
+   547→                  })
+   548→                }
+   549→                activePath={activePath}
+   550→                dirtyPaths={dirtyPaths}
+   551→                onOpenFile={(path) => void openFile(path)}
+   552→              />
+   553→            </div>
+   554→          </SheetContent>
+   555→        </Sheet>
+   556→
+   557→        {/* Editor area */}
+   558→        <div className="flex min-w-0 flex-1 flex-col">
+   559→          {/* Mobile tree trigger */}
+   560→          <div className="flex h-10 shrink-0 items-center gap-1.5 border-b px-2 md:hidden">
+   561→            <Button
+   562→              variant="outline"
+   563→              size="sm"
+   564→              className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+   565→              onClick={() => setMobileTreeOpen(true)}
+   566→              aria-label="Показать файлы проекта"
+   567→            >
+   568→              <Folder className="size-3.5" aria-hidden="true" />
+   569→              Файлы
+   570→            </Button>
+   571→            {activeDirty && (
+   572→              <span className="text-[11px] text-amber-600 dark:text-amber-400">
+   573→                есть изменения
+   574→              </span>
+   575→            )}
+   576→            <div className="flex-1" />
+   577→            {activeFile && (
+   578→              <Button
+   579→                variant="outline"
+   580→                size="sm"
+   581→                className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+   582→                onClick={() => void saveActiveFile()}
+   583→                disabled={!activeDirty || saving}
+   584→                aria-label="Сохранить файл"
+   585→              >
+   586→                {saving ? (
+   587→                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+   588→                ) : (
+   589→                  <Save className="size-3.5" aria-hidden="true" />
+   590→                )}
+   591→                Сохранить
+   592→              </Button>
+   593→            )}
+   594→          </div>
+   595→
+   596→          {/* Tab bar */}
+   597→          {openFiles.length > 0 && (
+   598→            <div
+   599→              role="tablist"
+   600→              aria-label="Открытые файлы"
+   601→              className="vf-scroll-x flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b px-1"
+   602→            >
+   603→              {openFiles.map((file) => {
+   604→                const active = file.path === activePath;
+   605→                const dirty = file.content !== file.original;
+   606→                return (
+   607→                  <div
+   608→                    key={file.path}
+   609→                    role="tab"
+   610→                    aria-selected={active}
+   611→                    className={cn(
+   612→                      "group flex shrink-0 items-center gap-1.5 border-b-2 px-2.5 py-1.5 text-xs transition-colors duration-150",
+   613→                      active
+   614→                        ? "border-primary bg-background font-medium text-foreground"
+   615→                        : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+   616→                    )}
+   617→                  >
+   618→                    <button
+   619→                      type="button"
+   620→                      onClick={() => setActivePath(file.path)}
+   621→                      className="flex min-w-0 items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60 rounded-md"
+   622→                      aria-label={`Файл ${file.path}`}
+   623→                    >
+   624→                      <FileCode2
+   625→                        className={cn("size-3.5 shrink-0", fileDotStyle(file.path))}
+   626→                        aria-hidden="true"
+   627→                      />
+   628→                      <span className="max-w-40 truncate">
+   629→                        {file.path.split("/").pop()}
+   630→                      </span>
+   631→                      {dirty && (
+   632→                        <span
+   633→                          aria-label="Есть несохранённые изменения"
+   634→                          title="Есть несохранённые изменения"
+   635→                          className="size-1.5 shrink-0 rounded-full bg-amber-500"
+   636→                        />
+   637→                      )}
+   638→                    </button>
+   639→                    <button
+   640→                      type="button"
+   641→                      onClick={() => closeFile(file.path)}
+   642→                      className="shrink-0 rounded-md p-0.5 text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60"
+   643→                      aria-label={`Закрыть ${file.path}`}
+   644→                    >
+   645→                      <svg
+   646→                        viewBox="0 0 12 12"
+   647→                        className="size-2.5"
+   648→                        aria-hidden="true"
+   649→                      >
+   650→                        <path
+   651→                          d="M2 2l8 8M10 2l-8 8"
+   652→                          stroke="currentColor"
+   653→                          strokeWidth="1.8"
+   654→                          strokeLinecap="round"
+   655→                        />
+   656→                      </svg>
+   657→                    </button>
+   658→                  </div>
+   659→                );
+   660→              })}
+   661→            </div>
+   662→          )}
+   663→
+   664→          {/* Monaco */}
+   665→          <div className="relative min-h-0 flex-1">
+   666→            {fileLoading ? (
+   667→              <div className="h-full w-full p-4" aria-label="Загрузка файла">
+   668→                <div className="space-y-3">
+   669→                  <Skeleton className="h-4 w-1/3" />
+   670→                  <Skeleton className="h-3 w-2/3" />
+   671→                  <Skeleton className="h-3 w-1/2" />
+   672→                  <Skeleton className="h-3 w-3/4" />
+   673→                </div>
+   674→              </div>
+   675→            ) : activeFile ? (
+   676→              <MonacoEditor
+   677→                value={activeFile.content}
+   678→                language={activeFile.language}
+   679→                onChange={onChangeContent}
+   680→              />
+   681→            ) : (
+   682→              <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+   683→                <span
+   684→                  aria-hidden="true"
+   685→                  className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary"
+   686→                >
+   687→                  <FileCode2 className="size-5" />
+   688→                </span>
+   689→                <p className="text-sm font-medium">Выберите файл слева</p>
+   690→                <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
+   691→                  Дерево файлов проекта —{" "}
+   692→                  <span className="md:hidden">кнопка «Файлы» сверху</span>
+   693→                  <span className="hidden md:inline">панель слева</span>.
+   694→                  Правки сохраняются через ⌘S / Ctrl+S.
+   695→                </p>
+   696→              </div>
+   697→            )}
+   698→          </div>
+   699→        </div>
+   700→      </div>
+   701→
+   702→      {/* ── Checkpoint dialog ── */}
+   703→      <CheckpointDialog
+   704→        open={checkpointOpen}
+   705→        onOpenChange={setCheckpointOpen}
+   706→        projectId={projectId}
+   707→        onDone={() => {
+   708→          void loadProject();
+   709→        }}
+   710→      />
+   711→
+   712→      {/* ── Commits sheet ── */}
+   713→      <CommitsSheet
+   714→        open={commitsOpen}
+   715→        onOpenChange={setCommitsOpen}
+   716→        projectId={projectId}
+   717→      />
+   718→
+   719→      {/* ── Rename dialog ── */}
+   720→      <RenameDialog
+   721→        open={renameOpen}
+   722→        onOpenChange={setRenameOpen}
+   723→        project={project}
+   724→        onRenamed={(updated) => setProject((prev) => ({ ...prev, ...updated }))}
+   725→      />
+   726→
+   727→      {/* ── Delete confirmation ── */}
+   728→      <AlertDialog
+   729→        open={deleteOpen}
+   730→        onOpenChange={(open) => {
+   731→          if (!open && !deleting) setDeleteOpen(false);
+   732→        }}
+   733→      >
+   734→        <AlertDialogContent>
+   735→          <AlertDialogHeader>
+   736→            <AlertDialogTitle>Удалить проект?</AlertDialogTitle>
+   737→            <AlertDialogDescription>
+   738→              «{project?.name}»: файлы и git-история будут удалены безвозвратно.
+   739→            </AlertDialogDescription>
+   740→          </AlertDialogHeader>
+   741→          <AlertDialogFooter>
+   742→            <AlertDialogCancel disabled={deleting}>Отмена</AlertDialogCancel>
+   743→            <AlertDialogAction
+   744→              onClick={(e) => {
+   745→                e.preventDefault();
+   746→                void doDelete();
+   747→              }}
+   748→              className="bg-destructive text-white hover:bg-destructive/90"
+   749→            >
+   750→              {deleting ? "Удаляем…" : "Удалить"}
+   751→            </AlertDialogAction>
+   752→          </AlertDialogFooter>
+   753→        </AlertDialogContent>
+   754→      </AlertDialog>
+   755→
+   756→    </section>
+   757→  );
+   758→}
+   759→
+   760→/* ── File tree (shared desktop/mobile) ── */
+   761→
+   762→function FileTreeBody({
+   763→  nodes,
+   764→  truncated,
+   765→  loading,
+   766→  collapsed,
+   767→  onToggleFolder,
+   768→  activePath,
+   769→  dirtyPaths,
+   770→  onOpenFile,
+   771→}: {
+   772→  nodes: TreeNode[];
+   773→  truncated: boolean;
+   774→  loading: boolean;
+   775→  collapsed: Set<string>;
+   776→  onToggleFolder: (path: string) => void;
+   777→  activePath: string | null;
+   778→  dirtyPaths: Set<string>;
+   779→  onOpenFile: (path: string) => void;
+   780→}) {
+   781→  if (loading) {
+   782→    return (
+   783→      <div className="space-y-2 px-3 pt-1" aria-label="Загрузка файлов">
+   784→        {Array.from({ length: 6 }).map((_, i) => (
+   785→          <Skeleton key={i} className="h-5 w-full rounded-md" />
+   786→        ))}
+   787→      </div>
+   788→    );
+   789→  }
+   790→  if (nodes.length === 0) {
+   791→    return (
+   792→      <p className="px-3 pt-2 text-xs leading-relaxed text-muted-foreground">
+   793→        В проекте пока нет файлов.
+   794→      </p>
+   795→    );
+   796→  }
+   797→  return (
+   798→    <ul className="select-none px-1.5">
+   799→      {nodes.map((node) => (
+   800→        <li key={node.path}>
+   801→          <TreeNodeRow
+   802→            node={node}
+   803→            depth={0}
+   804→            collapsed={collapsed}
+   805→            onToggleFolder={onToggleFolder}
+   806→            activePath={activePath}
+   807→            dirtyPaths={dirtyPaths}
+   808→            onOpenFile={onOpenFile}
+   809→          />
+   810→        </li>
+   811→      ))}
+   812→      {truncated && (
+   813→        <li className="px-2 pt-2 pb-1 text-[11px] leading-relaxed text-muted-foreground/80">
+   814→          Показаны не все файлы (лимит 2000)
+   815→        </li>
+   816→      )}
+   817→    </ul>
+   818→  );
+   819→}
+   820→
+   821→function TreeNodeRow({
+   822→  node,
+   823→  depth,
+   824→  collapsed,
+   825→  onToggleFolder,
+   826→  activePath,
+   827→  dirtyPaths,
+   828→  onOpenFile,
+   829→}: {
+   830→  node: TreeNode;
+   831→  depth: number;
+   832→  collapsed: Set<string>;
+   833→  onToggleFolder: (path: string) => void;
+   834→  activePath: string | null;
+   835→  dirtyPaths: Set<string>;
+   836→  onOpenFile: (path: string) => void;
+   837→}) {
+   838→  const isOpen = !collapsed.has(node.path);
+   839→
+   840→  if (node.type === "dir") {
+   841→    const Icon = isOpen ? FolderOpen : Folder;
+   842→    return (
+   843→      <div>
+   844→        <button
+   845→          type="button"
+   846→          onClick={() => onToggleFolder(node.path)}
+   847→          aria-expanded={isOpen}
+   848→          aria-label={`Папка ${node.name}`}
+   849→          className="flex min-h-9 w-full items-center gap-1 rounded-lg pr-2 text-left text-xs text-foreground/90 transition-colors duration-150 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60"
+   850→          style={{ paddingLeft: `${6 + depth * 14}px` }}
+   851→        >
+   852→          <motion.span
+   853→            animate={{ rotate: isOpen ? 90 : 0 }}
+   854→            transition={{ duration: 0.15 }}
+   855→            className="flex shrink-0 items-center"
+   856→            aria-hidden="true"
+   857→          >
+   858→            <ChevronRight className="size-3.5 text-muted-foreground/70" />
+   859→          </motion.span>
+   860→          <Icon
+   861→            className="size-3.5 shrink-0 text-muted-foreground"
+   862→            aria-hidden="true"
+   863→          />
+   864→          <span className="min-w-0 truncate font-medium">{node.name}</span>
+   865→        </button>
+   866→        <AnimatePresence initial={false}>
+   867→          {isOpen && node.children.length > 0 && (
+   868→            <motion.div
+   869→              initial={{ height: 0, opacity: 0 }}
+   870→              animate={{ height: "auto", opacity: 1 }}
+   871→              exit={{ height: 0, opacity: 0 }}
+   872→              transition={{ duration: 0.18, ease: "easeOut" }}
+   873→              className="overflow-hidden"
+   874→            >
+   875→              <ul>
+   876→                {node.children.map((child) => (
+   877→                  <li key={child.path}>
+   878→                    <TreeNodeRow
+   879→                      node={child}
+   880→                      depth={depth + 1}
+   881→                      collapsed={collapsed}
+   882→                      onToggleFolder={onToggleFolder}
+   883→                      activePath={activePath}
+   884→                      dirtyPaths={dirtyPaths}
+   885→                      onOpenFile={onOpenFile}
+   886→                    />
+   887→                  </li>
+   888→                ))}
+   889→              </ul>
+   890→            </motion.div>
+   891→          )}
+   892→        </AnimatePresence>
+   893→      </div>
+   894→    );
+   895→  }
+   896→
+   897→  const active = node.path === activePath;
+   898→  const dirty = dirtyPaths.has(node.path);
+   899→
+   900→  return (
+   901→    <button
+   902→      type="button"
+   903→      onClick={() => onOpenFile(node.path)}
+   904→      aria-current={active ? "true" : undefined}
+   905→      aria-label={`Файл ${node.name}`}
+   906→      title={node.path}
+   907→      className={cn(
+   908→        "flex min-h-9 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-xs transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+   909→        active
+   910→          ? "bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-300"
+   911→          : "text-foreground/80 hover:bg-accent/60",
+   912→      )}
+   913→      style={{ paddingLeft: `${6 + depth * 14}px` }}
+   914→    >
+   915→      <FileCode2
+   916→        className={cn("size-3.5 shrink-0", fileDotStyle(node.path))}
+   917→        aria-hidden="true"
+   918→      />
+   919→      <span className="min-w-0 truncate">{node.name}</span>
+   920→      {dirty && (
+   921→        <span
+   922→          className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500"
+   923→          aria-label="Есть несохранённые изменения"
+   924→        />
+   925→      )}
+   926→    </button>
+   927→  );
+   928→}
+   929→
+   930→/* ── Checkpoint dialog ── */
+   931→
+   932→function CheckpointDialog({
+   933→  open,
+   934→  onOpenChange,
+   935→  projectId,
+   936→  onDone,
+   937→}: {
+   938→  open: boolean;
+   939→  onOpenChange: (open: boolean) => void;
+   940→  projectId: string;
+   941→  onDone: () => void;
+   942→}) {
+   943→  const [message, setMessage] = useState("Изменения из редактора");
+   944→
+   945→  const [submitting, setSubmitting] = useState(false);
+   946→  const [error, setError] = useState<string | null>(null);
+   947→
+   948→  const submit = async () => {
+   949→    const trimmed = message.trim();
+   950→    if (!trimmed || submitting) return;
+   951→    setSubmitting(true);
+   952→    setError(null);
+   953→    try {
+   954→      const checkpoint = await api.createProjectCheckpoint(projectId, trimmed);
+   955→      if (checkpoint.noop) {
+   956→        toast.info("Изменений нет — чекпоинт не нужен");
+   957→      } else if (checkpoint.commit) {
+   958→        toast.success("Чекпоинт создан", {
+   959→          description: `${checkpoint.commit.short} · ${checkpoint.commit.message}`,
+   960→        });
+   961→      }
+   962→      onOpenChange(false);
+   963→      onDone();
+   964→    } catch (err) {
+   965→      setError(err instanceof ApiError ? err.message : "Не удалось создать чекпоинт");
+   966→    } finally {
+   967→      setSubmitting(false);
+   968→    }
+   969→  };
+   970→
+   971→  return (
+   972→    <Dialog open={open} onOpenChange={onOpenChange}>
+   973→      <DialogContent className="top-[50%] max-h-[85vh] translate-y-[-50%] overflow-y-auto gap-0 sm:max-w-md" aria-describedby={undefined}>
+   974→        <DialogHeader className="pb-3">
+   975→          <DialogTitle className="flex items-center gap-2 text-sm">
+   976→            <GitCommitHorizontal className="size-4 text-primary" aria-hidden="true" />
+   977→            Чекпоинт
+   978→          </DialogTitle>
+   979→          <DialogDescription className="sr-only">
+   980→            Зафиксировать текущие изменения проекта коммитом
+   981→          </DialogDescription>
+   982→        </DialogHeader>
+   983→        <div className="space-y-3">
+   984→          <div className="space-y-1.5">
+   985→            <label htmlFor="checkpoint-message" className="text-xs font-medium text-muted-foreground">
+   986→              Сообщение коммита
+   987→            </label>
+   988→            <Input
+   989→              id="checkpoint-message"
+   990→              value={message}
+   991→              onChange={(e) => setMessage(e.target.value)}
+   992→              maxLength={200}
+   993→              disabled={submitting}
+   994→              autoFocus
+   995→            />
+   996→          </div>
+   997→          {error && (
+   998→            <p className="text-xs text-destructive" role="alert">
+   999→              {error}
+  1000→            </p>
+  1001→          )}
+  1002→          <Button
+  1003→            className="h-10 w-full gap-2 rounded-xl"
+  1004→            onClick={() => void submit()}
+  1005→            disabled={submitting || message.trim().length === 0}
+  1006→          >
+  1007→            {submitting ? (
+  1008→              <>
+  1009→                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+  1010→                Фиксируем…
+  1011→              </>
+  1012→            ) : (
+  1013→              <>
+  1014→                <GitCommitHorizontal className="size-4" aria-hidden="true" />
+  1015→                Создать чекпоинт
+  1016→              </>
+  1017→            )}
+  1018→          </Button>
+  1019→        </div>
+  1020→      </DialogContent>
+  1021→    </Dialog>
+  1022→  );
+  1023→}
+  1024→
+  1025→/* ── Commits sheet ── */
+  1026→
+  1027→function CommitsSheet({
+  1028→  open,
+  1029→  onOpenChange,
+  1030→  projectId,
+  1031→}: {
+  1032→  open: boolean;
+  1033→  onOpenChange: (open: boolean) => void;
+  1034→  projectId: string;
+  1035→}) {
+  1036→  const [commits, setCommits] = useState<CommitInfo[] | null>(null);
+  1037→  const [loading, setLoading] = useState(false);
+  1038→
+  1039→  const loadCommits = useCallback(async () => {
+  1040→    setLoading(true);
+  1041→    setCommits(null);
+  1042→    try {
+  1043→      const list = await api.listProjectCommits(projectId);
+  1044→      setCommits(list);
+  1045→    } catch {
+  1046→      setCommits([]);
+  1047→      toast.error("Не удалось загрузить историю");
+  1048→    } finally {
+  1049→      setLoading(false);
+  1050→    }
+  1051→  }, [projectId]);
+  1052→
+  1053→  useEffect(() => {
+  1054→    if (!open) return;
+  1055→    void loadCommits();
+  1056→  }, [open, loadCommits]);
+  1057→
+  1058→  return (
+  1059→    <Sheet open={open} onOpenChange={onOpenChange}>
+  1060→      <SheetContent
+  1061→        side="right"
+  1062→        className="w-full gap-0 p-0 sm:max-w-md"
+  1063→        aria-describedby={undefined}
+  1064→      >
+  1065→        <SheetTitle className="flex h-14 shrink-0 items-center gap-2 border-b px-4 text-sm">
+  1066→          <GitCommitHorizontal className="size-4 text-primary" aria-hidden="true" />
+  1067→          История коммитов
+  1068→        </SheetTitle>
+  1069→        <div className="vf-scroll min-h-0 flex-1 overflow-y-auto p-3">
+  1070→          {loading ? (
+  1071→            <div className="space-y-3" aria-label="Загрузка истории">
+  1072→              {Array.from({ length: 5 }).map((_, i) => (
+  1073→                <Skeleton key={i} className="h-14 w-full rounded-xl" />
+  1074→              ))}
+  1075→            </div>
+  1076→          ) : !commits || commits.length === 0 ? (
+  1077→            <p className="px-2 pt-4 text-sm leading-relaxed text-muted-foreground">
+  1078→              Коммитов пока нет.
+  1079→            </p>
+  1080→          ) : (
+  1081→            <ul className="space-y-2">
+  1082→              {commits.map((commit) => (
+  1083→                <li
+  1084→                  key={commit.hash}
+  1085→                  className="rounded-xl border bg-card p-3"
+  1086→                >
+  1087→                  <div className="flex items-center gap-2">
+  1088→                    <Badge
+  1089→                      variant="outline"
+  1090→                      className="shrink-0 rounded-md border-emerald-500/30 bg-emerald-500/10 font-mono text-[11px] font-normal text-emerald-700 dark:text-emerald-300"
+  1091→                    >
+  1092→                      {commit.short}
+  1093→                    </Badge>
+  1094→                    <span className="min-w-0 flex-1 truncate text-sm">
+  1095→                      {commit.message}
+  1096→                    </span>
+  1097→                  </div>
+  1098→                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+  1099→                    {commit.author} · {relativeTime(commit.date)}
+  1100→                  </p>
+  1101→                </li>
+  1102→              ))}
+  1103→            </ul>
+  1104→          )}
+  1105→        </div>
+  1106→      </SheetContent>
+  1107→    </Sheet>
+  1108→  );
+  1109→}
+  1110→
+  1111→/* ── Rename dialog ── */
+  1112→
+  1113→function RenameDialog({
+  1114→  open,
+  1115→  onOpenChange,
+  1116→  project,
+  1117→  onRenamed,
+  1118→}: {
+  1119→  open: boolean;
+  1120→  onOpenChange: (open: boolean) => void;
+  1121→  project: Project | null;
+  1122→  onRenamed: (updated: Project) => void;
+  1123→}) {
+  1124→  const [name, setName] = useState("");
+  1125→  const [description, setDescription] = useState("");
+  1126→  const [submitting, setSubmitting] = useState(false);
+  1127→  const [error, setError] = useState<string | null>(null);
+  1128→
+  1129→  useEffect(() => {
+  1130→    if (open && project) {
+  1131→      setName(project.name);
+  1132→      setDescription(project.description ?? "");
+  1133→      setError(null);
+  1134→    }
+  1135→  }, [open, project]);
+  1136→
+  1137→  const submit = async () => {
+  1138→    const trimmed = name.trim();
+  1139→    if (!trimmed || !project || submitting) return;
+  1140→    setSubmitting(true);
+  1141→    setError(null);
+  1142→    try {
+  1143→      const updated = await api.updateProject(project.id, {
+  1144→        name: trimmed,
+  1145→        description: description.trim(),
+  1146→      });
+  1147→      onRenamed(updated);
+  1148→      useAppUi.getState().bumpProjects();
+  1149→      onOpenChange(false);
+  1150→      toast.success("Проект обновлён");
+  1151→    } catch (err) {
+  1152→      setError(err instanceof ApiError ? err.message : "Не удалось обновить проект");
+  1153→    } finally {
+  1154→      setSubmitting(false);
+  1155→    }
+  1156→  };
+  1157→
+  1158→  return (
+  1159→    <Dialog open={open} onOpenChange={onOpenChange}>
+  1160→      <DialogContent className="top-[50%] max-h-[85vh] translate-y-[-50%] overflow-y-auto gap-0 sm:max-w-md" aria-describedby={undefined}>
+  1161→        <DialogHeader className="pb-3">
+  1162→          <DialogTitle className="flex items-center gap-2 text-sm">
+  1163→            <Pencil className="size-4 text-primary" aria-hidden="true" />
+  1164→            Настройки проекта
+  1165→          </DialogTitle>
+  1166→          <DialogDescription className="sr-only">
+  1167→            Название и описание проекта
+  1168→          </DialogDescription>
+  1169→        </DialogHeader>
+  1170→        <div className="space-y-3">
+  1171→          <div className="space-y-1.5">
+  1172→            <label htmlFor="rename-name" className="text-xs font-medium text-muted-foreground">
+  1173→              Название
+  1174→            </label>
+  1175→            <Input
+  1176→              id="rename-name"
+  1177→              value={name}
+  1178→              onChange={(e) => setName(e.target.value)}
+  1179→              maxLength={80}
+  1180→              disabled={submitting}
+  1181→              autoFocus
+  1182→            />
+  1183→          </div>
+  1184→          <div className="space-y-1.5">
+  1185→            <label htmlFor="rename-description" className="text-xs font-medium text-muted-foreground">
+  1186→              Описание
+  1187→            </label>
+  1188→            <Textarea
+  1189→              id="rename-description"
+  1190→              value={description}
+  1191→              onChange={(e) => setDescription(e.target.value)}
+  1192→              maxLength={500}
+  1193→              rows={2}
+  1194→              disabled={submitting}
+  1195→              className="resize-none"
+  1196→            />
+  1197→          </div>
+  1198→          {error && (
+  1199→            <p className="text-xs text-destructive" role="alert">
+  1200→              {error}
+  1201→            </p>
+  1202→          )}
+  1203→          <Button
+  1204→            className="h-10 w-full gap-2 rounded-xl"
+  1205→            onClick={() => void submit()}
+  1206→            disabled={submitting || name.trim().length === 0}
+  1207→          >
+  1208→            {submitting ? (
+  1209→              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+  1210→            ) : null}
+  1211→            Сохранить
+  1212→          </Button>
+  1213→        </div>
+  1214→      </DialogContent>
+  1215→    </Dialog>
+  1216→  );
+  1217→}
+  1218→

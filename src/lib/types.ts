@@ -230,6 +230,60 @@ export interface WsProjectUpdatedPayload {
   reason: "files" | "checkpoint";
 }
 
+/* ── Checkpoint diff (Stage 4) ── */
+
+export type DiffFileStatus = "added" | "modified" | "deleted";
+
+export interface CommitDiffFile {
+  path: string;
+  status: DiffFileStatus;
+  original: string;
+  modified: string;
+  truncated: boolean;
+  skipped: boolean;
+}
+
+export interface CommitDiff {
+  commit: CommitInfo;
+  files: CommitDiffFile[];
+  skippedCount: number;
+}
+
+/* ── Global search (Stage 4) ── */
+
+export interface SearchThreadHit {
+  id: string;
+  title: string;
+  mode: ThreadMode;
+  projectId: string | null;
+  updatedAt: string;
+  preview: string | null;
+}
+
+export interface SearchNoteHit {
+  id: string;
+  preview: string;
+  status: NoteStatus;
+  favorite: boolean;
+  createdAt: string;
+  category: { id: string; name: string } | null;
+}
+
+export interface SearchProjectHit {
+  id: string;
+  name: string;
+  description: string | null;
+  origin: ProjectOrigin;
+  updatedAt: string;
+}
+
+export interface SearchResults {
+  threads: SearchThreadHit[];
+  notes: SearchNoteHit[];
+  projects: SearchProjectHit[];
+  total: number;
+}
+
 export const MODE_LABELS: Record<ThreadMode, string> = {
   ask: "Спросить",
   plan: "План",

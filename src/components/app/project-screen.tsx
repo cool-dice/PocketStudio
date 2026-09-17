@@ -16,8 +16,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeft,
   ChevronRight,
+  Download,
   File,
   FileCode2,
+  FileDiff,
   Folder,
   FolderOpen,
   GitCommitHorizontal,
@@ -31,6 +33,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { DiffDialog } from "@/components/app/diff-dialog";
 import { MonacoEditor } from "@/components/app/monaco-editor";
 import {
   AlertDialog,
@@ -157,6 +160,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [discussing, setDiscussing] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Version-bump bookkeeping: the first render does the initial load itself.
   const versionSeenRef = useRef(projectFilesVersion);
@@ -169,6 +173,44 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   const activeDirty = activeFile !== null && activeFile.content !== activeFile.original;
 
   /* ── Data loading ── */
+
+  /** Download the project as a zip (cookie-auth navigation, no fetch). */
+  const exportZip = useCallback(async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const url = api.projectExportUrl(projectId);
+      // Probe with fetch to surface API errors as toasts; on success the
+      // blob is handed to the browser as a file download.
+      const res = await fetch(url, { credentials: "same-origin" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Не удалось упаковать проект");
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+      const fileName = match
+        ? decodeURIComponent(match[1])
+        : `vibeflow-project-${projectId}.zip`;
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      toast.success("Архив проекта готов", {
+        description: `${fileName} · ${(blob.size / 1024).toFixed(1)} КБ`,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось упаковать проект");
+    } finally {
+      setExporting(false);
+    }
+  }, [projectId, exporting]);
+
 
   const loadProject = useCallback(async () => {
     const seq = ++projectSeqRef.current;
@@ -420,6 +462,22 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
+            onClick={() => void exportZip()}
+            disabled={!project || exporting}
+            aria-label="Скачать проект zip-архивом"
+            title="Скачать проект zip-архивом"
+          >
+            {exporting ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Download className="size-4" aria-hidden="true" />
+            )}
+            <span className="hidden md:inline">Скачать zip</span>
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1035,6 +1093,7 @@ function CommitsSheet({
 }) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [diffCommit, setDiffCommit] = useState<CommitInfo | null>(null);
 
   const loadCommits = useCallback(async () => {
     setLoading(true);
@@ -1082,7 +1141,7 @@ function CommitsSheet({
               {commits.map((commit) => (
                 <li
                   key={commit.hash}
-                  className="rounded-xl border bg-card p-3"
+                  className="group rounded-xl border bg-card p-3 transition-colors duration-150 hover:border-primary/25"
                 >
                   <div className="flex items-center gap-2">
                     <Badge
@@ -1094,6 +1153,16 @@ function CommitsSheet({
                     <span className="min-w-0 flex-1 truncate text-sm">
                       {commit.message}
                     </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 shrink-0 gap-1.5 rounded-lg px-2 text-xs text-muted-foreground opacity-100 transition-colors duration-150 hover:bg-primary/10 hover:text-primary md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                      onClick={() => setDiffCommit(commit)}
+                      aria-label={`Показать изменения коммита ${commit.short}`}
+                    >
+                      <FileDiff className="size-3.5" aria-hidden="true" />
+                      Diff
+                    </Button>
                   </div>
                   <p className="mt-1.5 text-[11px] text-muted-foreground">
                     {commit.author} · {relativeTime(commit.date)}
@@ -1104,6 +1173,16 @@ function CommitsSheet({
           )}
         </div>
       </SheetContent>
+
+      {/* Diff of the selected checkpoint */}
+      <DiffDialog
+        open={diffCommit !== null}
+        onOpenChange={(open) => {
+          if (!open) setDiffCommit(null);
+        }}
+        projectId={projectId}
+        commit={diffCommit}
+      />
     </Sheet>
   );
 }

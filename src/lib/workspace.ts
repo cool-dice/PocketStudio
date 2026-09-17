@@ -11,6 +11,7 @@
 
 import { execFile } from "node:child_process";
 import { promises as fsp } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // ─────────────────────────── roots ───────────────────────────
@@ -390,6 +391,208 @@ export async function hasUncommittedChanges(root: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ─────────────────────────── git: commit diff (Stage 4) ───────────────────────────
+
+export type DiffFileStatus = "added" | "modified" | "deleted";
+
+export interface CommitDiffFile {
+  path: string;
+  status: DiffFileStatus;
+  /** Content before the commit ("" for added files). */
+  original: string;
+  /** Content after the commit ("" for deleted files). */
+  modified: string;
+  /** Content was larger than the cap → truncated (UI shows a notice). */
+  truncated: boolean;
+  /** File is binary or too large to show → contents omitted. */
+  skipped: boolean;
+}
+
+export interface CommitDiff {
+  commit: CommitInfo;
+  files: CommitDiffFile[];
+  /** Number of changed entries not shown (over the 20-file cap). */
+  skippedCount: number;
+}
+
+const MAX_DIFF_FILES = 20;
+const MAX_DIFF_FILE_BYTES = 200 * 1024;
+
+/** Read `git show <rev>:<path>`; returns null when the path doesn't exist in rev. */
+async function showBlob(
+  root: string,
+  rev: string,
+  relPath: string,
+): Promise<string | null> {
+  try {
+    const out = await git(root, ["show", `${rev}:${relPath}`]);
+    return out.stdout;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Diff of one commit vs its parent (initial commit → vs empty tree).
+ * Uses --name-status to list changes, then loads old/new blobs for the
+ * first MAX_DIFF_FILES text files. Binary/huge blobs are marked skipped.
+ */
+export async function commitDiff(
+  root: string,
+  hash: string,
+): Promise<CommitDiff> {
+  if (!/^[0-9a-f]{6,40}$/i.test(hash)) {
+    throw new WorkspaceError("Некорректный хеш коммита", 400);
+  }
+
+  const commit = await lastCommitAt(root, hash);
+  if (!commit) throw new WorkspaceError("Коммит не найден", 404);
+
+  // Files changed by this commit (works for the root commit too, vs empty tree).
+  const nameStatus = await git(root, [
+    "diff-tree",
+    "--no-commit-id",
+    "--name-status",
+    "-r",
+    "--root",
+    "-z",
+    hash,
+  ]);
+  const raw = nameStatus.stdout;
+  const pairs: { status: string; path: string }[] = [];
+  // -z output: STATUS\0PATH\0STATUS\0PATH… (rename/copy have extra path — treated as add).
+  const parts = raw.split("\0").filter((p) => p.length > 0);
+  for (let i = 0; i < parts.length; i += 2) {
+    const status = parts[i];
+    const path = parts[i + 1];
+    if (!status || !path) continue;
+    if (status.startsWith("R") || status.startsWith("C")) {
+      // rename/copy: status letter, old path, new path — consume the extra part.
+      pairs.push({ status: "A", path: parts[i + 2] ?? path });
+      i += 1;
+    } else {
+      pairs.push({ status, path });
+    }
+  }
+
+  const parent = `${hash}^`;
+  const files: CommitDiffFile[] = [];
+  let skippedCount = Math.max(0, pairs.length - MAX_DIFF_FILES);
+
+  for (const { status, path } of pairs.slice(0, MAX_DIFF_FILES)) {
+    const normalized = path.replace(/^\/+/, "");
+    const statusLetter = status[0]?.toUpperCase() ?? "M";
+    const fileStatus: DiffFileStatus =
+      statusLetter === "A" ? "added" : statusLetter === "D" ? "deleted" : "modified";
+
+    let original: string | null = null;
+    let modified: string | null = null;
+    try {
+      original = await showBlob(root, parent, normalized);
+      modified = await showBlob(root, hash, normalized);
+    } catch {
+      original = null;
+      modified = null;
+    }
+
+    if (original === null && modified === null) {
+      files.push({ path: normalized, status: fileStatus, original: "", modified: "", truncated: false, skipped: true });
+      continue;
+    }
+
+    let truncated = false;
+    const clip = (s: string | null): string => {
+      if (s === null) return "";
+      if (Buffer.byteLength(s, "utf8") > MAX_DIFF_FILE_BYTES) {
+        truncated = true;
+        return s.slice(0, MAX_DIFF_FILE_BYTES);
+      }
+      return s;
+    };
+    files.push({
+      path: normalized,
+      status: fileStatus,
+      original: clip(original),
+      modified: clip(modified),
+      truncated,
+      skipped: false,
+    });
+  }
+
+  return { commit, files, skippedCount };
+}
+
+/** CommitInfo for a specific hash (null when unknown). */
+async function lastCommitAt(root: string, hash: string): Promise<CommitInfo | null> {
+  try {
+    const out = await git(root, [
+      "show",
+      "-s",
+      "--pretty=%H\u0001%s\u0001%an\u0001%aI",
+      hash,
+    ]);
+    return parseCommitLine(out.stdout.trim());
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────── zip export (Stage 4) ───────────────────────────
+
+const PY_ZIP = `
+import os, sys, zipfile
+
+src, dest = sys.argv[1], sys.argv[2]
+skip = {".git", "node_modules"}
+count = 0
+
+with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+    for dirpath, dirnames, filenames in os.walk(src):
+        dirnames[:] = [d for d in dirnames if d not in skip]
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, src)
+            z.write(full, rel)
+            count += 1
+
+print(count)
+`;
+
+/**
+ * Zip the project working tree (excluding .git / node_modules) into a temp
+ * file → returns its absolute path. Caller removes the file after streaming.
+ */
+export async function exportProjectZip(root: string): Promise<string> {
+  const zipPath = path.join(
+    os.tmpdir(),
+    `vibeflow-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.zip`,
+  );
+
+  let printedCount = "0";
+  await new Promise<void>((resolve, reject) => {
+    execFile(
+      "python3",
+      ["-c", PY_ZIP, root, zipPath],
+      { timeout: 120_000, maxBuffer: 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(new WorkspaceError("Не удалось упаковать проект", 500));
+          return;
+        }
+        printedCount = stdout.toString().trim() || "0";
+        void stderr;
+        resolve();
+      },
+    );
+  });
+
+  if (Number(printedCount) === 0) {
+    await fsp.rm(zipPath, { force: true });
+    throw new WorkspaceError("Проект пуст — нечего скачивать", 422);
+  }
+  return zipPath;
 }
 
 // ─────────────────────────── project creation ───────────────────────────

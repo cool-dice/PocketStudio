@@ -6,16 +6,33 @@
  * When the active thread is bound to a project, a small «Проект: …» chip
  * sits above the input (click → project screen).
  *
+ * Slash commands (Stage 4): typing "/" opens a command menu above the input —
+ * mode switches, quick note prefix, create project, notebook, global search,
+ * checkpoint and zip export (last two need a bound project).
+ *
  * Voice (Stage 2): compact mic next to the send button — records via
  * useVoiceRecorder, the backend transcribes (POST /api/notes/voice) and
  * the text is appended to the message input for review before sending.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, FolderGit2, Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 
-import { MAX_MESSAGE_LENGTH } from "@/lib/types";
+import {
+  SlashCommandsMenu,
+  filterSlashCommands,
+  isSlashTokenActive,
+  slashToken,
+  SLASH_MODE_ICONS,
+  SLASH_MISC_ICONS,
+  type SlashCommand,
+} from "@/components/app/slash-commands";
+import {
+  MAX_MESSAGE_LENGTH,
+  MODE_LABELS,
+  type ThreadMode,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   formatRecordingTime,
@@ -30,9 +47,13 @@ import { useAppUi } from "@/lib/store";
 const MAX_HEIGHT = 200;
 
 export function Composer() {
-  const { busy, sendMessage, activeThread } = useThreads();
+  const { busy, sendMessage, activeThread, updateThreadMode } = useThreads();
   const { getById } = useProjects();
   const openProject = useAppUi((s) => s.openProject);
+  const setMainArea = useAppUi((s) => s.setMainArea);
+  const setSearchOpen = useAppUi((s) => s.setSearchOpen);
+  const openCreateProject = useAppUi((s) => s.openCreateProject);
+  const bumpProjectFiles = useAppUi((s) => s.bumpProjectFiles);
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -40,6 +61,158 @@ export function Composer() {
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
+
+  /* ── Slash commands (Stage 4) ── */
+
+  const slashOpen = isSlashTokenActive(value);
+  const token = slashOpen ? slashToken(value) : "";
+
+  const commands = useMemo<SlashCommand[]>(() => {
+    const list: SlashCommand[] = [
+      {
+        name: "заметка",
+        label: "Заметка",
+        description: "Быстро записать мысль в блокнот",
+        icon: SLASH_MISC_ICONS.note,
+        run: () => {
+          setValue("Сохрани заметку: ");
+          requestAnimationFrame(() => taRef.current?.focus());
+        },
+      },
+      {
+        name: "проект",
+        label: "Новый проект",
+        description: "Создать проект: шаблон, GitHub или zip",
+        icon: SLASH_MISC_ICONS.project,
+        run: () => openCreateProject(),
+      },
+      {
+        name: "блокнот",
+        label: "Блокнот",
+        description: "Открыть все заметки",
+        icon: SLASH_MISC_ICONS.notebook,
+        run: () => setMainArea("notebook"),
+      },
+      {
+        name: "поиск",
+        label: "Поиск",
+        description: "Искать по диалогам, заметкам и проектам",
+        icon: SLASH_MISC_ICONS.search,
+        run: () => setSearchOpen(true),
+      },
+    ];
+
+    if (activeThread) {
+      const SLASH_MODE_NAMES: Record<ThreadMode, string> = {
+        ask: "спросить",
+        plan: "план",
+        act: "действовать",
+        review: "ревью",
+      };
+      for (const mode of ["ask", "plan", "act", "review"] as const) {
+        const Icon = SLASH_MODE_ICONS[mode];
+        list.push({
+          name: SLASH_MODE_NAMES[mode],
+          label: `Режим «${MODE_LABELS[mode]}»`,
+          description: `Переключить диалог в режим «${MODE_LABELS[mode]}»`,
+          icon: Icon,
+          run: async () => {
+            try {
+              await updateThreadMode(activeThread.id, mode);
+              toast.success(`Режим: ${MODE_LABELS[mode]}`);
+            } catch {
+              toast.error("Не удалось сменить режим");
+            }
+          },
+        });
+      }
+    }
+
+    if (boundProject) {
+      list.push(
+        {
+          name: "чекпоинт",
+          label: "Чекпоинт",
+          description: `Сохранить изменения проекта «${boundProject.name}»`,
+          icon: SLASH_MISC_ICONS.checkpoint,
+          run: async () => {
+            try {
+              const checkpoint = await api.createProjectCheckpoint(
+                boundProject.id,
+                `Чекпоинт из диалога · ${new Date().toLocaleString("ru-RU")}`,
+              );
+              if (checkpoint.noop) {
+                toast.info("Изменений нет — чекпоинт не нужен");
+              } else {
+                toast.success("Чекпоинт создан", {
+                  description: `${checkpoint.commit?.short ?? ""} · ${checkpoint.filesChanged} файл(ов)`,
+                });
+                bumpProjectFiles();
+              }
+            } catch (err) {
+              toast.error(
+                err instanceof ApiError ? err.message : "Не удалось создать чекпоинт",
+              );
+            }
+          },
+        },
+        {
+          name: "скачать",
+          label: "Скачать zip",
+          description: `Скачать «${boundProject.name}» архивом`,
+          icon: SLASH_MISC_ICONS.download,
+          run: async () => {
+            try {
+              const res = await fetch(api.projectExportUrl(boundProject.id), {
+                credentials: "same-origin",
+              });
+              if (!res.ok) {
+                const body = (await res.json().catch(() => ({}))) as { error?: string };
+                throw new Error(body.error ?? "Не удалось упаковать проект");
+              }
+              const blob = await res.blob();
+              const objectUrl = URL.createObjectURL(blob);
+              const anchor = document.createElement("a");
+              anchor.href = objectUrl;
+              anchor.download = `vibeflow-${boundProject.name}.zip`;
+              document.body.append(anchor);
+              anchor.click();
+              anchor.remove();
+              URL.revokeObjectURL(objectUrl);
+              toast.success("Архив проекта готов");
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Не удалось упаковать проект");
+            }
+          },
+        },
+      );
+    }
+
+    return list;
+  }, [
+    activeThread,
+    boundProject,
+    bumpProjectFiles,
+    openCreateProject,
+    setMainArea,
+    setSearchOpen,
+    updateThreadMode,
+  ]);
+
+  const filteredCommands = useMemo(
+    () => (slashOpen ? filterSlashCommands(commands, token) : []),
+    [slashOpen, commands, token],
+  );
+
+  const [slashIndex, setSlashIndex] = useState(0);
+  useEffect(() => {
+    setSlashIndex(0);
+  }, [token]);
+
+  const executeCommand = (cmd: SlashCommand) => {
+    setValue("");
+    void cmd.run();
+  };
 
   const finalizeRecording = async (clipArg?: VoiceClip) => {
     if (finalizingRef.current) return;
@@ -108,6 +281,33 @@ export function Composer() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash menu keyboard navigation takes priority while open.
+    if (slashOpen && filteredCommands.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIndex((i) => (i + 1) % filteredCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex(
+          (i) => (i - 1 + filteredCommands.length) % filteredCommands.length,
+        );
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const cmd = filteredCommands[slashIndex];
+        if (cmd) setValue(`/${cmd.name} `);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const cmd = filteredCommands[slashIndex];
+        if (cmd) executeCommand(cmd);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void submit();
@@ -117,12 +317,20 @@ export function Composer() {
   return (
     <div className="border-t bg-background">
       <form
-        className="mx-auto w-full max-w-3xl px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        className="relative mx-auto w-full max-w-3xl px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
+        <SlashCommandsMenu
+          open={slashOpen && filteredCommands.length > 0 && !busy && !isRecording}
+          commands={filteredCommands}
+          selectedIndex={slashIndex}
+          onSelectIndex={setSlashIndex}
+          onExecute={executeCommand}
+        />
+
         {boundProject && (
           <button
             type="button"
@@ -150,7 +358,7 @@ export function Composer() {
                 ? "Слушаем вас…"
                 : busy
                   ? "VibeFlow печатает…"
-                  : "Напишите сообщение…"
+                  : "Напишите сообщение… или / для команд"
             }
             disabled={busy || isRecording}
             maxLength={MAX_MESSAGE_LENGTH}
@@ -240,7 +448,7 @@ export function Composer() {
               ? "Распознаём голос…"
               : busy
                 ? "Агент отвечает — подождите немного"
-                : "Enter — отправить · Shift+Enter — новая строка"}
+                : "Enter — отправить · Shift+Enter — новая строка · / — команды"}
         </p>
       </form>
     </div>

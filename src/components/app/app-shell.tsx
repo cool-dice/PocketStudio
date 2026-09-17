@@ -15,6 +15,7 @@ import { CaptureDialog } from "@/components/app/capture-dialog";
 import { ChatArea } from "@/components/app/chat-area";
 import { ContextPanel } from "@/components/app/context-panel";
 import { CreateProjectDialog } from "@/components/app/create-project-dialog";
+import { GlobalSearch } from "@/components/app/global-search";
 import { MobileNoteDialog } from "@/components/app/mobile-note-dialog";
 import { NotebookScreen } from "@/components/app/notebook-screen";
 import { ProjectScreen } from "@/components/app/project-screen";
@@ -33,11 +34,16 @@ export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Global ⌘K / Ctrl+K → quick capture (works in inputs; dialogs allowed).
+  // Global ⌘P / Ctrl+P → global search across threads / notes / projects.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         useAppUi.getState().setCaptureOpen(true);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        useAppUi.getState().setSearchOpen(true);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -95,6 +101,7 @@ export function AppShell() {
       <CaptureDialog />
       <CreateProjectDialog />
       <MobileNoteDialog />
+      <GlobalSearch />
     </div>
   );
 }

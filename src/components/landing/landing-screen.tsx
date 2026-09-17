@@ -9,6 +9,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
+  ArrowUp,
   Check,
   MessageSquareText,
   Moon,
@@ -271,6 +272,11 @@ function HeroMockChat() {
       className="relative mx-auto w-full max-w-md"
       aria-hidden="true"
     >
+      {/* soft emerald glow behind the card */}
+      <div
+        className="absolute -inset-6 -z-10 rounded-[2rem] bg-primary/5 blur-2xl"
+        aria-hidden="true"
+      />
       <div className="rounded-2xl border bg-card p-4 shadow-lg sm:p-5">
         <div className="mb-4 flex items-center gap-2 border-b pb-3">
           <LogoMark className="size-6 rounded-md" />
@@ -300,17 +306,39 @@ function HeroMockChat() {
             <span className="vf-dot" />
             <span className="vf-dot" />
           </div>
+          {/* mock composer mirrors the real product (with / hint) */}
+          <div className="flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-xs text-muted-foreground">
+            <span className="flex-1 truncate">
+              Напишите сообщение… или / для команд
+            </span>
+            <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <ArrowUp className="size-3" />
+            </span>
+          </div>
         </div>
       </div>
 
-      <div className="absolute -top-3 -right-2 flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-md sm:-right-4">
+      <motion.div
+        className="absolute -top-3 -right-2 flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-md sm:-right-4"
+        animate={{ y: [0, -4, 0] }}
+        transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+      >
         <Check className="size-3.5 text-primary" aria-hidden="true" />
         Заметка создана
-      </div>
-      <div className="absolute -bottom-3 -left-2 flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-md sm:-left-4">
+      </motion.div>
+      <motion.div
+        className="absolute -bottom-3 -left-2 flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-md sm:-left-4"
+        animate={{ y: [0, 4, 0] }}
+        transition={{
+          duration: 3.5,
+          repeat: Infinity,
+          ease: "easeInOut",
+          delay: 0.8,
+        }}
+      >
         <Rocket className="size-3.5 text-primary" aria-hidden="true" />
         План MVP готов
-      </div>
+      </motion.div>
     </motion.div>
   );
 }

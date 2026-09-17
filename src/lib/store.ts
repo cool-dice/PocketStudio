@@ -84,6 +84,10 @@ interface AppUiState {
   setCreateProjectOpen: (open: boolean) => void;
   /** Note the dialog is bound to (null → regular create). */
   createProjectNoteId: string | null;
+
+  /** Global search dialog (Ctrl+P / ⌘P, Stage 4). */
+  searchOpen: boolean;
+  setSearchOpen: (open: boolean) => void;
 }
 
 export const useAppUi = create<AppUiState>((set, get) => ({
@@ -161,4 +165,7 @@ export const useAppUi = create<AppUiState>((set, get) => ({
       set({ createProjectOpen: false, createProjectNoteId: null });
     }
   },
+
+  searchOpen: false,
+  setSearchOpen: (searchOpen) => set({ searchOpen }),
 }));
