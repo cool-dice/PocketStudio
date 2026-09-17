@@ -68,3 +68,20 @@ Work Log:
 
 Stage Summary:
 - UI/UX textual spec delivered to user for review/alignment. Awaiting approval (or edits) before Stage 0 start.
+
+---
+Task ID: 0-e
+Agent: main
+Task: Revise concept per user: chat becomes THE main component of the whole app (chat-first shell), agent understands global intents (create project/note, link entities). Plan v4 for approval. No coding yet.
+
+Work Log:
+- User pivot: chat-first architecture — like Cursor, chat is the main control window of the entire app, not just project workspace. Agent must route global intents: create new project, create note, link note to existing projects/notes.
+- Redesigned shell: center = main chat (home screen after login); left sidebar = threads + collections (Блокнот, Проекты) + notifications/profile; right = adaptive context panel (note detail / files+Monaco / plan / diffs) driven by both agent and user.
+- Agent gets platform-wide tool layer: notebook tools (create/search/open/link notes, categories), project tools (create from template/note/idea, import github/zip, open, files, git, checkpoints), meta tools (global search, help).
+- Quick capture preserved as zero-latency path: ⌘K palette / FAB + voice — note lands in notebook without agent roundtrip; agent references it in chat.
+- Collections (notes feed, projects grid) remain as browse/manage screens; clicking an entity returns to chat with it in context.
+- Mobile becomes naturally chat-first (right panel → sheet).
+- Stages reordered: WS chat service + chat-first shell moved INTO Stage 0 foundation (home screen is chat); Stage 1 = agent core with tool-calling; Stage 2 = notebook; Stage 3 = projects/Act; Stage 4 = orchestration; Stage 5 = polish/export/admin.
+
+Stage Summary:
+- Plan v4 (chat-first cockpit) presented to user for approval. Chat = main control surface with global intent routing; notebook/projects are collections + context panel; quick capture kept latency-free via ⌘K.
