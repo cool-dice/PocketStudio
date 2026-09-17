@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 
 import { CaptureDialog } from "@/components/app/capture-dialog";
+import { AdminScreen } from "@/components/app/admin-screen";
 import { ChatArea } from "@/components/app/chat-area";
 import { ContextPanel } from "@/components/app/context-panel";
 import { CreateProjectDialog } from "@/components/app/create-project-dialog";
@@ -75,7 +76,7 @@ export function AppShell() {
         </SheetContent>
       </Sheet>
 
-      {/* ── Center: chat / notebook / projects / project detail ── */}
+      {/* ── Center: chat / notebook / projects / project detail / admin ── */}
       {mainArea === "chat" ? (
         <ChatArea
           contextOpen={contextOpen}
@@ -90,6 +91,8 @@ export function AppShell() {
           projectId={activeProjectId}
           onOpenMobileNav={() => setMobileNavOpen(true)}
         />
+      ) : mainArea === "admin" ? (
+        <AdminScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : (
         <ProjectsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       )}

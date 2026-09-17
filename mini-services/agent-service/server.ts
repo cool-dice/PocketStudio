@@ -41,6 +41,7 @@ import {
 } from "./agent";
 import { buildAgentSystemPrompt, deriveThreadTitle } from "./prompts";
 import { getTool, type ToolContext } from "./tools";
+import { createNotification } from "./notifications";
 import { startAnalyzer, stopAnalyzer } from "./analyzer";
 import {
   projectRoot,
@@ -273,6 +274,31 @@ async function streamFinalResponse(
   });
 }
 
+/** Checkpoint → bell notification with the project name (best-effort). */
+async function notifyCheckpoint(
+  userId: string,
+  projectId: string,
+  commitMessage: string,
+): Promise<void> {
+  try {
+    const project = await db.project.findFirst({
+      where: { id: projectId, userId },
+      select: { name: true },
+    });
+    if (!project) return;
+    await createNotification(
+      io,
+      userId,
+      "checkpoint",
+      `Чекпоинт в проекте «${project.name}»`,
+      commitMessage,
+      projectId,
+    );
+  } catch {
+    // best-effort — never breaks the turn
+  }
+}
+
 /**
  * Agent turn (tool-calling loop):
  *  1. persist user message → emit "message:user" → bump thread.updatedAt
@@ -410,6 +436,14 @@ async function runAgentTurn(
             io.to(userRoom).emit("project:created", {
               project: { id: p.id, name: p.name, origin: p.origin },
             });
+            await createNotification(
+              io,
+              user.sub,
+              "project_created",
+              `Агент создал проект «${p.name}»`,
+              "Проект создан из шаблона и привязан к диалогу",
+              p.id,
+            );
           }
         } else if (
           (call.tool === "write_file" || call.tool === "delete_file") &&
@@ -429,6 +463,10 @@ async function runAgentTurn(
             projectId: thread.projectId,
             reason: "checkpoint",
           });
+          const cp = resultObject(r.commit);
+          const commitMsg =
+            cp && typeof cp.message === "string" ? cp.message : "контрольная точка";
+          await notifyCheckpoint(user.sub, thread.projectId, commitMsg);
         }
       }
       // Loop continues — the next iteration sees [TOOL_CALL]/[TOOL_RESULT].
@@ -447,6 +485,7 @@ async function runAgentTurn(
             projectId: thread.projectId,
             reason: "checkpoint",
           });
+          await notifyCheckpoint(user.sub, thread.projectId, cp.commit?.message ?? AUTO_CHECKPOINT_MESSAGE);
         }
       } catch (err) {
         console.warn(

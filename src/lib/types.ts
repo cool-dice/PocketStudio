@@ -249,6 +249,69 @@ export interface CommitDiff {
   skippedCount: number;
 }
 
+/* ── Notifications (Stage 4b) ── */
+
+export type NotificationType =
+  | "analysis_ready"
+  | "project_created"
+  | "checkpoint"
+  | "system";
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  entityId: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface WsNotificationNewPayload {
+  notification: Notification;
+}
+
+/* ── Admin panel (Stage 4b) ── */
+
+export interface AdminStats {
+  users: number;
+  admins: number;
+  newUsers7d: number;
+  notes: number;
+  notesProcessed: number;
+  notesError: number;
+  categories: number;
+  projects: number;
+  threads: number;
+  messages: number;
+  notifications: number;
+  activity: {
+    date: string; // YYYY-MM-DD
+    notes: number;
+    threads: number;
+    projects: number;
+  }[];
+}
+
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  createdAt: string;
+  lastActivity: string | null;
+  counts: { notes: number; threads: number; projects: number };
+}
+
+export interface AuditLogEntry {
+  id: string;
+  action: string;
+  entity: string | null;
+  entityId: string | null;
+  createdAt: string;
+  user: { name: string; email: string } | null;
+}
+
 /* ── Global search (Stage 4) ── */
 
 export interface SearchThreadHit {

@@ -228,3 +228,21 @@
 .vf-status-pulse {
   animation: vf-pulse-ring 1.8s infinite ease-out;
 }
+
+/* ── Bell unread badge — pops in on every count change ── */
+@keyframes vf-badge-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.vf-badge-pop {
+  animation: vf-badge-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}

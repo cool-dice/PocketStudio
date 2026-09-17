@@ -9,7 +9,6 @@
 
 import { useState } from "react";
 import {
-  Bell,
   Check,
   FolderKanban,
   LogOut,
@@ -27,8 +26,8 @@ import {
 import { useTheme } from "next-themes";
 
 import { Logo } from "@/components/logo";
+import { NotificationsBell } from "@/components/app/notifications-bell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -56,6 +55,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
+import { useNotes } from "@/hooks/use-notes";
 import { useProjects } from "@/hooks/use-projects";
 import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
@@ -75,6 +75,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const { user, logout } = useAuth();
   const { connected } = useSocket();
   const { projects } = useProjects();
+  const { total: notesTotal } = useNotes();
   const {
     threads,
     threadsLoading,
@@ -175,24 +176,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
         )}
       >
         <Logo />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative size-9"
-              disabled
-              aria-label="Уведомления (скоро)"
-            >
-              <Bell className="size-4" aria-hidden="true" />
-              <span
-                aria-hidden="true"
-                className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary"
-              />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Уведомления появятся скоро</TooltipContent>
-        </Tooltip>
+        <NotificationsBell side={sheetMode ? "bottom" : "right"} />
       </div>
 
       {/* ── New thread + quick capture + search ── */}
@@ -389,6 +373,11 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
                 aria-hidden="true"
               />
               <span className="flex-1 text-left">Блокнот</span>
+              {notesTotal > 0 && (
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {notesTotal}
+                </span>
+              )}
             </button>
           </li>
         </ul>
@@ -513,12 +502,14 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             <DropdownMenuSeparator />
             <ThemeToggleItem />
             {user?.role === "admin" && (
-              <DropdownMenuItem disabled>
+              <DropdownMenuItem
+                onSelect={() => {
+                  onNavigate?.();
+                  setMainArea("admin");
+                }}
+              >
                 <Shield className="size-4" aria-hidden="true" />
-                Админка
-                <Badge variant="secondary" className="ml-auto text-[10px]">
-                  скоро
-                </Badge>
+                Админ-панель
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />

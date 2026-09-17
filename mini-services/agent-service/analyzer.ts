@@ -20,6 +20,7 @@
 import type { Server } from "socket.io";
 import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
+import { createNotification } from "./notifications";
 import {
   CATEGORY_COLORS,
   CATEGORY_ICONS,
@@ -270,6 +271,14 @@ async function analyzeNote(noteId: string): Promise<void> {
         updatedAt: new Date(),
       },
     });
+    await createNotification(
+      io,
+      note.userId,
+      "analysis_ready",
+      "Анализ заметки не удался",
+      (note.rawText ?? "").trim() || "Посмотрите заметку в блокноте",
+      noteId,
+    );
     await emitNote(noteId);
     return;
   }
@@ -314,6 +323,14 @@ async function analyzeNote(noteId: string): Promise<void> {
     },
   });
   console.log(`[analyzer] note ${noteId.slice(-6)} → processed (cat: ${categoryId ? analysis.categoryName : "kept"})`);
+  await createNotification(
+    io,
+    note.userId,
+    "analysis_ready",
+    "Анализ заметки готов",
+    (note.rawText ?? "").trim() || undefined,
+    noteId,
+  );
   await emitNote(noteId);
 }
 

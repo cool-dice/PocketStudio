@@ -34,11 +34,13 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { textPreview } from "@/lib/format";
+import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
 import type {
   Note,
   WsNoteAnalyzedPayload,
   WsNoteAnalyzingPayload,
+  WsNotificationNewPayload,
   WsProjectCreatedPayload,
   WsProjectUpdatedPayload,
 } from "@/lib/types";
@@ -130,6 +132,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       ) {
         void ui.refreshNote();
       }
+      // Bell resync — missed "notification:new" pushes land here too.
+      void useNotifications.getState().refresh();
     };
 
     const handleDisconnect = () => {
@@ -238,6 +242,17 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       notifyAnalyzed(note);
     };
 
+    /* ── Notifications (Stage 4b) ── */
+
+    // Live bell push. NO toast here — the underlying events
+    // (note:analyzed / project:created / project:updated) already toast
+    // from their own handlers; this only updates the persistent history.
+    const handleNotificationNew = (payload: unknown) => {
+      const { notification } = (payload ?? {}) as WsNotificationNewPayload;
+      if (!notification || typeof notification.id !== "string") return;
+      useNotifications.getState().prepend(notification);
+    };
+
     /* ── Project events (Stage 3) ── */
 
     const handleProjectCreated = (payload: unknown) => {
@@ -275,6 +290,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     s.on("error", handleServerError);
     s.on("note:analyzing", handleNoteAnalyzing);
     s.on("note:analyzed", handleNoteAnalyzed);
+    s.on("notification:new", handleNotificationNew);
     s.on("project:created", handleProjectCreated);
     s.on("project:updated", handleProjectUpdated);
 

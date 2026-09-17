@@ -16,7 +16,7 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import type { Note } from "@/lib/types";
 
-export type MainArea = "chat" | "notebook" | "projects" | "project";
+export type MainArea = "chat" | "notebook" | "projects" | "project" | "admin";
 
 interface AppUiState {
   /** Which screen occupies the center zone. */

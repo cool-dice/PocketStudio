@@ -4,6 +4,9 @@
  */
 
 import type {
+  AdminStats,
+  AdminUserListItem,
+  AuditLogEntry,
   Category,
   CheckpointResult,
   CommitDiff,
@@ -12,9 +15,11 @@ import type {
   Message,
   Note,
   NoteProjectLink,
+  Notification,
   Project,
   ProjectListItem,
   ProjectOrigin,
+  Role,
   SearchResults,
   Thread,
   ThreadListItem,
@@ -397,5 +402,80 @@ export const api = {
       `/api/notes/${encodeURIComponent(noteId)}/links?${qs.toString()}`,
       { method: "DELETE" },
     );
+  },
+
+  /* ── Notifications (Stage 4b) ── */
+
+  listNotifications(): Promise<{ notifications: Notification[]; unread: number }> {
+    return request<{ notifications: Notification[]; unread: number }>(
+      "/api/notifications",
+    );
+  },
+
+  markNotificationRead(id: string, read = true): Promise<Notification> {
+    return request<{ notification: Notification }>(
+      `/api/notifications/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ read }),
+      },
+    ).then((r) => r.notification);
+  },
+
+  markAllNotificationsRead(): Promise<void> {
+    return request<{ ok: boolean }>("/api/notifications/read-all", {
+      method: "POST",
+    });
+  },
+
+  clearNotifications(): Promise<void> {
+    return request<{ ok: boolean }>("/api/notifications", {
+      method: "DELETE",
+    });
+  },
+
+  /* ── Admin panel (Stage 4b) ── */
+
+  adminStats(): Promise<AdminStats> {
+    return request<{ stats: AdminStats }>("/api/admin/stats").then(
+      (r) => r.stats,
+    );
+  },
+
+  adminUsers(params?: {
+    q?: string;
+    role?: "admin" | "client";
+  }): Promise<AdminUserListItem[]> {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set("q", params.q);
+    if (params?.role) qs.set("role", params.role);
+    const query = qs.toString();
+    return request<{ users: AdminUserListItem[]}>(
+      `/api/admin/users${query ? `?${query}` : ""}`,
+    ).then((r) => r.users);
+  },
+
+  /** Role change — returns the plain user; the caller patches its local list. */
+  adminUpdateUserRole(id: string, role: Role): Promise<{ id: string; role: Role }> {
+    return request<{ id: string; role: Role }>(
+      `/api/admin/users/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      },
+    );
+  },
+
+  adminDeleteUser(id: string): Promise<void> {
+    return request<{ ok: boolean }>(
+      `/api/admin/users/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  adminAudit(limit = 50): Promise<AuditLogEntry[]> {
+    return request<{ entries: AuditLogEntry[] }>(
+      `/api/admin/audit?limit=${limit}`,
+    ).then((r) => r.entries);
   },
 };

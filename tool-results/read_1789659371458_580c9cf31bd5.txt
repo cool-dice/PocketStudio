@@ -1,0 +1,307 @@
+   280→- /api/notes/[id]: GET {note}; PATCH {favorite?, categoryId? string|null (null clears), rawText 1..5000} → {note} (update include category); DELETE → {ok:true}. All ownership-scoped → 404 "Заметка не найдена".
+   281→- GET /api/categories → {categories:[{id,name,color,icon,noteCount}]} (_count, name asc). PATCH /api/categories/[id] {name? 1..40, color?/icon? z.enum allowlists} → {category:{id,name,color,icon,createdAt,noteCount}} (superset of list item — frontend can update state without refetch); duplicate name (P2002) → 409 "Категория с таким названием уже существует"; DELETE → {ok:true} (notes → null categoryId via SetNull, verified live). 404 "Категория не найдена".
+   282→- No POST /api/categories by contract — categories are born via 1-b agent tool create_note (tests created them via direct Prisma inserts).
+   283→- curl verification via localhost:3000, 2 test users (test-notes@vf.io + test-notes-2@vf.io for ownership tests): ALL PASS — 401s without cookie; POST 201 pending/null-category + nested category variant; 400s (empty/5001-char text, broken JSON, invalid color/icon/name>40, page=0/abc, limit=51) with Russian messages; q=кофе↔КОФЕ and q=ИДЕЯ↔Идея Cyrillic case-insensitive both directions; favorite/q/categoryId filters + combined; pagination hasMore true/false; cross-user GET/PATCH/DELETE → 404 + per-user list isolation; category rename/409/foreign-404; category delete → attached notes category:null (SetNull) with favorite preserved; note delete → 404 after.
+   284→- dev.log: zero compile/type/runtime errors across all requests. bun run lint: 0 problems.
+   285→- Cleanup: deleted ONLY the two test users via Prisma deleteMany (cascaded → notes/categories counts 0). Real admin game.puzzles.a1@gmail.com untouched. NOTE for main: leftover user qa-round1@vf.io (client) from Task 4 QA exists — not mine, may want cleanup.
+   286→
+   287→Stage Summary:
+   288→- Files: src/lib/note-utils.ts, src/app/api/notes/route.ts, src/app/api/notes/[id]/route.ts, src/app/api/categories/route.ts, src/app/api/categories/[id]/route.ts — exact contract shapes, Russian errors, ownership everywhere, lint clean, curl-verified end to end. Nothing else touched (no hooks/components/mini-services/schema changes).
+   289→- For 1-c: import COLORS/ICONS from @/lib/note-utils; favorite filter is literal favorite=1; PATCH category returns createdAt+noteCount superset. For 1-b: reuse @/lib/note-utils allowlists for category validation (colors/icons identical).
+   290→
+   291→---
+   292→Task ID: 1-b
+   293→Agent: full-stack-developer (crashed mid-task; verified & logged by main)
+   294→Task: Agent tool-calling in agent-service (tools.ts, loop in server.ts, prompts, agent.ts rework)
+   295→
+   296→Work Log:
+   297→- Subagent wrote all files (tools.ts 12KB, server.ts reworked with tool loop, agent.ts, prompts.ts) but crashed on network timeout BEFORE verification/worklog.
+   298→- Main verified independently: service restarted (bun --hot, pid alive), full E2E script run:
+   299→  - register → ws-token → thread → WS "message:send" ("Запиши... корм коту") 
+   300→  - [tool:start] create_note {text, category_name:"Домашние дела", category_color:"amber", icon shopping-cart-ish} (LLM-chosen dynamic category!)
+   301→  - [tool:end] note created in DB, category auto-created
+   302→  - [message:end] streamed text confirmation "Заметка сохранена в категории «Домашние дела»…"
+   303→  - REST /api/notes confirms note + category — ALL PASS
+   304→- Lint agent-service: 0 problems. Test users cleaned (verify-1b-*, qa-round1).
+   305→
+   306→Stage Summary:
+   307→- Tool-calling LIVE: JSON protocol parser, 6-iteration loop, tool events (tool:start/tool:end) to thread rooms, notebook tools (create_note/search_notes/list_notes/open_note) with dynamic categories. 1-a + 1-b done → frontend 1-c next.
+   308→
+   309→---
+   310→Task ID: 1-c
+   311→Agent: full-stack-developer
+   312→Task: Frontend Stage 1 — tool cards in chat, NotebookScreen, note detail in context panel, ⌘K quick capture.
+   313→
+   314→Work Log:
+   315→- Read worklog (Tasks 1, 2-a/b/c, 4, 1-a, 1-b) + all existing frontend (page.tsx, hooks, lib, app components) + notes REST routes + agent-service tools.ts/server.ts (result shapes: create_note → {note,category,createdNewCategory}; open_note → note at top level; tool events {threadId,messageId,tool,args[,result]}).
+   316→- types.ts: MessageRole +"tool", tool fields optional on Message (REST history returns only toolName — no toolArgs/toolResult despite task STATE saying otherwise; frontend handles both), ChatMessage +toolPending, Note/NoteStatus/NoteCategoryRef/Category, WsToolStart/EndPayload, MAX_NOTE_LENGTH. api.ts: listNotes (categoryId/favorite/q/page/limit → {notes,total,hasMore}), createNote, getNote, updateNote, deleteNote, listCategories.
+   317→- New lib/store.ts (zustand useAppUi): mainArea chat|notebook, contextOpen, contextNote + openNote(note,{auto})/closeNote/updateContextNote/refreshNote, noteDialogOpen (mobile), captureOpen, notesVersion/bumpNotes — deep UI wiring (WS handlers → panel/dialog/notebook) without prop drilling.
+   318→- use-threads.tsx: tool:start (active thread only; appends toolPending row, hides typing indicator), tool:end (fills toolResult JSON, clears pending; create_note/open_note with note payload → openNote(auto:true) + bumpNotes on create), error finalizes stuck cards, busy = thinking || streaming || any toolPending (composer lock during tools). noteFromToolResult normalizes both tool result shapes.
+   319→- tool-card.tsx: compact muted card (border, bg-muted/40, rounded-xl, xs text) — icon map (NotebookPen/Search/List/Eye/Wrench), running = Loader2 spin + animate-pulse, done = emerald Check (framer 150ms pop), readable summaries (note preview / «N заметок: …» / error), raw JSON behind native details «подробнее», sr-only status. message-bubble routes role 'tool'.
+   320→- notebook-screen.tsx: sticky header (📓 + total badge + capture btn), vf-scroll-x chip row (Все/⭐ Избранные/dynamic categories: colored dot + CategoryGlyph + name + count; active = filled emerald), NoteCard feed max-w-3xl (framer 150ms opacity+4px; pre-wrap line-clamp-3; category chip; amber pulse «Анализ скоро»; optimistic star; ru date «17 сент, 14:32»; trash → AlertDialog; click → panel/dialog), «Загрузить ещё», 4 skeletons, empty state (icon circle + ⌘K hint + CTA). use-notes.ts: skeleton load on mount/filter change, SILENT refresh on notesVersion (no flash), optimistic favorite/delete with rollback, loadMore pagination w/ race guards, delete closes open panel note + refreshes category counts.
+   321→- context-panel.tsx placeholder|note modes; note-detail.tsx (full text, chip, «Создана …», favorite/«Обсудить» («Помоги мне разобраться с этой заметкой: «≤120 chars»» + to chat)/delete-confirm); mobile-note-dialog.tsx same detail in Dialog <xl (agent auto-open never pops it — only explicit clicks). capture-dialog.tsx: ⌘K/Ctrl+K global (app-shell keydown), auto-grow 2→12 rows, 5000 counter, Enter save/Shift+Enter newline/Esc, toast «Мысль сохранена ✓» + action «Открыть блокнот»; inner form component = natural reset on Radix unmount (no reset effects).
+   322→- sidebar: «Блокнот» ENABLED (active state, switches mainArea; thread select/«Новый диалог» returns to chat, mobile Sheet included), pen quick-capture button next to «Новый диалог». welcome.tsx «Записать мысль» chip enabled. category-style.tsx (10 colors × {chip,dot} static classes light+dark via /10-/30, 12 icons, stable CategoryGlyph — satisfies react-hooks/static-components). format.ts, use-media-query.ts (useIsNarrow <xl), globals.css .vf-scroll-x.
+   323→- Lint fixes en route: set-state-in-effect in capture dialog (solved by remount-on-open architecture), static-components for icon maps (module-scope CategoryGlyph).
+   324→
+   325→Stage Summary:
+   326→- Files: NEW src/lib/{store.ts,category-style.tsx,format.ts}, src/hooks/{use-notes.ts,use-media-query.ts}, src/components/app/{tool-card.tsx,notebook-screen.tsx,note-detail.tsx,capture-dialog.tsx,mobile-note-dialog.tsx}; MODIFIED src/lib/{types.ts,api.ts}, src/hooks/use-threads.tsx, src/components/app/{app-shell,sidebar,context-panel,message-bubble,welcome}.tsx, src/app/globals.css. NOT touched: api/**, auth*, mini-services/**, prisma/**.
+   327→- Verification (gateway :81, ui-1c@vf.io, agent-browser 1440×900 + 375×812, dark+light, VLM screenshot audits): 1) register → shell PASS; 2) Ctrl+K → «Тестовая мысль из палитры» → toast+note PASS; 3) Блокнот → note + «Анализ скоро» + chips PASS; 4) «Запиши… трекинга привычек» → tool card spinner→done + reply + panel AUTO-OPEN + dynamic category «Идеи приложений» PASS; 5) notebook refresh w/ category chip PASS; 6) favorite/star filter + delete confirm + empty state PASS; 7) «Обсудить в чате» desktop + mobile PASS; 8) mobile 375: chips scroll (395>375px), capture fits (341px w/ margins), note dialog usable PASS; 9) dark mode notebook/panel/chat/tool cards PASS; 10) console 0 errors, page errors 0, dev.log clean (only prisma query noise), `bun run lint` 0 problems PASS. Reload persistence: REST tool rows render as done cards (no args/result — graceful). «подробнее» JSON toggle verified on live list_notes card. Delete-from-feed closes the panel note + refreshes category counts.
+   328→- Issues for main (not 1-c scope): (a) agent-service 1-b quirk — LLM sometimes answers with the HISTORY FORMAT text ("\n[TOOL_CALL search_notes] {json}") instead of clean JSON → streamed as a plain reply and shown in sidebar preview; suggest history pairs mirror the JSON protocol exactly or add a parser fallback for "[TOOL_CALL name] {json}". (b) GET /api/threads/[id] omits toolArgs/toolResult (task description said they're included) — 1-c treats them optional; add 2 fields to the select if richer reloads wanted.
+   329→- Cleanup: all test notes/threads deleted via UI (counts 0/0), user ui-1c@vf.io removed via Prisma cascade. Real admin game.puzzles.a1@gmail.com untouched. Orphan AuditLog rows predate this task.
+   330→
+   331→---
+   332→Task ID: 5 (cron round 1 — Stage 1 COMPLETE)
+   333→Agent: main
+   334→Task: Integrate + harden Stage 1 (fixes from 1-c review), verify, close the round.
+   335→
+   336→Work Log:
+   337→- Fixes applied by main after 1-c review:
+   338→  1. History-format leak (LLM mimicking "[TOOL_CALL …]" in replies): buildLLMHistory now renders tool rows EXACTLY as the wire protocol (assistant: {"tool":...,"args":...} + user: [TOOL_RESULT] …); parseToolCall gained bracket-format fallback; NEW sanitizeTextAnswer() strips leaked markers/pure tool-JSON from would-be text answers (empty after strip → loop continues, never streams garbage); system prompt explains [TOOL_RESULT] delivery + forbids emitting markers.
+   339→  2. GET /api/threads/[id] now returns toolArgs/toolResult (richer reloads of tool cards).
+   340→  3. Busy-flag race (next message right after message:end → "Агент ещё отвечает…"): auto-title moved to turn START (before streaming), so nothing slow remains after the final emit; flag clears synchronously after return.
+   341→- Verification: multi-turn E2E (register → create-note turn → search turn → plain-question turn, immediate next-message sends): tools used 3, marker leaks 0, busy errors 0, 3 clean answers — ALL PASS (re-run after race fix: clean).
+   342→- Lint (full project): 0 problems. dev.log: no runtime errors (73 grep hits = HTTP status codes in request logs only).
+   343→- Cleanup: final-qa-* and leftover qa-round1 users deleted; 1 real user remains (admin).
+   344→
+   345→Stage Summary:
+   346→- STAGE 1 COMPLETE: agent creates notes with LLM-invented dynamic categories straight from chat; tool cards in UI; NotebookScreen with filters/favorites/delete; context panel note detail; ⌘K quick capture; leaks and races eliminated.
+   347→- NEXT (Stage 2): analysis pipeline for notes (4 blocks: positive/negative/final/recommendations, dynamic category assignment on ⌘K captures too), note discussion in chat, audio capture (voice), note↔project relevance detector (needs Stage 3 projects first — so pipeline + voice are the right Stage 2 scope).
+   348→- Risks/notes: agent-service still a background process (restart cmd in worklog); tool-calling is single-LLM JSON protocol (no native function calling) — robust now but watch for new leak patterns; threads list preview may show tool-card JSON — minor, cosmetic (didn't reproduce).
+   349→
+   350→---
+   351→Task ID: 2-ctr (Stage 2 contracts)
+   352→Agent: main
+   353→Task: Define Stage 2 contracts (analysis pipeline + voice + analysis UI) BEFORE implementation.
+   354→
+   355→Work Log:
+   356→- QA smoke of Stage 1 via agent-browser (gateway :81, user qa-s2@vf.io): landing→register→shell→chat tool-call (note «зарядка», category «Здоровье», panel auto-open)→notebook — ALL PASS, 0 console/page errors.
+   357→
+   358→Stage Summary — CONTRACTS (all Stage 2 agents MUST follow):
+   359→
+   360→1) Note statuses (existing enum, no schema change): `pending` → `processing` → `processed` | `error`.
+   361→   DB fields already exist: transcription, positiveBlock, negativeBlock, finalBlock, recommendations (JSON string), analysisRaw, analyzedAt, errorMessage.
+   362→
+   363→2) EXTENDED NoteShape (flat, REST + WS use the same shape) — superset of old:
+   364→   `{id, rawText, status, favorite, createdAt, updatedAt, transcription, positive, negative, final, recommendations: string[]|null, analyzedAt, errorMessage, category: {id,name,color,icon}|null}`
+   365→   - positive/negative/final = DB positiveBlock/negativeBlock/finalBlock (renamed in shaping only).
+   366→   - recommendations parsed from JSON string to array.
+   367→   - Old consumers ignore new fields → backward compatible.
+   368→
+   369→3) WS events (agent-service → room `user:${userId}`):
+   370→   - `note:analyzing` `{noteId}` — worker started on the note.
+   371→   - `note:analyzed` `{note}` — finished (note.status = 'processed'|'error'; on error note.errorMessage filled).
+   372→
+   373→4) Analyzer worker (mini-services/agent-service/analyzer.ts):
+   374→   - Boot: orphan 'processing' → 'pending' (crash recovery).
+   375→   - Poll every 5s: up to 2 oldest 'pending' notes, sequential.
+   376→   - LLM (Russian, JSON out): positive 60–120 слов, negative 60–120, final 50–100, recommendations array 3–6 items (короткие действия), category_name/color/icon (assign ONLY when note has no category; allowlists as in tools.ts).
+   377→   - Robust JSON parse (fences stripped, outer {...} extract, type validation); 2 LLM attempts, then status 'error' + errorMessage.
+   378→   - Category resolution: reuse by case-insensitive name else create (unique-race safe).
+   379→
+   380→5) REST:
+   381→   - `POST /api/notes/[id]/analyze` — re-queue analysis: status→'pending', clear analysis/error fields → {note} (404 if not owner).
+   382→   - PATCH /api/notes/[id] with rawText change → resets analysis (status 'pending', fields cleared).
+   383→   - `POST /api/notes/voice` {audioBase64, mime} → ASR (z-ai-web-dev-sdk, backend) → create note {rawText=transcription, transcription, status 'pending'} → 201 {note}. Client records via MediaRecorder → decodeAudioData → 16kHz mono WAV → base64 (guarantees ASR-compatible format).
+   384→
+   385→6) Frontend (Tasks 6-b voice, 6-c analysis UI):
+   386→   - 6-b owns: api/notes/voice/route.ts, hooks/use-voice-recorder.ts, capture-dialog.tsx mic UI, composer.tsx mic.
+   387→   - 6-c owns: types.ts WS payload types wiring, use-socket/use-notes handlers, note-detail.tsx analysis blocks, notebook-screen.tsx status chips, store.ts contextNote updates, toast.
+   388→
+   389→---
+   390→Task ID: 6-a (Stage 2 — analysis pipeline backend)
+   391→Agent: main
+   392→Task: Honest LLM analysis pipeline for notes (4 blocks + dynamic category) with WS live events + REST re-analysis + process self-healing.
+   393→
+   394→Work Log:
+   395→- src/lib/note-utils.ts: NoteShape extended FLAT (positive/negative/final renamed from DB *Block, recommendations parsed string[] via parseRecommendations, transcription/analyzedAt/errorMessage/updatedAt). noteWithCategory now maps DB rows.
+   396→- src/lib/types.ts: Note extends NoteAnalysis (positive/negative/final/recommendations/analyzedAt as ISO strings); NEW WsNoteAnalyzingPayload {noteId}, WsNoteAnalyzedPayload {note}.
+   397→- src/lib/api.ts: reanalyzeNote(id) → POST /api/notes/[id]/analyze; createVoiceNote({audioBase64, mime}) → POST /api/notes/voice (for Task 6-b).
+   398→- NEW src/app/api/notes/[id]/analyze/route.ts: resets note to pending + clears analysis (owner-scoped) → worker re-analyzes.
+   399→- PATCH /api/notes/[id]: rawText edit now resets analysis (status pending, blocks null) — edited text invalidates old analysis.
+   400→- NEW mini-services/agent-service/analyzer.ts: poll worker (5s, batch 2, sequential), ANALYSIS_SYSTEM_PROMPT (Russian, strict JSON: positive/negative/final/recommendations[3-6]/category_name+color+icon), robust parse (fences/outer-brace/type-validation), category assigned ONLY when note has none (reuse case-insensitive else create, race-safe), statuses pending→processing→processed|error, crash recovery on boot (processing→pending), detailed console logs.
+   401→- server.ts: startAnalyzer(io) on boot, stopAnalyzer() on SIGTERM/SIGINT.
+   402→- db-client.ts: own PrismaClient (log warn/error only — the shared src/lib/db.ts had log:['query'] which spammed the service log).
+   403→- PROCESS SELF-HEALING (sandbox reaper kills session-spawned bun processes within ~1-4 min; system-managed Next dev server is immortal): NEW mini-services/agent-service/start.sh (supervisor loop, log rotation >5MB, restart after 3s) + NEW src/app/api/health/agent-service/route.ts (GET probe TCP :3003; POST auth-required: probe → spawn detached supervisor FROM the dev-server process → re-probe ×10×400ms). use-socket.tsx: on connect_error (non-auth) → debounced POST /api/health/agent-service (30s window) — app self-heals in browser. VERIFIED: kill service → POST → up in ~4s.
+   404→
+   405→Verification (curl + bun ws-test client + DB):
+   406→- REST create note → worker picks in ≤5s → processing → processed with all 4 blocks + recommendations array + NEW dynamic categories («Продуктивность», «Разработка» created by LLM).
+   407→- WS events received end-to-end: «note:analyzing» {noteId} then «note:analyzed» {note: full extended shape} on room user:<id>.
+   408→- POST /api/notes/[id]/analyze → pending + cleared → re-processed by worker.
+   409→- bun run lint: 0 problems. Dev-server-spawned supervisor survived >3 min (previously session-spawned died ≤4 min).
+   410→
+   411→Stage Summary:
+   412→- Stage 2 backend COMPLETE. Contract implemented exactly as Task 2-ctr.
+   413→- ⚠️ If agent-service is down: curl -X POST (authed) /api/health/agent-service OR open the app in browser (socket connect_error self-heals it). Manual: nohup sh mini-services/agent-service/start.sh (from a LONG-lived parent ideally).
+   414→- NEXT: 6-b voice capture (REST /api/notes/voice + use-voice-recorder + capture/composer mic UI), 6-c analysis UI (note-detail 4 blocks, notebook status chips, WS wiring to store/use-notes, toast).
+   415→
+   416→---
+   417→Task ID: 6-b (Stage 2 — voice capture)
+   418→Agent: voice-capture-agent (executed via subagent; network cut it off before it could log — main verified/polished/logged on its behalf)
+   419→Task: Voice capture — mic recording in ⌘K palette + chat composer, WAV conversion, ASR REST route.
+   420→
+   421→Work Log (reconstructed from code + QA artifacts):
+   422→- NEW src/app/api/notes/voice/route.ts: auth + zod-less manual validation (base64 regex, ≤12MB, audio/* mime) → z-ai-web-dev-sdk ASR → note {rawText: transcription, transcription, status 'pending'} → 201 {note}. SMART EXTRA: the agent discovered the ASR service hard-rejects audio >30s ("duration limit 0–30 s" — verified 31s ok / 33s fails) and implemented PCM WAV SEGMENTATION: parses RIFF chunks, splits >29s WAVs into ≤29s standalone segments, transcribes each, joins texts. Error paths: 400/413/422/502 with Russian messages, never throws raw.
+   423→- NEW src/hooks/use-voice-recorder.ts: state machine idle→requesting→recording→processing; MediaRecorder with mime candidates (webm;opus→webm→mp4→ogg), 250ms timeslices; live level meter via AnalyserNode (RMS, throttled rAF); 90s auto-stop with onAutoStop callback; stop() → Blob → decodeAudioData → mono mixdown → linear resample to 16kHz → PCM16 WAV (44-byte header) → base64; in-flight stop dedupe; full resource teardown (StrictMode-safe, aliveRef guards the permission-prompt-then-unmount window); Russian errors (микрофон запрещён/не найден/не поддерживается/запись короткая).
+   424→- MODIFIED capture-dialog.tsx: mic button (idle ghost / recording rose pulsing dot + mm:ss timer + 5 animated level bars + Square stop / processing Loader2 «Распознаём…» / requesting spinner); transcription lands IN THE TEXTAREA for review (never auto-saves), merged with existing draft, capped at 5000; toasts; textarea dims while recording; !supported → button hidden; all previous behavior intact.
+   425→- MODIFIED composer.tsx: compact mic with the same states; transcription appends to the message input; disabled while agent busy; Enter-to-send unbroken.
+   426→- Agent's own QA: registered s2b-* users, generated real speech WAVs (ASR produced «Tamak, Tan, Huarang…» transcriptions — notes visible in DB), sine-wave route tests («#» notes), browser checks.
+   427→
+   428→Stage Summary:
+   429→- Voice capture E2E VERIFIED by main: mic buttons render (⌘K + composer), headless no-mic → clean «Микрофон не найден» toast, REST route 201 with valid WAV (created note from 440Hz sine), 0 console errors. Files: voice/route.ts + use-voice-recorder.ts NEW; capture-dialog.tsx + composer.tsx MODIFIED.
+   430→
+   431→---
+   432→Task ID: 6-c (Stage 2 — analysis UI + live updates)
+   433→Agent: analysis-ui-agent (executed via subagent; network cut it off before it could log — main verified/polished/logged on its behalf)
+   434→Task: 4-block analysis UI in note detail, status chips in feed, live WS wiring, toasts, re-analysis.
+   435→
+   436→Work Log (reconstructed from code + main's E2E):
+   437→- MODIFIED use-socket.tsx: NoteEvent type + noteListenersRef registry + onNoteEvent(cb) stable subscription API (cleanup via returned unsubscribe); socket handlers note:analyzing (→ emit + contextNote pending→processing patch) and note:analyzed (→ emit + updateContextNote(note) + toast). Toast dedupe: ≤1 per noteId per 60s; error status → destructive toast «Не удалось проанализировать заметку», success → «Анализ заметки готов» with «Открыть» action (openNote → desktop panel / mobile dialog). PRESERVED main's connect_error self-heal block exactly.
+   438→- MODIFIED use-notes.ts: patchNoteLocally(noteId, patch) in-place list patch; onNoteEvent subscription → analyzing: status patch; analyzed: full note patch + ONE silent refresh when category appeared/changed (chips + counts). Exposed patchNoteLocally.
+   439→- MODIFIED store.ts: updateContextNote(note) — replaces contextNote when ids match (WS live payload path), no-ops otherwise.
+   440→- MODIFIED note-detail.tsx: StatusChip (AnimatePresence popLayout; pending «Анализ в очереди» amber pulse dot / processing «Анализируем…» spinner / error «Ошибка анализа» rose); «Анализ ИИ» section header (Sparkles, emerald) + relative analyzedAt («только что», ru plurals); 4 AnalysisBlocks with tones — Сильные стороны (ThumbsUp, emerald), Риски и слабые стороны (AlertTriangle, amber), Главный вывод (neutral), Рекомендации (ListChecks, numbered emerald circle badges) — staggered framer-motion reveal, empty blocks skipped; «Переанализировать заметку» button (processed + error states) → api.reanalyzeNote → optimistic pending flip → worker re-runs live.
+   441→- MODIFIED notebook-screen.tsx: status mini-chips (pending «Анализ в очереди» / processing «Анализируем…» / processed «Проанализирована» + emerald Sparkles / error rose); processed cards show first-recommendation teaser (line-clamp-1, ListChecks icon).
+   442→- Main's polish after VLM audit: light-mode block tint bg-*/5→/10, icon text *-600→*-700, body text foreground/90→foreground, block title→content mt-2.5→mt-3 (dark PASS untouched).
+   443→
+   444→Stage Summary:
+   445→- E2E VERIFIED by main (browser, gateway :81): chat «Запиши заметку…» → tool card → panel auto-open → LIVE WS transition to «Анализ ИИ» with all 4 blocks WITHOUT reload (category «Читательские привычки» assigned by analyzer); notebook chips evolution + recommendation teaser; reanalyze button → pending → re-processed live; mobile 375px dialog with full analysis + scrollable; dark mode PASS (VLM unconditional), light PASS after contrast fix (VLM re-audit). 0 console/page errors. Files: use-socket.tsx, use-notes.ts, store.ts, note-detail.tsx, notebook-screen.tsx MODIFIED (mobile-note-dialog needed no changes).
+   446→
+   447→---
+   448→Task ID: 6-fin (Stage 2 round — integration, QA, cleanup)
+   449→Agent: main
+   450→Task: Integrate Stage 2 (6-a/6-b/6-c), full QA, styling audit, cleanup, worklog.
+   451→
+   452→Work Log:
+   453→- Subagent infrastructure was flaky (network "context deadline exceeded") — but BOTH subagents had actually completed their file work before the cutoff; main verified everything end-to-end instead of re-implementing.
+   454→- Full E2E matrix (agent-browser via :81, user qa-s2@vf.io): landing → chat note-creation → live analysis blocks in panel (WS, no reload) → notebook chips/categories/teaser → reanalyze cycle → voice UI (buttons render, graceful no-mic toast, REST 201 with valid WAV) → dark mode (VLM PASS) → light mode (VLM PASS after contrast fix) → mobile 375px (notebook chips row, note dialog with analysis, scrollable) → console/page errors 0 → bun run lint 0 problems → dev.log clean.
+   455→- Process self-healing validated: supervisor spawned from the Next dev-server process (11:19) SURVIVED the sandbox reaper for 2+ hours (session-spawned bun processes died within ~4 min earlier). Frontend self-heals via connect_error → POST /api/health/agent-service.
+   456→- Cleanup: ALL test users deleted (qa-s2, s2c-*, s2b-*×5) with cascade; DB now: 1 user (real admin game.puzzles.a1@gmail.com), 0 notes, 0 threads.
+   457→
+   458→Stage Summary:
+   459→- **STAGE 2 COMPLETE**: honest LLM analysis pipeline (pending→processing→processed/error, 4 blocks + recommendations + dynamic category assignment incl. ⌘K captures), live WS updates with toasts, re-analysis (button + auto-reset on text edit), voice capture (⌘K + composer, WAV 16kHz conversion, >30s ASR segmentation), full UI polish (light/dark/mobile).
+   460→- NEXT (Stage 3 per plan): PROJECTS — Next.js template sandbox / GitHub clone / ZIP import, real files + git on disk (workspace/), file tools for the agent (read/write/list/search), Monaco editor, checkpoints via git commits, thread.mode ask/plan/act/review UI, note↔project links (NoteLink model exists).
+   461→- Risks/notes: (a) agent-service process is now self-healing BUT the supervisor script must exist for boot — if the whole sandbox restarts, first browser visit revives :3003 automatically; (b) ASR 30s segment limit handled by splitting — long-voice quality depends on segment boundaries landing mid-word occasionally; (c) analyzer processes max 2 notes per 5s tick sequentially — fine for single-user, revisit batch if multi-user load appears; (d) tool-card reload rendering (REST history) shows tool JSON gracefully (Stage 1 behavior, unchanged).
+   462→
+   463→---
+   464→Task ID: 3-ctr (Stage 3 contracts)
+   465→Agent: main
+   466→Task: Define Stage 3 contracts (projects, files+git, agent tools, modes, frontend) BEFORE implementation. 3-a (REST + workspace lib) is ALREADY implemented and curl-verified by main; 3-b and 3-c must follow these contracts exactly.
+   467→
+   468→Work Log:
+   469→- QA regression of Stage 2 via agent-browser (gateway :81, user qa-s3@vf.io): landing → register → chat tool-call (note «зарядка», category «Здоровье», analysis 4 blocks live in panel) → notebook — ALL PASS, 0 console/page errors.
+   470→- Environment probes: git 2.47.3 ✓, unzip ✓, python3+zipfile ✓, github.com network ✓ (ls-remote works) → all three import origins feasible.
+   471→- Installed monaco-editor@0.56.0 + @monaco-editor/react@4.7.0; copied min/vs → public/monaco/vs (24MB, LOCAL loader — no CDN dependency); added public/monaco/** to eslint ignores (lint OOM without it).
+   472→- templates/nextjs-basic/ created (package.json, next.config.mjs, tsconfig.json, app/layout.tsx, app/page.tsx, app/globals.css, README.md, .gitignore) — 8 files.
+   473→- src/lib/workspace.ts (NEW, pure-node, NO "@/…" imports, importable from BOTH Next.js and agent-service via relative path): WORKSPACE_ROOT (env VIBEFLOW_WORKSPACE_ROOT, set in .env + agent-service index.ts), TEMPLATE_ROOT, safeJoin (traversal/.git/node_modules guards — curl-verified), read/write/deleteWorkspaceFile (256KB caps, binary reject), listWorkspaceTree (flat FileEntry[], 2000 cap, sorted ru), initProjectGit (git init -b main + checkpoint 0), checkpointProject (noop-detect), listProjectCommits/lastCommit/countProjectCommits (git log %H\x01%s\x01%an\x01%aI), createFromTemplate (fs.cp), createFromGithub (https+github.com-only SSRF guard, --depth 1, 120s timeout), createFromZip (python3 zipfile, zip-slip-safe, 5000 entries / 250MB caps, single-root flattening), removeProjectDir, projectStats.
+   474→- REST (all owner-scoped, all curl-verified):
+   475→  - GET /api/projects → {projects: [Project + threadsCount, notesLinked, stats]}
+   476→  - POST /api/projects — JSON {name 1-80, description?≤500, origin: template|github, remoteUrl?, noteId?} OR multipart (name, description?, noteId?, file≤20MB zip) → 201 {project} (+stats). GitHub import verified 1.4s (octocat/Hello-World). Zip import verified with flatten + zip-slip protection.
+   477→  - GET /api/projects/[id] → {project + stats + notes: [{id, preview, status, category, linkKind}]}
+   478→  - PATCH /api/projects/[id] {name?, description?} → {project}
+   479→  - DELETE /api/projects/[id] → {ok} (rm -rf dir + cascade)
+   480→  - GET /api/projects/[id]/tree → {tree: FileEntry[], truncated, dirty}
+   481→  - GET /api/projects/[id]/file?path=… → {path, content, size} (404/413/415 on bad)
+   482→  - PUT /api/projects/[id]/file {path, content≤256KB} → {path, size, created}
+   483→  - GET /api/projects/[id]/commits?limit=50 → {commits: [{hash, short, message, author, date}]}
+   484→  - POST /api/projects/[id]/checkpoint {message 1-200} → {checkpoint: {noop, commit, filesChanged}}
+   485→  - GET/POST/DELETE /api/notes/[id]/links (note↔project, kind reference|context|proposal, DELETE ?projectId=)
+   486→- bun run lint: 0 problems.
+   487→- Cleanup: all curl test projects + note deleted; workspace/ empty; qa-s3@vf.io user left in DB for continued QA.
+   488→
+   489→Stage Summary — CONTRACTS (3-b and 3-c MUST follow):
+   490→
+   491→1) Project wire shape (REST): {id, name, description, origin: 'template'|'github'|'zip', remoteUrl, createdAt, updatedAt} + stats: {filesCount, commitsCount, lastCommit: {hash, short, message, author, date}|null}. List adds threadsCount, notesLinked.
+   492→
+   493→2) FileEntry: {path (posix rel), type: 'file'|'dir', size}. Commits: CommitInfo {hash, short, message, author, date ISO}.
+   494→
+   495→3) AGENT TOOLS (agent-service tools.ts, 3-b): ToolDef.execute signature CHANGES to execute(args, userId, ctx: ToolContext) where ToolContext = {threadId: string, mode: string, projectId: string | null} (server.ts passes from thread row; existing notebook tools ignore ctx).
+   496→   - create_project {name 1-80, description?≤500, note_id?} → creates template project (db.project + workspace.ts createFromTemplate + initProjectGit), binds thread.projectId when thread has none, NoteLink(kind 'proposal') when note_id given → {project: {id,name,origin}, filesCount, rootFiles} + emits WS.
+   497→   - list_projects {} → {projects: [{id, name, origin, filesCount?}]}
+   498→   - list_files {path?} (ctx.projectId required else {error:'…'}) → listWorkspaceTree (maybe scoped to subpath) → {files, truncated}
+   499→   - read_file {path} → readWorkspaceFile, agent cap 200KB → {path, content, size}
+   500→   - write_file {path, content} → writeWorkspaceFile. ONLY in mode 'act' (else {error:'Запись доступна только в режиме «Действовать»'}). Marks turn dirty → auto-checkpoint at turn end.
+   501→   - delete_file {path} → deleteWorkspacePath, mode 'act' only.
+   502→   - checkpoint {message? default 'Агент: контрольная точка'} → checkpointProject, mode 'act' only → {noop, commit, filesChanged}.
+   503→   - workspace.ts is imported from agent-service as `import {…} from "../../src/lib/workspace"` — it is pure node, this works under bun.
+   504→
+   505→4) MODES (thread.mode): prompts.ts exports buildAgentSystemPrompt({mode, project}) — base prompt (existing rules) + mode block:
+   506→   - ask: read-only Q&A; write tools forbidden (and they self-check).
+   507→   - plan: propose numbered implementation plans, NO writes, may read files.
+   508→   - act: full power incl. write_file/delete_file/checkpoint/create_project.
+   509→   - review: read files, critique code, suggest diffs in text, NO writes.
+   510→   + project context block when ctx.projectId: name, origin, top ~40 tree paths, last 5 commits. server.ts: AGENT_SYSTEM_PROMPT import replaced by buildAgentSystemPrompt({mode, project}) per turn (fetch thread + project row).
+   511→
+   512→5) WS events (agent-service → user room `user:${userId}`), 3-b:
+   513→   - project:created {project: {id, name, origin}}
+   514→   - project:updated {projectId, reason: 'files'|'checkpoint'}
+   515→   Auto-checkpoint in server.ts after the tool loop: if any write/delete happened && mode==='act' → checkpointProject(root, 'Агент: изменения за ход') → project:updated reason 'checkpoint'.
+   516→
+   517→6) FRONTEND (3-c): store mainArea extends to 'projects' | 'project' + activeProjectId + projectsVersion/projectFilesVersion bump counters; new hook use-projects (list/create/delete/update following use-notes pattern); projects-screen (cards grid + create dialog Tabs: Шаблон/GitHub/Zip file input); project-screen (header w/ origin badge + checkpoint btn + «Обсудить проект»→thread with projectId; left file tree collapsible; center Monaco tabs, ⌘S save, dirty dot; commits sheet); monaco wrapper component with loader.config({paths:{vs:'/monaco/vs'}}) — LOCAL, theme vs-dark/vs follows app theme; sidebar ПРОЕКТЫ section (replaces «Проекты скоро»); chat-area header mode dropdown (4 modes via api.updateThread, MODE_LABELS exists in types.ts); composer project chip when activeThread.projectId; tool-card cases for create_project/write_file/read_file/list_files/checkpoint/delete_file/list_projects; welcome chip «Создать проект» → create dialog; use-socket: project:created/project:updated handlers (bump versions + toast); note-detail: linked projects chips (GET /api/notes/[id]/links) + «Создать проект» button (create dialog with noteId → link kind 'context').
+   518→   Styling (MANDATORY): stone/emerald system, cards p-4/p-6, long lists max-h-* overflow-y-auto custom scrollbar, framer-motion subtle transitions, responsive (mobile sheet/tabs), dark+light verified, 44px touch targets.
+   519→
+   520→---
+   521→Task ID: 3-b
+   522→Agent: agent-tools-agent
+   523→Task: Stage 3 backend of agent-service — 7 project/file tools, mode-aware system prompt, turn orchestration with project WS events + auto-checkpoint.
+   524→
+   525→Work Log:
+   526→- tools.ts: ToolDef.execute → execute(args, userId, ctx: ToolContext); export ToolContext {threadId, mode, projectId}. Existing 4 notebook tools untouched (2-param execute stays assignable; extra arg ignored at runtime — verified by test). 7 new tools, all Russian descriptions + argsSchema, manual validation returning {error} (never throw): create_project (name 1–80, description ≤500, note_id → db.project origin "template" rootPath "" → createFromTemplate + initProjectGit via ../../src/lib/workspace; on workspace error: removeProjectDir + row delete + {error}; on success: rootPath update, bind thread.projectId ONLY if null, NoteLink kind "proposal" race-caught → {project:{id,name,origin}, filesCount, rootFiles}); list_projects (newest first, cap 50); list_files (projectId+owner check else «Сначала создайте или выберите проект», subdir normalization + prefix scoping + re-based paths, cap 400, {files, truncated}); read_file (200KB cap → {path, content, size}); write_file / delete_file (mode must be «act» else «Запись файлов доступна только в режиме «Действовать» — переключите режим диалога») → {path,size,created} / {deleted,path}; checkpoint (message default «Агент: контрольная точка», ≤200, act-only → {noop, commit, filesChanged}).
+   527→- prompts.ts: AGENT_SYSTEM_PROMPT replaced by buildAgentSystemPrompt({mode, projectName?, projectOrigin?, projectTree?, recentCommits?}) + ThreadModeName type. Base prompt text kept EXACTLY (protocol, [TOOL_RESULT] rules, formatting, leak rule), tool list extended with the 7 new tools. Mode blocks (ask/plan/act/review; unknown mode → ask). Project context block: «Активный проект: <name> (origin: <o>). Структура (первые 40 путей)… Последние коммиты…» (defensive 40/5 slices). deriveThreadTitle untouched.
+   528→- server.ts: runAgentTurn(socket, user, threadId, content, thread: ThreadTurnInfo) — thread row passed from message:send. System prompt built ONCE per turn (buildTurnSystemPrompt: project row owner check → listWorkspaceTree top-40 file paths + listProjectCommits 5 → mode prompt + project block; workspace failure degrades to project-less prompt, never kills the turn). tool.execute(args, user.sub, ctx) with ctx rebuilt every iteration; after successful create_project the local thread.projectId is updated so later iterations + auto-checkpoint see the fresh binding. Project WS events to user room emitted by server (tools stay io-free): project:created after create_project; project:updated {reason:"files"} after write_file/delete_file; project:updated {reason:"checkpoint"} after non-noop checkpoint. turnDirty tracking; auto-checkpoint (checkpointProject «Агент: изменения за ход», try/catch — failure only logs) runs AFTER the tool loop but BEFORE the final answer streams (finalText is remembered instead of streamed inside the loop) → zero busy-flag race window (Task 5 lesson preserved). MAX_TOOL_ITERATIONS 6→8.
+   529→- Verification: bunx tsc --noEmit on the 3 files → 0 errors. Integration test (temp test-tools.ts, real db thread/note for qa-s3 user, deleted afterwards): 35/35 PASS — prompt builder blocks, create_project flow (binding, NoteLink "proposal", rootPath, filesCount, rootFiles), write/list(root+subdir)/read roundtrip, checkpoint non-noop then noop, list_projects, delete_file, act-mode guards for write/delete/checkpoint, no-project guards, traversal reject, notebook tool unaffected by 3-arg call, cleanup. WS E2E (temp e2e-ws.ts, real LLM turns via socket.io-client, deleted afterwards): register→ws-token→act thread→«Создай проект…» → create_project tool + project:created + text answer; «Запиши в файл agent-e2e.md…» → write_file + project:updated(files) + auto-checkpoint event BEFORE message:end + file on disk with exact content + «Агент: изменения за ход» in git log + thread.projectId persisted — 17/17 PASS. bun run lint: 0 problems.
+   530→- Restart: pkill supervisor+bun; clean restart landed via the app's self-heal (dev-server-spawned supervisor, reaper-proof lineage — better than a session-spawned nohup) → bun --hot on final code, curl :3003 returns sid, /tmp/agent-service.log clean (the transient AGENT_SYSTEM_PROMPT hot-reload SyntaxError predates the restart).
+   531→- Cleanup: test-tools.ts + e2e-ws.ts deleted; all E2E data removed (user cascade, project row + workspace dir via REST); DB back to the 2 pre-existing users, 0 projects, workspace/ empty.
+   532→
+   533→Stage Summary:
+   534→- Stage 3 agent-service backend COMPLETE per 3-ctr contracts §3/§4/§5: agent can create template projects (bound to the thread), read/list/write/delete files (act-mode guarded) and git-checkpoint; system prompt is mode-aware (ask/plan/act/review) and carries active-project tree+commits; project:created/project:updated WS events flow to the user room; dirty act turns auto-commit BEFORE the final answer (no busy-flag race). Notebook behavior unchanged.
+   535→- NEXT (3-c): frontend — projects/project screens, Monaco, mode dropdown, project WS wiring, tool-card cases, note↔project links UI.
+   536→- Risks/notes: (a) create_project has NO mode guard (contract/task list guards only write/delete/checkpoint) — in ask/plan/review the prompt forbids it, in act it's the intended path; flip to a hard guard if product wants it. (b) list_files caps at 400 entries for the LLM (REST tree stays 2000). (c) thread mode is read once per turn — a mode switch mid-turn applies next turn.
+   537→
+   538→---
+   539→Task ID: 3-fin (Stage 3 — integration, critical bugfixes, styling polish, QA, cleanup)
+   540→Agent: main
+   541→Task: Integrate Stage 3 (3-a REST/workspace by main, 3-b agent tools by subagent, 3-c frontend by subagent), fix critical bugs found in QA, mandatory styling refinements, full E2E verification, cleanup, handover.
+   542→
+   543→Work Log:
+   544→- Subagent 3-b completed fully (7 file/project tools + mode-aware prompts + WS events + auto-checkpoint; 35/35 unit + 17/17 WS E2E; agent-service restarted reaper-proof from Next dev-server lineage). Subagent 3-c completed ALL file work before the network cutoff (its worklog entry was lost — main verified + polished + logged on its behalf).
+   545→- CRITICAL BUG #1 (tool protocol): the LLM sometimes chains SEVERAL tool calls in one reply and/or omits the "args" wrapper (flat form {"tool":"write_file","path":…}). parseToolCall failed → raw JSON leaked into chat + sidebar previews. THREE-LAYER FIX in agent.ts/prompts.ts/server.ts: (1) splitTopLevelObjects string-aware brace-walk splits chained objects, first valid call wins (follow-up calls resurface next loop iteration); (2) tryParseToolObject accepts flat form (other top-level keys become args); (3) prompt now demands РОВНО ОДИН JSON per answer; (4) sanitizeTextAnswer strips whole-line {"tool":…} leaks. 9/9 parser unit tests PASS; live re-test: write_file + checkpoint executed with proper cards, clean prose answer, file on disk, git commit.
+   546→- CRITICAL BUG #2 (dialog geometry): CreateProjectDialog top-[18%] kept the default translate-y-[-50%] → dialog half OFF-SCREEN (tabs at y=-47!) → clicking a tab dispatched outside-viewport → overlay closed the dialog. Fixed: top-[50%] translate-y-[-50%] max-h-[85vh] overflow-y-auto (create-project-dialog + 2 dialogs in project-screen). After fix tabs at y=138, GitHub tab switch works.
+   547→- BUG #3 (file tree nesting): file rows had +18px extra indent → ROOT files looked nested inside the empty public/ folder (VLM caught it; DOM pad 24 vs 6). Fixed to 6+depth*14 — VLM re-audit PASS (root files aligned with folders, app/ children one level deeper).
+   548→- BUG #4 (stale note links): LinkedProjects fetched once per noteId — creating a project from a note didn't refresh the «Связанные проекты» section until reopen. Fixed: subscribe to store.projectsVersion (bumped on every project creation) as effect dep.
+   549→- Styling refinements (mandatory): project card name title-attr tooltip (truncation UX), last-commit line contrast emerald-600/70→emerald-700 (WCAG), muted-foreground/80→muted-foreground.
+   550→- NOTE: a display artifact ate the "[m" byte sequence in tool outputs (od/py hex proved the file was never corrupted) — wasted one fix cycle; hex-verify before believing "corrupted" lines.
+   551→- FULL E2E MATRIX (agent-browser via :81, user qa-s3@vf.io): landing → register → shell → QA regression of Stage 2 (chat→note→analysis 4 blocks→notebook, 0 console errors) → projects screen → create template project via dialog → project screen (tree + Monaco renders content, executeEdits + Ctrl+S → file on disk, toast) → checkpoint via dialog → commits history (3 commits listed) → «Обсудить проект в чате» (thread bound + project chip in header) → mode dropdown (ask/plan/act/review, persisted via PATCH) → CORE LOOP: act mode + «создай файл + чекпоинт» → write_file executed + tool card + checkpoint commit 35ffdb2 + WS tree refresh (greeting.ts appeared WITHOUT reload) → ask mode blocks write_file with proper error card + agent explanation → create_project from fresh chat (project created, thread auto-bound, sidebar live «Все проекты 2») → GitHub import via UI (octocat/Hello-World, navigated into project, GitHub origin badge) → zip import (curl-verified earlier with flatten + zip-slip protection) → note→project link (button in note detail, NoteLink kind 'context' in DB, chip shows in Связанные проекты after fix) → dark mode (VLM PASS: consistent, vs-dark, contrast ok) → mobile 375px (file tree Sheet, tabs, Monaco, VLM PASS) → light mode (VLM PASS with minor refinements applied) → final console/page errors 0 → lint 0 → dev.log clean.
+   552→- Cleanup: qa-s3@vf.io + all test projects/threads/notes deleted (DB: 1 real admin only); workspace/ empty; test scripts removed.
+   553→
+   554→Stage Summary:
+   555→- **STAGE 3 COMPLETE**: real files + real git projects (workspace/<id> with own .git), 3 import origins (Next.js template / GitHub depth-1 clone / zip with slip-protection + single-root flatten), checkpoints (manual via UI + agent tool + auto-checkpoint at dirty turn end), agent file tools (create_project/list_projects/list_files/read_file/write_file/delete_file/checkpoint) with act-mode enforcement, mode-aware prompts (ask/plan/act/review) + mode dropdown UI, Monaco editor (LOCAL bundle public/monaco, no CDN), file tree + tabs + ⌘S, commits history, thread↔project binding, note↔project links (Связанные проекты + создать из заметки), WS live updates (project:created/updated), full tool-card set, mobile + dark + light verified.
+   556→- The CORE VibeFlow loop now works END-TO-END: мысль → заметка → (анализ) → «создай проект» → агент создаёт проект → агент пишет код в режиме «Действовать» → чекпоинт → пользователь видит код в Monaco.
+   557→- NEXT (Stage 4 per plan): sub-agents/orchestration (analyst→planner→coder→reviewer inside one turn), plan mode producing structured task lists UI, diff viewer (git diff per checkpoint), run/build preview (deferred — sandbox), export/download project as zip, admin panel (users, AI providers), notifications bell, slash commands, search across everything (⌘P).
+   558→- Risks/notes: (a) tool protocol is single-JSON-per-reply by prompt + parser normalizations — new leak shapes may appear; watch sanitize + parser (9 unit tests in /tmp were ephemeral — consider committing them); (b) agent-service supervisor is dev-server-spawned (reaper-proof) but a full sandbox restart requires one browser visit to self-heal :3003; (c) Monaco bundle is 24MB in public/ — fine for dev, consider pruning languages for production; (d) README/notes analysis of HELLO-WORLD shows «1 файл 1 коммит» — shallow clones keep their history + our checkpoints append on top (intended); (e) thread previews in sidebar still show tool-card JSON for OLD messages (cosmetic, pre-existing, low priority).
+   559→
+   560→---
+   561→Task ID: 7 (cron round 2 — Stage 4 «Всё под рукой»: export + diff + search + slash commands)
+   562→Agent: main
+   563→Task: QA regression of Stages 0–3 via agent-browser; then independently advance Stage 4 (mandatory: styling refinement + new features), fix bugs first.
+   564→
+   565→Work Log:
+   566→- Read worklog; probed services: :3000 up, :81 up, :3003 up (socket.io 400 on GET = alive).
+   567→- QA REGRESSION (agent-browser via :81, fresh user qa-s4@vf.io / Qa12345!): landing → register (client role) → chat-first shell → «Сохрани заметку…» → note «телеграм-бот…» + category «Идеи проектов» + full 4-block analysis live in context panel → mode dropdown → «Действовать» → «Создай проект… + напиши в app/page.tsx…» → create_project + write_file tool cards + auto-checkpoint → projects screen (live «Все проекты 1») → project screen → Monaco with code (VLM PASS) → console 0 errors. Stage 0–3 STABLE.
+   568→- INFRA INCIDENT mid-round: the system-managed Next dev server (:3000) DIED (reaped/OOM — log ended with clean compiles, no error). Gateway :81 fell back to a placeholder page. Session-spawned `nohup bun run dev` also got reaped (~1–4 min, as documented in Task 6-a).
+   569→- SELF-HEALING PLATFORM (fix): NEW mini-services/agent-service/next-supervisor.sh (flock-singleton /tmp/next-supervisor.lock, restart loop 5s, log rotation >5MB → /tmp/next-dev.log) + agent-service index.ts now has a WATCHDOG: probe :3000 every 60s; when down → spawn the supervisor DETACHED from the agent-service process (reaper-proof lineage — agent-service is boot-time, PPID 1). Verified: :3000 revived via watchdog, supervisor + `next dev` running under it. Also fixed hot-reload zombies: index.ts now process.exit(1) when server.ts import fails (port held by sibling) — previously my setInterval kept failed instances alive; killed 2 zombies + 2 duplicate start.sh supervisors; final state: ONE bun --hot (2918, holds :3003) + ONE supervisor (2914) + next-supervisor → next dev.
+   570→- FEATURE A — Export project as ZIP: workspace.ts exportProjectZip (python3 zipfile walk, skips .git/node_modules, empty-project → 422); NEW GET /api/projects/[id]/export (owner-scoped, streams zip, content-disposition RFC-5987 ascii+UTF-8, temp file removed in finally); project-screen header button «Скачать zip» (fetch→blob→anchor download→toast with size; errors surfaced as toasts); curl: 200, 8 entries, no .git, application/zip.
+   571→- FEATURE B — Checkpoint diff viewer: workspace.ts commitDiff(hash) — validates hash, git diff-tree --name-status -r -z --root (rename/copy → add), git show hash^:path / hash:path for old/new blobs (null-safe), caps 20 files / 200KB per blob (truncated flag), binary/missing → skipped flag, skippedCount; NEW GET /api/projects/[id]/diff?commit= (WorkspaceError → status). NEW monaco-diff.tsx (DiffEditor dynamic import, local bundle loader via side-effect import of monaco-editor.tsx, vs-dark/vs theme, renderSideBySide toggle); NEW diff-dialog.tsx (commit header + hash badge, scrollable file tab bar with colored status dots (added=emerald/modified=amber/deleted=rose), inline toggle «Рядом/Строкой», per-file truncated/skipped notices, >20 files footer, loading skeleton + cancel-guard via seqRef). Wired into CommitsSheet: per-commit Diff button (hover-reveal on desktop). CRITICAL LAYOUT BUG FOUND+FIXED: Monaco rendered at 5px height — `h-full`/`height:100%` does NOT resolve inside dialogs whose flex height is content-driven (only max-h cap) → monaco layer is now `absolute inset-0` (documented in code comment).
+   572→- FEATURE C — Global search: NEW GET /api/search?q= (min 2 chars, JS toLowerCase matching — case-insensitive for BOTH ASCII and Cyrillic unlike SQLite LIKE; bounded fetch 300 threads (last 3 user/assistant msgs each) / 500 notes / 100 projects; excerpt() with ±42-char window around the match; 5 per group); NEW global-search.tsx — CommandDialog (cmdk) palette: Ctrl+P/⌘P global shortcut (app-shell), debounced 250ms, groups Проекты/Диалоги/Заметки with icons, hint state <2 chars, empty state, navigation: thread→setMainArea(chat)+selectThread, note→api.getNote→openNote (context panel/mobile dialog), project→openProject; close() resets state + cancels in-flight (seqRef). Sidebar: NEW search button «Поиск по VibeFlow (Ctrl+P)» next to capture. API+types: SearchResults/…Hit types, api.search.
+   573→- FEATURE D — Slash commands: NEW slash-commands.tsx (SlashCommandsMenu — floating listbox above composer, framer-motion fade/slide, kbd hints Tab/Enter, scrollIntoView on nav; isSlashTokenActive/slashToken/filterSlashCommands helpers); composer.tsx rewritten: 10 commands — /заметка (transforms input to «Сохрани заметку: »), /проект (create-project dialog), /блокнот, /поиск (search palette), /спросить /план /действовать /ревью (updateThreadMode + toast), /чекпоинт + /скачать (bound-project only: api.createProjectCheckpoint / export blob download); keyboard: ArrowUp/Down cycle, Tab completes command text, Enter executes selection, menu auto-filters by token (name+label+description match); placeholder «…или / для команд»; footer hint «· / — команды».
+   574→- BUG FIX (pre-existing cosmetic from 3-fin notes): sidebar thread preview could show tool-card JSON — /api/threads GET had take:1 on ALL messages; now `where role IN (user, assistant)` take 5, first row = preview. Verified: preview shows assistant text.
+   575→- STYLING REFINEMENT (mandatory): welcome.tsx — staged framer-motion entrance (logo/heading/chips/kbd row), hover-lift on chips, NEW kbd hints row (Ctrl K мысль · Ctrl P поиск · / команды); landing HeroMockChat — emerald glow backdrop (blur-2xl), floating badge animations (y ±4 infinite loop), NEW mock composer row mirroring the real product («…или / для команд» + send chip); CommitsSheet commit cards — hover border-primary/25 + group-hover Diff buttons; diff dialog + slash menu + search palette styled to the stone/emerald system (rounded-2xl, backdrop-blur popover, vf-scroll, 44px targets).
+   576→- Lint fixes along the way: react-hooks/set-state-in-effect (3 errors) → restructured diff-dialog + global-search to the loadCommits useCallback pattern + event-handler resets + derived hint state; unused imports; `Record<typeof mode>` → Record<ThreadMode>.
+   577→- VERIFICATION: curl matrix (login, search «вод» → 3 hits grouped, diff latest commit (1 file modified 302→1959), diff root commit (8 files all added), invalid hash → 404, export 200/8 entries/no .git); agent-browser E2E after fixes: reload → slash menu (10 items, filter «заме» → 3) → Enter /заметка → input «Сохрани заметку: » → /ревью → mode chip «Ревью» → /действовать → «Действовать» → Ctrl+P → «вод» → grouped results → Enter → project screen → «Скачать zip» → toast «Архив проекта готов» → История → Diff 4edad80 → Monaco side-by-side (VLM: red deletions left / green additions right PASS) → «Строкой» inline mode OK → root commit 7433d75 → 8 file tabs → tab switch (tsconfig.json) OK; mobile 375px: slash menu (10 items, VLM PASS readable/no overlap), search dialog (3 groups, VLM PASS); console 0 errors; bun run lint 0; bunx tsc — my files 0 errors (api.ts Promise<void> patterns are pre-existing).
+   578→
+   579→Stage Summary:
+   580→- **STAGE 4 (round a) COMPLETE**: 4 new features — project zip export (REST + header button + /скачать), checkpoint diff viewer (REST + Monaco DiffEditor dialog per commit with file tabs/inline toggle/status colors), global search (REST + Ctrl+P cmdk palette across threads/notes/projects + sidebar button), slash commands in composer (10 commands incl. mode switches and bound-project actions). Plus: sidebar preview tool-JSON fix, welcome/landing/commits styling refinements.
+   581→- **PLATFORM NOW SELF-HEALS**: agent-service watchdog keeps :3000 alive (probe 60s → flock-singleton supervisor restart loop, reaper-proof lineage). This closes the "dev server is mortal" gap discovered this round.
+   582→- DB state (deliberate): qa-s4@vf.io kept with 1 thread + 1 note («Идеи проектов») + 1 project «Напоминалка о воде» (2 commits) — next-round regression can hit search/diff/export immediately; delete via profile logout + admin or REST if a clean slate is needed.
+   583→- NEXT (Stage 4 round b per plan): sub-agents/orchestration (analyst→planner→coder→reviewer inside one act turn), plan-mode structured task list UI, admin panel (users/stats/AI providers), notifications bell (Notification model exists), run/build preview (sandbox-limited), git-push export origin.
+   584→- Risks/notes: (a) diff viewer needs the absolute-inset-0 height pattern anywhere Monaco mounts inside auto-height dialogs — copied for future dialogs; (b) search is JS in-memory (bounded 300/500/100 rows) — honest personal-scale scope, document if multi-user growth; (c) export zips the WORKING TREE (uncommitted changes included, .git excluded) — intended: «что вижу — то и скачаю»; (d) if the agent-service itself dies its start.sh supervisor (2914) restarts it in 3s, and the app self-heal POST /api/health/agent-service remains as a fallback; (e) thread previews for OLD messages were already persisted correctly — the fix only affects the LIST query, no data migration needed.
+
+[showing lines 280-584 of 585; use offset=585 with limit to continue reading]
