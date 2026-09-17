@@ -39,6 +39,8 @@ import type {
   Note,
   WsNoteAnalyzedPayload,
   WsNoteAnalyzingPayload,
+  WsProjectCreatedPayload,
+  WsProjectUpdatedPayload,
 } from "@/lib/types";
 
 /** Live note-analysis pipeline events forwarded to onNoteEvent subscribers. */
@@ -236,12 +238,45 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       notifyAnalyzed(note);
     };
 
+    /* ── Project events (Stage 3) ── */
+
+    const handleProjectCreated = (payload: unknown) => {
+      const { project } = (payload ?? {}) as WsProjectCreatedPayload;
+      if (!project || typeof project.id !== "string") return;
+      useAppUi.getState().bumpProjects();
+      toast.success(`Агент создал проект «${project.name}»`, {
+        action: {
+          label: "Открыть",
+          onClick: () => useAppUi.getState().openProject(project.id),
+        },
+      });
+    };
+
+    // File updates are frequent → silent bump; checkpoints toast (deduped
+    // per project for 60s so socket echoes never double-fire).
+    const checkpointToastAt = new Map<string, number>();
+    const handleProjectUpdated = (payload: unknown) => {
+      const { projectId, reason } = (payload ?? {}) as WsProjectUpdatedPayload;
+      if (typeof projectId !== "string") return;
+      const ui = useAppUi.getState();
+      if (ui.activeProjectId !== projectId) return;
+      ui.bumpProjectFiles();
+      if (reason === "checkpoint") {
+        const now = Date.now();
+        if (now - (checkpointToastAt.get(projectId) ?? 0) < 60_000) return;
+        checkpointToastAt.set(projectId, now);
+        toast.success("Агент сделал чекпоинт");
+      }
+    };
+
     s.on("connect", handleConnect);
     s.on("disconnect", handleDisconnect);
     s.on("connect_error", handleConnectError);
     s.on("error", handleServerError);
     s.on("note:analyzing", handleNoteAnalyzing);
     s.on("note:analyzed", handleNoteAnalyzed);
+    s.on("project:created", handleProjectCreated);
+    s.on("project:updated", handleProjectUpdated);
 
     s.connect();
 

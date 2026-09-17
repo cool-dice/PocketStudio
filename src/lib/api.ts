@@ -5,8 +5,15 @@
 
 import type {
   Category,
+  CheckpointResult,
+  CommitInfo,
+  FileEntry,
   Message,
   Note,
+  NoteProjectLink,
+  Project,
+  ProjectListItem,
+  ProjectOrigin,
   Thread,
   ThreadListItem,
   ThreadMode,
@@ -35,6 +42,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         "content-type": "application/json",
         ...init?.headers,
       },
+    });
+  } catch {
+    throw new ApiError("Нет соединения с сервером", 0);
+  }
+
+  const data: unknown = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const body = (data ?? {}) as {
+      error?: string;
+      fields?: Record<string, string>;
+    };
+    throw new ApiError(
+      body.error ?? `Ошибка запроса (${res.status})`,
+      res.status,
+      body.fields,
+    );
+  }
+
+  return data as T;
+}
+
+/**
+ * Same as request() but for FormData bodies — the browser must set the
+ * multipart boundary itself, so NO content-type header is passed.
+ */
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      credentials: "same-origin",
+      method: "POST",
+      body: form,
     });
   } catch {
     throw new ApiError("Нет соединения с сервером", 0);
@@ -197,6 +237,143 @@ export const api = {
   listCategories(): Promise<Category[]> {
     return request<{ categories: Category[] }>("/api/categories").then(
       (r) => r.categories,
+    );
+  },
+
+  /* ── Projects & workspace files (Stage 3) ── */
+
+  listProjects(): Promise<ProjectListItem[]> {
+    return request<{ projects: ProjectListItem[] }>("/api/projects").then(
+      (r) => r.projects,
+    );
+  },
+
+  /** JSON create (template / github). The note is linked with kind 'context'. */
+  createProject(data: {
+    name: string;
+    description?: string;
+    origin: Extract<ProjectOrigin, "template" | "github">;
+    remoteUrl?: string;
+    noteId?: string;
+  }): Promise<Project> {
+    return request<{ project: Project }>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => r.project);
+  },
+
+  /** Multipart create (zip import, ≤20MB) from a prepared FormData. */
+  createProjectFromZipRaw(form: FormData): Promise<Project> {
+    return requestForm<{ project: Project }>("/api/projects", form).then(
+      (r) => r.project,
+    );
+  },
+
+  getProject(
+    id: string,
+  ): Promise<Project & { notes: { id: string; preview: string; status: string; linkKind: string }[] }> {
+    return request<{
+      project: Project & {
+        notes: { id: string; preview: string; status: string; linkKind: string }[];
+      };
+    }>(`/api/projects/${encodeURIComponent(id)}`).then((r) => r.project);
+  },
+
+  updateProject(
+    id: string,
+    patch: { name?: string; description?: string },
+  ): Promise<Project> {
+    return request<{ project: Project }>(
+      `/api/projects/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      },
+    ).then((r) => r.project);
+  },
+
+  deleteProject(id: string): Promise<void> {
+    return request<{ ok: boolean }>(
+      `/api/projects/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  getProjectTree(id: string): Promise<{
+    tree: FileEntry[];
+    truncated: boolean;
+    dirty: boolean;
+  }> {
+    return request(`/api/projects/${encodeURIComponent(id)}/tree`);
+  },
+
+  getProjectFile(
+    id: string,
+    path: string,
+  ): Promise<{ path: string; content: string; size: number }> {
+    const qs = new URLSearchParams({ path });
+    return request(
+      `/api/projects/${encodeURIComponent(id)}/file?${qs.toString()}`,
+    );
+  },
+
+  saveProjectFile(
+    id: string,
+    path: string,
+    content: string,
+  ): Promise<{ path: string; size: number; created: boolean }> {
+    return request(`/api/projects/${encodeURIComponent(id)}/file`, {
+      method: "PUT",
+      body: JSON.stringify({ path, content }),
+    });
+  },
+
+  listProjectCommits(id: string, limit = 50): Promise<CommitInfo[]> {
+    return request<{ commits: CommitInfo[] }>(
+      `/api/projects/${encodeURIComponent(id)}/commits?limit=${limit}`,
+    ).then((r) => r.commits);
+  },
+
+  createProjectCheckpoint(
+    id: string,
+    message: string,
+  ): Promise<CheckpointResult> {
+    return request<{ checkpoint: CheckpointResult }>(
+      `/api/projects/${encodeURIComponent(id)}/checkpoint`,
+      {
+        method: "POST",
+        body: JSON.stringify({ message }),
+      },
+    ).then((r) => r.checkpoint);
+  },
+
+  /* ── Note ↔ project links ── */
+
+  listNoteLinks(id: string): Promise<NoteProjectLink[]> {
+    return request<{ links: NoteProjectLink[] }>(
+      `/api/notes/${encodeURIComponent(id)}/links`,
+    ).then((r) => r.links);
+  },
+
+  linkNoteToProject(
+    noteId: string,
+    projectId: string,
+    kind?: "reference" | "context" | "proposal",
+  ): Promise<NoteProjectLink> {
+    return request<{ link: NoteProjectLink }>(
+      `/api/notes/${encodeURIComponent(noteId)}/links`,
+      {
+        method: "POST",
+        body: JSON.stringify({ projectId, ...(kind ? { kind } : {}) }),
+      },
+    ).then((r) => r.link);
+  },
+
+  unlinkNoteFromProject(noteId: string, projectId: string): Promise<void> {
+    const qs = new URLSearchParams({ projectId });
+    return request<{ ok: boolean }>(
+      `/api/notes/${encodeURIComponent(noteId)}/links?${qs.toString()}`,
+      { method: "DELETE" },
     );
   },
 };

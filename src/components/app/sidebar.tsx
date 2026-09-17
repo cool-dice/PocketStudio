@@ -11,7 +11,7 @@ import { useState } from "react";
 import {
   Bell,
   Check,
-  FolderGit2,
+  FolderKanban,
   LogOut,
   MessageSquarePlus,
   Moon,
@@ -55,8 +55,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
+import { useProjects } from "@/hooks/use-projects";
 import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
+import { ORIGIN_META } from "@/lib/project-style";
 import { useAppUi } from "@/lib/store";
 import type { ThreadListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -71,6 +73,7 @@ interface SidebarContentProps {
 export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const { user, logout } = useAuth();
   const { connected } = useSocket();
+  const { projects } = useProjects();
   const {
     threads,
     threadsLoading,
@@ -83,6 +86,8 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const mainArea = useAppUi((s) => s.mainArea);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
+  const activeProjectId = useAppUi((s) => s.activeProjectId);
+  const openProject = useAppUi((s) => s.openProject);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -116,6 +121,16 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const handleOpenNotebook = () => {
     onNavigate?.();
     setMainArea("notebook");
+  };
+
+  const handleOpenProjects = () => {
+    onNavigate?.();
+    setMainArea("projects");
+  };
+
+  const handleOpenProject = (id: string) => {
+    onNavigate?.();
+    openProject(id);
   };
 
   const handleOpenCapture = () => {
@@ -355,26 +370,83 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
               <span className="flex-1 text-left">Блокнот</span>
             </button>
           </li>
+        </ul>
+      </div>
+
+      {/* ── Projects ── */}
+      <div className="shrink-0 border-t p-3">
+        <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Проекты
+        </h3>
+        <ul className="space-y-1">
           <li>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  disabled
-                  aria-disabled="true"
-                  className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-muted-foreground opacity-70"
-                >
-                  <FolderGit2 className="size-4 shrink-0" aria-hidden="true" />
-                  <span className="flex-1 text-left">Проекты</span>
-                  <Badge variant="secondary" className="text-[10px]">
-                    скоро
-                  </Badge>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Проекты появятся в следующей версии</TooltipContent>
-            </Tooltip>
+            <button
+              type="button"
+              onClick={handleOpenProjects}
+              aria-current={mainArea === "projects" ? "true" : undefined}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
+                mainArea === "projects"
+                  ? "bg-accent font-medium text-accent-foreground"
+                  : "text-foreground/90 hover:bg-accent/60",
+              )}
+            >
+              <FolderKanban
+                className={cn(
+                  "size-4 shrink-0 transition-colors duration-150",
+                  (mainArea === "projects" || mainArea === "project") &&
+                    "text-primary",
+                )}
+                aria-hidden="true"
+              />
+              <span className="flex-1 text-left">Все проекты</span>
+              {projects.length > 0 && (
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {projects.length}
+                </span>
+              )}
+            </button>
           </li>
         </ul>
+        {projects.length > 0 && (
+          <div className="vf-scroll mt-1 max-h-48 overflow-y-auto">
+            <ul className="space-y-0.5">
+              {projects.map((project) => {
+                const active =
+                  mainArea === "project" && activeProjectId === project.id;
+                const meta = ORIGIN_META[project.origin] ?? ORIGIN_META.template;
+                const Icon = meta.icon;
+                return (
+                  <li key={project.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenProject(project.id)}
+                      aria-current={active ? "true" : undefined}
+                      title={project.name}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
+                        active
+                          ? "bg-accent font-medium text-accent-foreground"
+                          : "text-foreground/80 hover:bg-accent/60",
+                      )}
+                    >
+                      <Icon
+                        className={cn(
+                          "size-3.5 shrink-0",
+                          active ? meta.iconClass : "text-muted-foreground/70",
+                        )}
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-left">
+                        {project.name}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* ── Profile ── */}

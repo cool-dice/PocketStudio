@@ -161,11 +161,88 @@ export interface WsNoteAnalyzedPayload {
   note: Note;
 }
 
+/* ── Projects, workspace files & git (Stage 3 REST contract) ── */
+
+export type ProjectOrigin = "template" | "github" | "zip";
+
+export interface ProjectStats {
+  filesCount: number;
+  commitsCount: number;
+  lastCommit: CommitInfo | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  origin: ProjectOrigin;
+  remoteUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+  stats?: ProjectStats;
+}
+
+/** Project row as returned by GET /api/projects (adds list counters). */
+export interface ProjectListItem extends Project {
+  threadsCount: number;
+  notesLinked: number;
+  stats: ProjectStats;
+}
+
+export interface FileEntry {
+  /** Relative POSIX path without a leading ./ */
+  path: string;
+  type: "file" | "dir";
+  /** Bytes for files, 0 for dirs. */
+  size: number;
+}
+
+export interface CommitInfo {
+  hash: string;
+  short: string;
+  message: string;
+  author: string;
+  /** ISO date. */
+  date: string;
+}
+
+export interface CheckpointResult {
+  noop: boolean;
+  commit: CommitInfo | null;
+  filesChanged: number;
+}
+
+/** Note ↔ project link as returned by GET /api/notes/[id]/links. */
+export interface NoteProjectLink {
+  id: string;
+  kind: "reference" | "context" | "proposal";
+  project: { id: string; name: string; origin: ProjectOrigin };
+}
+
+/* ── Project WS events (Stage 3, agent-service → user room) ── */
+
+export interface WsProjectCreatedPayload {
+  project: { id: string; name: string; origin: ProjectOrigin };
+}
+
+export interface WsProjectUpdatedPayload {
+  projectId: string;
+  reason: "files" | "checkpoint";
+}
+
 export const MODE_LABELS: Record<ThreadMode, string> = {
   ask: "Спросить",
   plan: "План",
   act: "Действовать",
   review: "Ревью",
+};
+
+/** Short RU description for the chat mode selector. */
+export const MODE_DESCRIPTIONS: Record<ThreadMode, string> = {
+  ask: "Вопросы и ответы, без изменений",
+  plan: "План работ перед кодом",
+  act: "Полный доступ: создаёт и пишет файлы",
+  review: "Ревью кода и предложения правок",
 };
 
 export const MAX_MESSAGE_LENGTH = 20000;

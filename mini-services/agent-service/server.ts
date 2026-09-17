@@ -1,7 +1,7 @@
-// agent-service — socket.io transport + Stage-1 agent turn orchestration
-// (tool-calling loop over the notebook tools).
+// agent-service — socket.io transport + agent turn orchestration
+// (tool-calling loop over the notebook tools + Stage-3 project/file tools).
 //
-// Contract (worklog Tasks 1 & 4):
+// Contract (worklog Tasks 1, 4 & 3-ctr):
 //   Client→server: "thread:join" {threadId}; "thread:leave" {threadId};
 //                  "message:send" {threadId, content}
 //   Server→client: "message:user" {message}; "agent:thinking" {threadId};
@@ -10,14 +10,22 @@
 //                  "message:end" {threadId, message};
 //                  "tool:start" {threadId, messageId, tool, args};
 //                  "tool:end" {threadId, messageId, tool, args, result};
-//                  "thread:updated" {thread}; "error" {message}
+//                  "thread:updated" {thread}; "error" {message};
+//                  "project:created" {project: {id, name, origin}} (user room);
+//                  "project:updated" {projectId, reason: "files"|"checkpoint"} (user room)
 //   Message shape: {id, threadId, role: 'user'|'assistant', content, createdAt}
 //
-// Agent turn = up to 6 LLM iterations. Each LLM reply is either plain text
+// Agent turn = up to 8 LLM iterations. Each LLM reply is either plain text
 // (→ streamed to the client via message:start/delta/end, loop ends) or a JSON
-// tool call (→ tool row persisted, tool executed, tool:start/tool:end emitted,
-// result fed back into the next LLM call via [TOOL_CALL]/[TOOL_RESULT]
-// history markers).
+// tool call (→ tool row persisted, tool executed with ToolContext
+// {threadId, mode, projectId} from the thread row, tool:start/tool:end
+// emitted, result fed back into the next LLM call via [TOOL_CALL]/
+// [TOOL_RESULT] history markers). The system prompt is mode-aware
+// (buildAgentSystemPrompt) and carries the active project's tree + commits.
+// Successful project tools emit WS project events to the user room; a turn
+// that wrote/deleted files in "act" mode gets one auto-checkpoint BEFORE the
+// final answer streams (nothing slow may run after message:end — the busy
+// flag clears as soon as the turn returns).
 //
 // Path MUST be "/" (Caddy gateway requirement), port 3003 (hardcoded).
 
@@ -31,17 +39,26 @@ import {
   chunkText,
   type LlmMessage,
 } from "./agent";
-import { AGENT_SYSTEM_PROMPT, deriveThreadTitle } from "./prompts";
-import { getTool } from "./tools";
+import { buildAgentSystemPrompt, deriveThreadTitle } from "./prompts";
+import { getTool, type ToolContext } from "./tools";
 import { startAnalyzer, stopAnalyzer } from "./analyzer";
+import {
+  projectRoot,
+  listWorkspaceTree,
+  listProjectCommits,
+  checkpointProject,
+} from "../../src/lib/workspace";
 
 const PORT = 3003;
 const MAX_CONTENT_LENGTH = 20000;
 const HISTORY_LIMIT = 30; // last N message rows fed to the LLM (all roles)
-const MAX_TOOL_ITERATIONS = 6; // hard cap on LLM round-trips per turn
+const MAX_TOOL_ITERATIONS = 8; // hard cap on LLM round-trips per turn (file work needs more steps)
 const TURN_TIMEOUT_MS = 120000; // total turn budget
 const MAX_TOOL_RESULT_CHARS = 8000; // stored toolResult JSON cap
 const TOOL_RESULT_HISTORY_CHARS = 2000; // toolResult cap inside LLM history
+const PROMPT_TREE_PATHS = 40; // project tree paths embedded in the system prompt
+const PROMPT_COMMITS = 5; // recent commits embedded in the system prompt
+const AUTO_CHECKPOINT_MESSAGE = "Агент: изменения за ход";
 const FALLBACK_REPLY =
   "Я обработал запрос, но что-то пошло не так — попробуйте переформулировать.";
 
@@ -87,6 +104,67 @@ function serializeMessage(m: MessageRow) {
 
 // Concurrency guard: one agent turn per thread at a time.
 const runningThreads = new Map<string, true>();
+
+/** Thread fields the turn orchestration needs (subset of the Prisma row;
+ *  projectId is mutated in-place when create_project binds the thread so
+ *  later iterations of the SAME turn see the fresh binding). */
+interface ThreadTurnInfo {
+  id: string;
+  userId: string;
+  mode: string;
+  projectId: string | null;
+}
+
+/** Tool result → shallow object view (non-objects / null → null). */
+function resultObject(result: unknown): Record<string, unknown> | null {
+  return typeof result === "object" && result !== null
+    ? (result as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Mode + active-project system prompt for the turn (contract 3-ctr §4).
+ * Built ONCE per turn (not per iteration). Workspace failures degrade to a
+ * project-less prompt — a broken tree must never kill the turn.
+ */
+async function buildTurnSystemPrompt(
+  userId: string,
+  thread: ThreadTurnInfo,
+): Promise<string> {
+  try {
+    if (!thread.projectId) {
+      return buildAgentSystemPrompt({ mode: thread.mode });
+    }
+    const project = await db.project.findFirst({
+      where: { id: thread.projectId, userId },
+      select: { id: true, name: true, origin: true },
+    });
+    if (!project) {
+      return buildAgentSystemPrompt({ mode: thread.mode });
+    }
+    const root = projectRoot(project.id);
+    const [tree, commits] = await Promise.all([
+      listWorkspaceTree(root),
+      listProjectCommits(root, PROMPT_COMMITS),
+    ]);
+    return buildAgentSystemPrompt({
+      mode: thread.mode,
+      projectName: project.name,
+      projectOrigin: project.origin,
+      projectTree: tree.entries
+        .filter((e) => e.type === "file")
+        .map((e) => e.path)
+        .slice(0, PROMPT_TREE_PATHS),
+      recentCommits: commits.map((c) => `${c.short} ${c.message}`),
+    });
+  } catch (err) {
+    console.warn(
+      "[agent] project context build failed (continuing without it):",
+      err instanceof Error ? err.message : String(err),
+    );
+    return buildAgentSystemPrompt({ mode: thread.mode });
+  }
+}
 
 // ─────────────────────────── agent turn ───────────────────────────
 
@@ -144,7 +222,13 @@ function sanitizeTextAnswer(raw: string): string | null {
     .split("\n")
     .filter((line) => !/^\s*\[(TOOL_CALL|TOOL_RESULT)/i.test(line))
     .join("\n");
-  // 2. Remove a bare JSON tool object if it is the entire message.
+  // 2. Drop whole-line bare tool-JSON objects (chained-call leak: the model
+  //    sometimes packs several {"tool":…} objects into one reply).
+  text = text
+    .split("\n")
+    .filter((line) => !/^\s*\{\s*"tool"\s*:/.test(line))
+    .join("\n");
+  // 3. Remove a bare JSON tool object if it is the entire message.
   const trimmed = text.trim();
   if (/^\{\s*"tool"\s*:/.test(trimmed)) {
     try {
@@ -190,22 +274,35 @@ async function streamFinalResponse(
 }
 
 /**
- * Stage-1 agent turn (tool-calling loop):
+ * Agent turn (tool-calling loop):
  *  1. persist user message → emit "message:user" → bump thread.updatedAt
- *  2. up to MAX_TOOL_ITERATIONS LLM iterations:
+ *  2. build the mode/project system prompt ONCE (buildTurnSystemPrompt)
+ *  3. up to MAX_TOOL_ITERATIONS LLM iterations:
  *       - "agent:thinking" (before every LLM call, incl. the first)
  *       - history = last 30 rows (user/assistant + [TOOL_CALL]/[TOOL_RESULT])
  *       - LLM reply parses as a tool call? → persist tool row ("pending") →
- *         emit "tool:start" → execute tool → persist result (≤8000 chars) →
- *         emit "tool:end" → next iteration sees the result in history
- *       - plain text? → streamFinalResponse, loop ends
- *  3. loop exhausted / turn timeout (>120s) without a text answer →
- *     stream a fallback message
- *  4. auto-title brand-new threads → "thread:updated" to the user room
+ *         emit "tool:start" → execute with ToolContext → persist result
+ *         (≤8000 chars) → emit "tool:end" (+ project WS events on success) →
+ *         next iteration sees the result in history
+ *       - plain text? → remembered as finalText, loop ends
+ *  4. dirty act-mode turn (write_file/delete_file succeeded) →
+ *     auto-checkpoint (failures are logged and swallowed)
+ *  5. stream the final answer (or the fallback when the loop ended without
+ *     one) — AFTER the checkpoint, so nothing slow runs after message:end
+ *  6. loop exhausted / turn timeout (>120s) without a text answer →
+ *     fallback message
+ *  7. auto-title brand-new threads → "thread:updated" to the user room
  * Never throws — failures emit "error" to the triggering socket.
  */
-async function runAgentTurn(socket: Socket, user: WsUser, threadId: string, content: string): Promise<void> {
+async function runAgentTurn(
+  socket: Socket,
+  user: WsUser,
+  threadId: string,
+  content: string,
+  thread: ThreadTurnInfo,
+): Promise<void> {
   const room = `thread:${threadId}`;
+  const userRoom = `user:${user.sub}`;
   const turnStart = Date.now();
 
   try {
@@ -221,8 +318,12 @@ async function runAgentTurn(socket: Socket, user: WsUser, threadId: string, cont
     // keeps the busy-flag race window at effectively zero.
     await maybeAutoTitle(threadId, user.sub);
 
-    // 2. Tool-calling loop.
-    let answered = false;
+    // 2. Mode + project context for the whole turn (built once).
+    const systemPrompt = await buildTurnSystemPrompt(user.sub, thread);
+
+    // 3. Tool-calling loop.
+    let finalText: string | null = null;
+    let turnDirty = false; // write_file/delete_file succeeded this turn
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       if (Date.now() - turnStart > TURN_TIMEOUT_MS) break;
@@ -231,15 +332,14 @@ async function runAgentTurn(socket: Socket, user: WsUser, threadId: string, cont
       io.to(room).emit("agent:thinking", { threadId });
 
       const history = await buildLLMHistory(threadId);
-      const raw = await generateLLMResponse(AGENT_SYSTEM_PROMPT, history);
+      const raw = await generateLLMResponse(systemPrompt, history);
 
       const call = parseToolCall(raw);
       if (!call) {
         // Would-be plain text: strip leaked protocol artifacts first.
         const clean = sanitizeTextAnswer(raw);
         if (clean) {
-          await streamFinalResponse(room, threadId, clean);
-          answered = true;
+          finalText = clean;
           break;
         }
         // Nothing human-readable left (model emitted protocol garbage) —
@@ -267,11 +367,18 @@ async function runAgentTurn(socket: Socket, user: WsUser, threadId: string, cont
       });
 
       // Execute (never throws into the loop — errors become tool results).
+      // ctx is rebuilt every iteration: create_project may have bound the
+      // thread's projectId in a previous iteration of this same turn.
+      const ctx: ToolContext = {
+        threadId,
+        mode: thread.mode,
+        projectId: thread.projectId,
+      };
       let result: unknown;
       try {
         const tool = getTool(call.tool);
         result = tool
-          ? await tool.execute(call.args, user.sub)
+          ? await tool.execute(call.args, user.sub, ctx)
           : { error: `Неизвестный инструмент: ${call.tool}` };
       } catch (err) {
         result = { error: err instanceof Error ? err.message : String(err) };
@@ -289,18 +396,74 @@ async function runAgentTurn(socket: Socket, user: WsUser, threadId: string, cont
         args: call.args,
         result,
       });
+
+      // Project WS events (contract 3-ctr §5) — emitted HERE by the
+      // transport layer, tools stay io-free.
+      const r = resultObject(result);
+      if (r && r.error === undefined) {
+        if (call.tool === "create_project") {
+          const p = resultObject(r.project);
+          if (p && typeof p.id === "string") {
+            // Keep the local binding fresh for later iterations + the
+            // auto-checkpoint below.
+            thread.projectId = p.id;
+            io.to(userRoom).emit("project:created", {
+              project: { id: p.id, name: p.name, origin: p.origin },
+            });
+          }
+        } else if (
+          (call.tool === "write_file" || call.tool === "delete_file") &&
+          thread.projectId
+        ) {
+          turnDirty = true;
+          io.to(userRoom).emit("project:updated", {
+            projectId: thread.projectId,
+            reason: "files",
+          });
+        } else if (
+          call.tool === "checkpoint" &&
+          thread.projectId &&
+          r.noop === false
+        ) {
+          io.to(userRoom).emit("project:updated", {
+            projectId: thread.projectId,
+            reason: "checkpoint",
+          });
+        }
+      }
       // Loop continues — the next iteration sees [TOOL_CALL]/[TOOL_RESULT].
     }
 
-    // 3. Loop exhausted or timed out without a text answer → fallback.
-    if (!answered) {
-      await streamFinalResponse(room, threadId, FALLBACK_REPLY);
+    // 4. Auto-checkpoint a dirty act-mode turn (contract 3-ctr §5) — BEFORE
+    // the final answer streams. Failure must never break the turn.
+    if (turnDirty && thread.mode === "act" && thread.projectId) {
+      try {
+        const cp = await checkpointProject(
+          projectRoot(thread.projectId),
+          AUTO_CHECKPOINT_MESSAGE,
+        );
+        if (!cp.noop) {
+          io.to(userRoom).emit("project:updated", {
+            projectId: thread.projectId,
+            reason: "checkpoint",
+          });
+        }
+      } catch (err) {
+        console.warn(
+          "[agent] auto-checkpoint failed (ignored):",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
+
+    // 5. Final answer (or the fallback when the loop ended without text).
+    await streamFinalResponse(room, threadId, finalText ?? FALLBACK_REPLY);
 
     // NOTE: nothing slow may happen after the final message:end emit —
     // the busy flag clears right after this function returns, and a
     // client that sends its next message on message:end would otherwise
-    // race into "Агент ещё отвечает…". Auto-title moved to the turn start.
+    // race into "Агент ещё отвечает…". Auto-title moved to the turn start,
+    // the auto-checkpoint runs before the answer streams.
   } catch (err) {
     console.error(
       `[agent] turn failed (thread ${threadId}):`,
@@ -425,7 +588,7 @@ io.on("connection", async (socket: Socket) => {
         // Make sure the sender receives thread room events even if they
         // skipped an explicit thread:join.
         socket.join(`thread:${threadId}`);
-        await runAgentTurn(socket, user, threadId, text);
+        await runAgentTurn(socket, user, threadId, text, thread);
       } finally {
         runningThreads.delete(threadId);
       }

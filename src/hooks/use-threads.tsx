@@ -30,6 +30,7 @@ import type {
   Note,
   NoteStatus,
   ThreadListItem,
+  ThreadMode,
   WsAgentThinkingPayload,
   WsErrorPayload,
   WsMessageDeltaPayload,
@@ -57,6 +58,13 @@ interface ThreadsContextValue {
   newThread: () => Promise<void>;
   deleteThread: (id: string) => Promise<void>;
   renameThread: (id: string, title: string) => Promise<void>;
+  /** Switch the thread mode (ask/plan/act/review) — optimistic + PATCH. */
+  updateThreadMode: (id: string, mode: ThreadMode) => Promise<void>;
+  /**
+   * Create a new thread bound to a project («Обсудить проект») and make it
+   * active. Returns the thread or null on failure.
+   */
+  startProjectThread: (projectId: string, title: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
 }
 
@@ -286,6 +294,53 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       toast.error("Не удалось создать диалог");
     }
   }, [emitLeave, maybeDeleteEmptyThread]);
+
+  /** New thread pre-bound to a project (project screen «Обсудить проект»). */
+  const startProjectThread = useCallback(
+    async (projectId: string, title: string) => {
+      const prevId = activeIdRef.current;
+      if (prevId) {
+        await maybeDeleteEmptyThread(prevId);
+        emitLeave(prevId);
+      }
+      try {
+        const thread = await api.createThread({ projectId, title });
+        const seq = ++selectSeqRef.current;
+        setThreads((prev) => [{ ...thread, lastMessage: null }, ...prev]);
+        loadedRef.current = thread.id;
+        activeIdRef.current = thread.id;
+        setActiveThreadId(thread.id);
+        setMessages([]);
+        setMessagesLoading(false);
+        const s = socketRef.current;
+        if (s && s.connected) s.emit("thread:join", { threadId: thread.id });
+      } catch {
+        toast.error("Не удалось создать диалог с проектом");
+      }
+    },
+    [emitLeave, maybeDeleteEmptyThread],
+  );
+
+  /** Optimistic mode switch; reverts the chip when the PATCH fails. */
+  const updateThreadMode = useCallback(
+    async (id: string, mode: ThreadMode) => {
+      const prevMode = threadsRef.current.find((t) => t.id === id)?.mode;
+      setThreads((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, mode } : t)),
+      );
+      try {
+        await api.updateThread(id, { mode });
+      } catch {
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.id === id && prevMode ? { ...t, mode: prevMode } : t,
+          ),
+        );
+        toast.error("Не удалось изменить режим диалога");
+      }
+    },
+    [],
+  );
 
   const deleteThread = useCallback(
     async (id: string) => {
@@ -648,6 +703,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       newThread,
       deleteThread,
       renameThread,
+      updateThreadMode,
+      startProjectThread,
       sendMessage,
     }),
     [
@@ -664,6 +721,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       newThread,
       deleteThread,
       renameThread,
+      updateThreadMode,
+      startProjectThread,
       sendMessage,
     ],
   );

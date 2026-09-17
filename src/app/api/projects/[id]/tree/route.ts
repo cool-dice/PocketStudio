@@ -1,0 +1,48 @@
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { getUserFromRequest } from "@/lib/auth";
+import {
+  WorkspaceError,
+  hasUncommittedChanges,
+  listWorkspaceTree,
+  projectRoot,
+} from "@/lib/workspace";
+
+export const dynamic = "force-dynamic";
+
+/* ── GET /api/projects/[id]/tree — flat file listing ── */
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await getUserFromRequest(req);
+  if (!session) {
+    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
+  }
+  const { id } = await params;
+
+  const project = await db.project.findFirst({
+    where: { id, userId: session.sub },
+  });
+  if (!project) {
+    return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+  }
+
+  try {
+    const root = projectRoot(project.id);
+    const [{ entries, truncated }, dirty] = await Promise.all([
+      listWorkspaceTree(root),
+      hasUncommittedChanges(root),
+    ]);
+    return NextResponse.json({ tree: entries, truncated, dirty });
+  } catch (err) {
+    if (err instanceof WorkspaceError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    return NextResponse.json(
+      { error: "Не удалось прочитать файлы проекта" },
+      { status: 500 },
+    );
+  }
+}

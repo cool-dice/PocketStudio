@@ -2,19 +2,15 @@
 
 /**
  * Welcome — empty-thread screen: greeting + starter chips.
- * Only «Что ты умеешь?» is enabled (sends that text); the rest are
- * placeholders with a «Скоро» tooltip.
+ * «Записать мысль» opens the ⌘K capture, «Создать проект» the project
+ * creation dialog (template / GitHub / zip), «Что ты умеешь?» sends that
+ * text to the agent.
  */
 
 import { FolderGit2, NotebookPen, Sparkles } from "lucide-react";
 
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import { useThreads } from "@/hooks/use-threads";
 import { useAppUi } from "@/lib/store";
@@ -23,6 +19,7 @@ export function Welcome() {
   const { user } = useAuth();
   const { sendMessage } = useThreads();
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
+  const openCreateProject = useAppUi((s) => s.openCreateProject);
 
   const firstName = (user?.name ?? "").trim().split(/\s+/)[0] || "друг";
 
@@ -48,15 +45,18 @@ export function Welcome() {
           <NotebookPen className="size-4" aria-hidden="true" />
           Записать мысль
         </Button>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="outline" size="sm" disabled className="gap-2">
-              <FolderGit2 className="size-4" aria-hidden="true" />
-              Создать проект
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Скоро</TooltipContent>
-        </Tooltip>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 gap-2 rounded-xl"
+          onClick={() => openCreateProject()}
+        >
+          <FolderGit2 className="size-4" aria-hidden="true" />
+          Создать проект
+          <span className="text-[11px] font-normal text-muted-foreground">
+            из шаблона, GitHub или zip
+          </span>
+        </Button>
         <Button
           variant="outline"
           size="sm"

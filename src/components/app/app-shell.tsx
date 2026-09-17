@@ -14,14 +14,18 @@ import { useEffect, useState } from "react";
 import { CaptureDialog } from "@/components/app/capture-dialog";
 import { ChatArea } from "@/components/app/chat-area";
 import { ContextPanel } from "@/components/app/context-panel";
+import { CreateProjectDialog } from "@/components/app/create-project-dialog";
 import { MobileNoteDialog } from "@/components/app/mobile-note-dialog";
 import { NotebookScreen } from "@/components/app/notebook-screen";
+import { ProjectScreen } from "@/components/app/project-screen";
+import { ProjectsScreen } from "@/components/app/projects-screen";
 import { SidebarContent } from "@/components/app/sidebar";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAppUi } from "@/lib/store";
 
 export function AppShell() {
   const mainArea = useAppUi((s) => s.mainArea);
+  const activeProjectId = useAppUi((s) => s.activeProjectId);
   const contextOpen = useAppUi((s) => s.contextOpen);
   const setContextOpen = useAppUi((s) => s.setContextOpen);
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
@@ -65,15 +69,23 @@ export function AppShell() {
         </SheetContent>
       </Sheet>
 
-      {/* ── Center: chat or notebook ── */}
+      {/* ── Center: chat / notebook / projects / project detail ── */}
       {mainArea === "chat" ? (
         <ChatArea
           contextOpen={contextOpen}
           onToggleContext={() => setContextOpen(!contextOpen)}
           onOpenMobileNav={() => setMobileNavOpen(true)}
         />
-      ) : (
+      ) : mainArea === "notebook" ? (
         <NotebookScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "project" && activeProjectId ? (
+        <ProjectScreen
+          key={activeProjectId}
+          projectId={activeProjectId}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
+        />
+      ) : (
+        <ProjectsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       )}
 
       {/* ── Right: context (xl+) ── */}
@@ -81,6 +93,7 @@ export function AppShell() {
 
       {/* ── Overlays ── */}
       <CaptureDialog />
+      <CreateProjectDialog />
       <MobileNoteDialog />
     </div>
   );

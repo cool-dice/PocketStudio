@@ -92,10 +92,81 @@ function stripFences(text: string): string {
 }
 
 /**
+ * Split a reply into consecutive top-level {...} object candidates using a
+ * string-aware brace-depth walk. Chained replies like
+ *   {"tool":"write_file",…}\n{"tool":"checkpoint",…}
+ * (observed in the wild: the model packs several calls into one answer)
+ * are split into individual objects; prose between objects is ignored.
+ */
+function splitTopLevelObjects(text: string): string[] {
+  const objects: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          objects.push(text.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
+  }
+  return objects;
+}
+
+/** Parse one JSON string as a tool-call object, null when not shaped right. */
+function tryParseToolObject(raw: string): ToolCall | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.tool === "string" && obj.tool.trim()) {
+    if (typeof obj.args === "object" && obj.args !== null && !Array.isArray(obj.args)) {
+      return { tool: obj.tool.trim(), args: obj.args as Record<string, unknown> };
+    }
+    // Flat form observed in the wild: {"tool":"write_file","path":…,…} —
+    // the model forgot the args wrapper; treat the other keys as args.
+    if (obj.args === undefined) {
+      const { tool, ...rest } = obj;
+      return { tool: tool.trim(), args: rest as Record<string, unknown> };
+    }
+  }
+  return null;
+}
+
+/**
  * Detect a tool call in an LLM reply.
  *   1. trim; strip markdown fences when the reply starts with ```
- *   2. try JSON.parse (then, as a fallback, extract the outermost {...} block)
- *   3. accept only objects with a string "tool" and an object "args"
+ *   2. normalize a legacy "[TOOL_CALL name] {json}" bracket form
+ *   3. when the reply starts with "{": split consecutive top-level objects
+ *      (string-aware) and return the FIRST valid tool object — chained
+ *      follow-up calls resurface naturally on the next loop iteration
+ *      (the model re-emits them after each [TOOL_RESULT])
+ *   4. fallback: plain JSON.parse of the whole reply / outermost {...} slice
  * Anything else is a plain-text answer → null.
  */
 export function parseToolCall(text: string): ToolCall | null {
@@ -109,11 +180,20 @@ export function parseToolCall(text: string): ToolCall | null {
   if (bracket) {
     try {
       const args = JSON.parse(bracket[2].trim());
-      if (typeof args === "object" && args !== null) {
+      if (typeof args === "object" && args !== null && !Array.isArray(args)) {
         return { tool: bracket[1], args: args as Record<string, unknown> };
       }
     } catch {
       // fall through to the regular candidates
+    }
+  }
+
+  // Reply starts with an object → walk brace depth, try each top-level
+  // object (handles chained calls AND single object + trailing prose).
+  if (trimmed.startsWith("{")) {
+    for (const obj of splitTopLevelObjects(trimmed)) {
+      const call = tryParseToolObject(obj);
+      if (call) return call;
     }
   }
 
@@ -125,28 +205,8 @@ export function parseToolCall(text: string): ToolCall | null {
   }
 
   for (const candidate of candidates) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(candidate);
-    } catch {
-      continue;
-    }
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      !Array.isArray(parsed)
-    ) {
-      const obj = parsed as Record<string, unknown>;
-      if (typeof obj.tool === "string" && obj.tool.trim()) {
-        if (
-          typeof obj.args === "object" &&
-          obj.args !== null &&
-          !Array.isArray(obj.args)
-        ) {
-          return { tool: obj.tool.trim(), args: obj.args as Record<string, unknown> };
-        }
-      }
-    }
+    const call = tryParseToolObject(candidate);
+    if (call) return call;
   }
 
   return null;

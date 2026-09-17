@@ -3,6 +3,8 @@
 /**
  * Composer — auto-growing textarea. Enter sends, Shift+Enter inserts a
  * newline. Disabled while the agent is thinking/streaming (busy).
+ * When the active thread is bound to a project, a small «Проект: …» chip
+ * sits above the input (click → project screen).
  *
  * Voice (Stage 2): compact mic next to the send button — records via
  * useVoiceRecorder, the backend transcribes (POST /api/notes/voice) and
@@ -10,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Loader2, Mic, Square } from "lucide-react";
+import { ArrowUp, FolderGit2, Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import { MAX_MESSAGE_LENGTH } from "@/lib/types";
@@ -20,15 +22,21 @@ import {
   useVoiceRecorder,
   type VoiceClip,
 } from "@/hooks/use-voice-recorder";
+import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
 
 const MAX_HEIGHT = 200;
 
 export function Composer() {
-  const { busy, sendMessage } = useThreads();
+  const { busy, sendMessage, activeThread } = useThreads();
+  const { getById } = useProjects();
+  const openProject = useAppUi((s) => s.openProject);
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  const boundProject = getById(activeThread?.projectId ?? null);
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
@@ -109,12 +117,23 @@ export function Composer() {
   return (
     <div className="border-t bg-background">
       <form
-        className="mx-auto w-full max-w-3xl px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        className="mx-auto w-full max-w-3xl px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
+        {boundProject && (
+          <button
+            type="button"
+            onClick={() => openProject(boundProject.id)}
+            aria-label={`Проект «${boundProject.name}» — открыть`}
+            className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+            <span className="truncate">Проект: {boundProject.name}</span>
+          </button>
+        )}
         <div className="flex items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
           <label htmlFor="composer" className="sr-only">
             Сообщение

@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * AppUi store (zustand) — cross-component UI state for Stage 1:
- * main area routing (chat ⇄ notebook), context-panel note detail,
- * the ⌘K capture dialog and a notes version counter (any note mutation
- * bumps it so a mounted NotebookScreen silently refetches).
+ * AppUi store (zustand) — cross-component UI state:
+ * main area routing (chat ⇄ notebook ⇄ projects ⇄ project detail),
+ * context-panel note detail, the ⌘K capture dialog, the create-project
+ * dialog (optionally pre-bound to a note) and version counters so mounted
+ * screens silently refetch after mutations / WS events.
  *
  * Use atomic selectors in components: useAppUi((s) => s.mainArea).
  * In callbacks outside React (WS handlers), use useAppUi.getState().
@@ -15,7 +16,7 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import type { Note } from "@/lib/types";
 
-export type MainArea = "chat" | "notebook";
+export type MainArea = "chat" | "notebook" | "projects" | "project";
 
 interface AppUiState {
   /** Which screen occupies the center zone. */
@@ -56,6 +57,33 @@ interface AppUiState {
   /** Incremented on every note mutation → mounted use-notes refetch. */
   notesVersion: number;
   bumpNotes: () => void;
+
+  /** Project detail screen: the project being shown (mainArea === "project"). */
+  activeProjectId: string | null;
+  /** Open the project detail screen (center zone). */
+  openProject: (id: string) => void;
+  /** Leave the project detail screen → back to the projects list. */
+  closeProject: () => void;
+
+  /** Incremented on every project mutation → mounted use-projects refetch. */
+  projectsVersion: number;
+  bumpProjects: () => void;
+
+  /**
+   * Incremented when the ACTIVE project's files change (WS project:updated
+   * for this project, manual saves trigger a local tree refresh anyway).
+   * The project screen refetches the tree + open file when it bumps.
+   */
+  projectFilesVersion: number;
+  bumpProjectFiles: () => void;
+
+  /** Create-project dialog (global, mounted in AppShell). */
+  createProjectOpen: boolean;
+  /** Open the create dialog; noteId pre-binds it to a note (kind 'context'). */
+  openCreateProject: (noteId?: string) => void;
+  setCreateProjectOpen: (open: boolean) => void;
+  /** Note the dialog is bound to (null → regular create). */
+  createProjectNoteId: string | null;
 }
 
 export const useAppUi = create<AppUiState>((set, get) => ({
@@ -102,4 +130,35 @@ export const useAppUi = create<AppUiState>((set, get) => ({
 
   notesVersion: 0,
   bumpNotes: () => set((state) => ({ notesVersion: state.notesVersion + 1 })),
+
+  activeProjectId: null,
+  openProject: (id) =>
+    set((state) => ({
+      mainArea: "project",
+      activeProjectId: id,
+      // A fresh open always sees the newest files.
+      projectFilesVersion: state.projectFilesVersion + 1,
+    })),
+  closeProject: () => set({ mainArea: "projects", activeProjectId: null }),
+
+  projectsVersion: 0,
+  bumpProjects: () =>
+    set((state) => ({ projectsVersion: state.projectsVersion + 1 })),
+
+  projectFilesVersion: 0,
+  bumpProjectFiles: () =>
+    set((state) => ({ projectFilesVersion: state.projectFilesVersion + 1 })),
+
+  createProjectOpen: false,
+  createProjectNoteId: null,
+  openCreateProject: (noteId) =>
+    set({ createProjectOpen: true, createProjectNoteId: noteId ?? null }),
+  setCreateProjectOpen: (open) => {
+    if (open) {
+      set({ createProjectOpen: true });
+    } else {
+      // Closing always unbinds the note.
+      set({ createProjectOpen: false, createProjectNoteId: null });
+    }
+  },
 }));

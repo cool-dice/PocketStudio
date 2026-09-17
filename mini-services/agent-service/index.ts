@@ -5,5 +5,6 @@
 
 process.env.DATABASE_URL ||= "file:/home/z/my-project/db/custom.db";
 process.env.AUTH_SECRET ||= "vf-local-dev-secret-9f2c";
+process.env.VIBEFLOW_WORKSPACE_ROOT ||= "/home/z/my-project/workspace";
 
 await import("./server.ts");
