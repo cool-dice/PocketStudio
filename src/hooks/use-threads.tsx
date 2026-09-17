@@ -29,17 +29,21 @@ import type {
   Message,
   Note,
   NoteStatus,
+  Task,
   ThreadListItem,
   ThreadMode,
+  TurnPhase,
   WsAgentThinkingPayload,
   WsErrorPayload,
   WsMessageDeltaPayload,
   WsMessageEndPayload,
   WsMessageStartPayload,
   WsMessageUserPayload,
+  WsTasksUpdatedPayload,
   WsThreadUpdatedPayload,
   WsToolEndPayload,
   WsToolStartPayload,
+  WsTurnPhasePayload,
 } from "@/lib/types";
 import { useSocket } from "@/hooks/use-socket";
 
@@ -54,6 +58,10 @@ interface ThreadsContextValue {
   busy: boolean;
   /** "agent:thinking" received for the active thread (before the bubble appears). */
   thinking: boolean;
+  /** Orchestrator phase for the active thread (plan/act/review) + label. */
+  phase: { phase: TurnPhase; label: string | null } | null;
+  /** Plan checklist of the active thread (live via "tasks:updated"). */
+  tasks: Task[];
   selectThread: (id: string) => Promise<void>;
   newThread: () => Promise<void>;
   deleteThread: (id: string) => Promise<void>;
@@ -122,6 +130,12 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [thinkingThreadId, setThinkingThreadId] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [phase, setPhase] = useState<{
+    threadId: string;
+    phase: TurnPhase;
+    label: string | null;
+  } | null>(null);
   const [streaming, setStreaming] = useState<{
     threadId: string;
     messageId: string;
@@ -209,10 +223,15 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       activeIdRef.current = id;
       setActiveThreadId(id);
       setMessages([]);
+      setTasks([]);
+      setPhase(null);
       setMessagesLoading(true);
 
       try {
-        const { thread, messages: loaded } = await api.getThread(id);
+        const [{ thread, messages: loaded }, tasksRes] = await Promise.all([
+          api.getThread(id),
+          api.getThreadTasks(id).catch(() => ({ tasks: [] as Task[] })),
+        ]);
         if (seq !== selectSeqRef.current) return; // stale response
         setThreads((prev) => {
           const idx = prev.findIndex((t) => t.id === id);
@@ -223,6 +242,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         });
         loadedRef.current = id;
         setMessages(loaded.map((m) => ({ ...m })));
+        setTasks(tasksRes.tasks);
         const s = socketRef.current;
         if (s && s.connected) s.emit("thread:join", { threadId: id });
       } catch {
@@ -287,6 +307,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       activeIdRef.current = thread.id;
       setActiveThreadId(thread.id);
       setMessages([]);
+      setTasks([]);
+      setPhase(null);
       setMessagesLoading(false);
       const s = socketRef.current;
       if (s && s.connected) s.emit("thread:join", { threadId: thread.id });
@@ -311,6 +333,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         activeIdRef.current = thread.id;
         setActiveThreadId(thread.id);
         setMessages([]);
+        setTasks([]);
+        setPhase(null);
         setMessagesLoading(false);
         const s = socketRef.current;
         if (s && s.connected) s.emit("thread:join", { threadId: thread.id });
@@ -362,6 +386,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
           activeIdRef.current = null;
           setActiveThreadId(null);
           setMessages([]);
+          setTasks([]);
+          setPhase(null);
           setMessagesLoading(false);
         }
       }
@@ -488,6 +514,21 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       setThinkingThreadId(threadId);
     };
 
+    const onTasksUpdated = ({ threadId, tasks: updated }: WsTasksUpdatedPayload) => {
+      if (threadId === activeIdRef.current) setTasks(updated);
+    };
+
+    const onTurnPhase = ({ threadId, phase: p, label }: WsTurnPhasePayload) => {
+      if (threadId !== activeIdRef.current) return;
+      if (p === "idle") {
+        setPhase(null);
+        return;
+      }
+      setPhase({ threadId, phase: p, label });
+      // A phase event implies the agent is working (keep the indicator up).
+      setThinkingThreadId(threadId);
+    };
+
     const onToolStart = ({
       threadId,
       messageId,
@@ -601,6 +642,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         cur && cur.threadId === threadId ? null : cur,
       );
       setThinkingThreadId((cur) => (cur === threadId ? null : cur));
+      setPhase((cur) => (cur && cur.threadId === threadId ? null : cur));
       if (threadId === activeIdRef.current) {
         setMessages((prev) => {
           const idx = prev.findIndex((m) => m.id === message.id);
@@ -628,6 +670,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     const onError = ({ message }: WsErrorPayload) => {
       toast.error(message);
       setThinkingThreadId(null);
+      setPhase(null);
       // A failed turn can leave tool cards stuck in the running state —
       // finalize them without a result.
       setMessages((prev) =>
@@ -661,6 +704,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     socket.on("thread:updated", onThreadUpdated);
     socket.on("tool:start", onToolStart);
     socket.on("tool:end", onToolEnd);
+    socket.on("tasks:updated", onTasksUpdated);
+    socket.on("turn:phase", onTurnPhase);
     socket.on("error", onError);
 
     return () => {
@@ -672,6 +717,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       socket.off("thread:updated", onThreadUpdated);
       socket.off("tool:start", onToolStart);
       socket.off("tool:end", onToolEnd);
+      socket.off("tasks:updated", onTasksUpdated);
+      socket.off("turn:phase", onTurnPhase);
       socket.off("error", onError);
     };
   }, [socket, bumpThread]);
@@ -688,6 +735,11 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     (m) => m.role === "tool" && m.toolPending === true,
   );
 
+  const activePhase =
+    phase && phase.threadId === activeThreadId
+      ? { phase: phase.phase, label: phase.label }
+      : null;
+
   const value = useMemo<ThreadsContextValue>(
     () => ({
       threads,
@@ -699,6 +751,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       busy:
         thinking || streaming?.threadId === activeThreadId || toolBusy,
       thinking,
+      phase: activePhase,
+      tasks,
       selectThread,
       newThread,
       deleteThread,
@@ -717,6 +771,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       thinking,
       streaming,
       toolBusy,
+      activePhase,
+      tasks,
       selectThread,
       newThread,
       deleteThread,

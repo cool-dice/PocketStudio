@@ -24,6 +24,7 @@ import {
 
 import { Composer } from "@/components/app/composer";
 import { MessageBubble } from "@/components/app/message-bubble";
+import { PlanCard } from "@/components/app/plan-card";
 import { Welcome } from "@/components/app/welcome";
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ import {
   MODE_DESCRIPTIONS,
   MODE_LABELS,
   type ThreadMode,
+  type TurnPhase,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +74,8 @@ export function ChatArea({
     messagesLoading,
     busy,
     thinking,
+    phase,
+    tasks,
     updateThreadMode,
   } = useThreads();
 
@@ -190,7 +194,7 @@ export function ChatArea({
             {messages.map((message) => (
               <MessageBubble key={message.id} message={message} />
             ))}
-            {thinking && <TypingIndicator />}
+            {thinking && <TypingIndicator phase={phase?.phase ?? null} />}
           </div>
         )}
       </div>
@@ -208,6 +212,9 @@ export function ChatArea({
           к новым
         </Button>
       )}
+
+      {/* ── Live plan checklist (Stage 4c) ── */}
+      <PlanCard tasks={tasks} busy={busy} phase={phase} />
 
       {/* ── Composer ── */}
       <Composer />
@@ -283,17 +290,30 @@ function ModeSelector({
   );
 }
 
-function TypingIndicator() {
+function TypingIndicator({ phase }: { phase: TurnPhase | null }) {
+  const label =
+    phase === "plan"
+      ? "Планировщик составляет шаги"
+      : phase === "act"
+        ? "Исполнитель работает"
+        : phase === "review"
+          ? "Ревьюер проверяет результат"
+          : "VibeFlow печатает";
   return (
     <div className="flex w-full items-start gap-2.5 sm:gap-3">
       <span
         aria-hidden="true"
-        className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+        className={cn(
+          "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-300",
+          phase
+            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+            : "bg-primary/10 text-primary",
+        )}
       >
         <Sparkles className="size-3.5" />
       </span>
       <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border bg-card px-4 py-3 text-sm text-muted-foreground">
-        <span className="text-xs">VibeFlow печатает</span>
+        <span className="text-xs">{label}</span>
         <span className="flex items-center gap-1 py-0.5">
           <span className="vf-dot" />
           <span className="vf-dot" />

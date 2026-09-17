@@ -213,6 +213,44 @@ export function parseToolCall(text: string): ToolCall | null {
 }
 
 /**
+ * Extract a {"steps":[...]} plan from an orchestrator (planner) reply.
+ * Lenient: accepts fenced JSON, objects mixed with prose, and chained
+ * objects; returns trimmed step strings (3–200 chars, max 8) or null when
+ * no valid steps array is present (caller should skip orchestration).
+ */
+export function parsePlannerSteps(raw: string): string[] | null {
+  if (typeof raw !== "string") return null;
+  const text = stripFences(raw.trim());
+  const candidates: string[] = [];
+  if (text.includes("{")) {
+    candidates.push(...splitTopLevelObjects(text));
+  }
+  candidates.push(text);
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1));
+
+  for (const candidate of candidates) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    if (typeof parsed !== "object" || parsed === null) continue;
+    const steps = (parsed as Record<string, unknown>).steps;
+    if (!Array.isArray(steps)) continue;
+    const cleaned = steps
+      .filter((s): s is string => typeof s === "string")
+      .map((s) => s.replace(/\s+/g, " ").trim())
+      .filter((s) => s.length >= 3 && s.length <= 200)
+      .slice(0, 8);
+    if (cleaned.length >= 2) return cleaned;
+  }
+  return null;
+}
+
+/**
  * Split a full reply into chunks of ~4–10 words for simulated streaming.
  * Concatenating the chunks reproduces the original text exactly
  * (whitespace preserved).

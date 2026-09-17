@@ -151,6 +151,31 @@ export interface WsErrorPayload {
   message: string;
 }
 
+/* ── Plan tasks & orchestrator phases (Stage 4c) ── */
+
+/** Plan task of a thread (planner / plan-mode generated checklist). */
+export interface Task {
+  id: string;
+  order: number;
+  text: string;
+  done: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TurnPhase = "plan" | "act" | "review" | "idle";
+
+export interface WsTasksUpdatedPayload {
+  threadId: string;
+  tasks: Task[];
+}
+
+export interface WsTurnPhasePayload {
+  threadId: string;
+  phase: TurnPhase;
+  label: string | null;
+}
+
 /* ── Note analysis pipeline events (Stage 2, worklog Task 2-ctr) ── */
 
 export interface WsNoteAnalyzingPayload {

@@ -356,7 +356,7 @@ const NEED_PROJECT_ERROR = "Сначала создайте или выбери�
 
 /** Mode guard message for write tools (contract 3-ctr §3/§4). */
 const ACT_MODE_ERROR =
-  "Запись файлов доступна только в режиме «Действовать» — переключите режим диалога";
+  "Это действие доступно только в режиме «Действовать» — переключите режим диалога";
 const CHECKPOINT_MODE_ERROR =
   "Чекпоинты доступны только в режиме «Действовать» — переключите режим диалога";
 
@@ -399,7 +399,7 @@ function normalizeSubdir(raw: string): string {
 const createProject: ToolDef = {
   name: "create_project",
   description:
-    "Создать проект из шаблона Next.js (реальные файлы и git-репозиторий) и привязать его к текущему диалогу. Возвращает проект, число файлов и корневые файлы.",
+    "Создать проект из шаблона Next.js (реальные файлы и git-репозиторий) и привязать его к текущему диалогу. Возвращает проект, число файлов и корневые файлы. Доступен только в режиме «Действовать».",
   argsSchema: {
     name: "название проекта (обязательно, 1–80 символов)",
     description: "короткое описание проекта (необязательно, до 500 символов)",
@@ -409,6 +409,10 @@ const createProject: ToolDef = {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
+
+    // Mutation guard: creating projects materializes real files — only
+    // the «act» mode may do that (ask/plan/review must stay read-only).
+    if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
 
     // name (required, 1..80 after trim)
     if (typeof args.name !== "string") {

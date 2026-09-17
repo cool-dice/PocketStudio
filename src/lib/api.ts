@@ -21,6 +21,7 @@ import type {
   ProjectOrigin,
   Role,
   SearchResults,
+  Task,
   Thread,
   ThreadListItem,
   ThreadMode,
@@ -151,6 +152,12 @@ export const api = {
   getThread(id: string): Promise<{ thread: Thread; messages: Message[] }> {
     return request<{ thread: Thread; messages: Message[] }>(
       `/api/threads/${encodeURIComponent(id)}`,
+    );
+  },
+
+  getThreadTasks(id: string): Promise<{ tasks: Task[] }> {
+    return request<{ tasks: Task[] }>(
+      `/api/threads/${encodeURIComponent(id)}/tasks`,
     );
   },
 

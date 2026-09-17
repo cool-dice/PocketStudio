@@ -5,6 +5,12 @@
 
 cd "$(dirname "$0")"
 
+# Single-instance guard: several things (boot script, health endpoint,
+# manual restarts) may spawn this supervisor — the flock makes every extra
+# copy exit immediately instead of racing bun instances for port 3003.
+exec 8>/tmp/agent-service-supervisor.lock
+flock -n 8 || exit 0
+
 # Rotate the log if it grew beyond ~5MB.
 if [ -f /tmp/agent-service.log ]; then
   size=$(wc -c < /tmp/agent-service.log)

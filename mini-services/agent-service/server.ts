@@ -36,10 +36,16 @@ import { verifyWsToken, type WsUser } from "./auth";
 import {
   generateLLMResponse,
   parseToolCall,
+  parsePlannerSteps,
   chunkText,
   type LlmMessage,
 } from "./agent";
-import { buildAgentSystemPrompt, deriveThreadTitle } from "./prompts";
+import {
+  buildAgentSystemPrompt,
+  buildPlannerPrompt,
+  buildReviewerPrompt,
+  deriveThreadTitle,
+} from "./prompts";
 import { getTool, type ToolContext } from "./tools";
 import { createNotification } from "./notifications";
 import { startAnalyzer, stopAnalyzer } from "./analyzer";
@@ -64,6 +70,8 @@ const FALLBACK_REPLY =
   "Я обработал запрос, но что-то пошло не так — попробуйте переформулировать.";
 const PLAN_MAX_TASKS = 20;
 const PLAN_MAX_TEXT_CHARS = 200;
+const REVIEWER_BUDGET_MS = 30000; // min remaining turn budget to run the reviewer
+const ORCHESTRATE_MIN_CHARS = 24; // act-mode request length gate for planning
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
@@ -394,6 +402,175 @@ async function notifyCheckpoint(
   }
 }
 
+// ─────────────────────── orchestrator (Stage 4c) ───────────────────────
+
+/** Turn phase shown in the client's typing indicator. */
+function emitPhase(
+  room: string,
+  threadId: string,
+  phase: "plan" | "act" | "review" | "idle",
+  label?: string,
+): void {
+  io.to(room).emit("turn:phase", { threadId, phase, label: label ?? null });
+}
+
+/** Cheap local heuristic: does this act-mode request look like real work? */
+function looksLikeWorkRequest(content: string): boolean {
+  if (content.length >= ORCHESTRATE_MIN_CHARS) return true;
+  return /созда|сдела|напиши|реализу|добав|исправ|настро|обнов|разработ|постро|собер|установ|нарису|сгенери|написат|создать|выполни/i.test(
+    content,
+  );
+}
+
+/**
+ * Planner sub-agent: one dedicated LLM call that turns the request into a
+ * short task list. Returns the steps or null (→ plain turn, no plan).
+ * Never throws.
+ */
+async function runPlanner(
+  thread: ThreadTurnInfo,
+  content: string,
+  existingTree: string[],
+): Promise<string[] | null> {
+  try {
+    const prompt = buildPlannerPrompt({
+      projectName: null,
+      projectTree: existingTree,
+      hasProject: Boolean(thread.projectId),
+    });
+    const raw = await generateLLMResponse(prompt, [
+      { role: "user", content: content.slice(0, MAX_CONTENT_LENGTH) },
+    ]);
+    const steps = parsePlannerSteps(raw);
+    if (steps && steps.length >= 2) return steps;
+    return null;
+  } catch (err) {
+    console.warn(
+      "[agent] planner failed (continuing without plan):",
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
+}
+
+/**
+ * Execute one parsed tool call: persist the pending row → tool:start →
+ * execute with a fresh ToolContext → persist the result → tool:end →
+ * project WS events + notifications. Returns the raw result object
+ * ({error} on unknown tool / thrown error — same as the inlined code did).
+ */
+async function executeToolCall(opts: {
+  room: string;
+  userRoom: string;
+  threadId: string;
+  userId: string;
+  thread: ThreadTurnInfo;
+  call: { tool: string; args: Record<string, unknown> };
+}): Promise<unknown> {
+  const { room, userRoom, threadId, userId, thread, call } = opts;
+
+  // Tool call → persist a "pending" tool row first (it becomes the
+  // message id reported to the client).
+  const toolMessage = await db.message.create({
+    data: {
+      threadId,
+      role: "tool",
+      content: "",
+      toolName: call.tool,
+      toolArgs: JSON.stringify(call.args),
+      toolResult: "pending",
+    },
+  });
+  io.to(room).emit("tool:start", {
+    threadId,
+    messageId: toolMessage.id,
+    tool: call.tool,
+    args: call.args,
+  });
+
+  // Execute (never throws into the caller — errors become tool results).
+  // ctx is rebuilt per call: create_project may have bound the thread's
+  // projectId in an earlier call of the SAME turn.
+  const ctx: ToolContext = {
+    threadId,
+    mode: thread.mode,
+    projectId: thread.projectId,
+  };
+  let result: unknown;
+  try {
+    const tool = getTool(call.tool);
+    result = tool
+      ? await tool.execute(call.args, userId, ctx)
+      : { error: `Неизвестный инструмент: ${call.tool}` };
+  } catch (err) {
+    result = { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  const resultJson = (JSON.stringify(result) ?? "{}").slice(0, MAX_TOOL_RESULT_CHARS);
+  await db.message.update({
+    where: { id: toolMessage.id },
+    data: { toolResult: resultJson },
+  });
+  io.to(room).emit("tool:end", {
+    threadId,
+    messageId: toolMessage.id,
+    tool: call.tool,
+    args: call.args,
+    result,
+  });
+
+  // Project WS events (contract 3-ctr §5) — emitted HERE by the transport
+  // layer, tools stay io-free.
+  const r = resultObject(result);
+  if (r && r.error === undefined) {
+    if (call.tool === "complete_task") {
+      // Live plan progress → push the fresh task list to the user room.
+      await emitTasksUpdated(threadId, userId);
+    } else if (call.tool === "create_project") {
+      const p = resultObject(r.project);
+      if (p && typeof p.id === "string") {
+        // Keep the local binding fresh for later calls + the
+        // auto-checkpoint below.
+        thread.projectId = p.id;
+        io.to(userRoom).emit("project:created", {
+          project: { id: p.id, name: p.name, origin: p.origin },
+        });
+        await createNotification(
+          io,
+          userId,
+          "project_created",
+          `Агент создал проект «${p.name}»`,
+          "Проект создан из шаблона и привязан к диалогу",
+          p.id,
+        );
+      }
+    } else if (
+      (call.tool === "write_file" || call.tool === "delete_file") &&
+      thread.projectId
+    ) {
+      io.to(userRoom).emit("project:updated", {
+        projectId: thread.projectId,
+        reason: "files",
+      });
+    } else if (
+      call.tool === "checkpoint" &&
+      thread.projectId &&
+      r.noop === false
+    ) {
+      io.to(userRoom).emit("project:updated", {
+        projectId: thread.projectId,
+        reason: "checkpoint",
+      });
+      const cp = resultObject(r.commit);
+      const commitMsg =
+        cp && typeof cp.message === "string" ? cp.message : "контрольная точка";
+      await notifyCheckpoint(userId, thread.projectId, commitMsg);
+    }
+  }
+
+  return result;
+}
+
 /**
  * Agent turn (tool-calling loop):
  *  1. persist user message → emit "message:user" → bump thread.updatedAt
@@ -439,12 +616,49 @@ async function runAgentTurn(
     // keeps the busy-flag race window at effectively zero.
     await maybeAutoTitle(threadId, user.sub);
 
-    // 2. Mode + project context for the whole turn (built once).
-    const systemPrompt = await buildTurnSystemPrompt(user.sub, thread);
+    // 2. Mode + project context for the whole turn (built once; rebuilt
+    // after orchestration when a plan was saved).
+    let systemPrompt = await buildTurnSystemPrompt(user.sub, thread);
+
+    // 2b. Orchestrator (Stage 4c): act-mode work requests without an active
+    // plan go through the Planner sub-agent first — the task list becomes a
+    // live checklist in the chat, and the coder loop works through it.
+    let orchestrated = false;
+    if (
+      thread.mode === "act" &&
+      looksLikeWorkRequest(content) &&
+      (await threadTasks(threadId)).length === 0
+    ) {
+      emitPhase(room, threadId, "plan", "Составляю план работ…");
+      io.to(room).emit("agent:thinking", { threadId });
+      let existingTree: string[] = [];
+      if (thread.projectId) {
+        try {
+          const tree = await listWorkspaceTree(projectRoot(thread.projectId));
+          existingTree = tree.entries
+            .filter((e) => e.type === "file")
+            .map((e) => e.path)
+            .slice(0, PROMPT_TREE_PATHS);
+        } catch {
+          // tree is a nice-to-have for the planner
+        }
+      }
+      const steps = await runPlanner(thread, content, existingTree);
+      if (steps) {
+        orchestrated = true;
+        await savePlanTasks(threadId, user.sub, steps);
+        // Rebuild so the coder prompt includes the fresh plan block.
+        systemPrompt = await buildTurnSystemPrompt(user.sub, thread);
+        emitPhase(room, threadId, "act", "Выполняю план…");
+      } else {
+        emitPhase(room, threadId, "act", "Работаю над запросом…");
+      }
+    }
 
     // 3. Tool-calling loop.
     let finalText: string | null = null;
     let turnDirty = false; // write_file/delete_file succeeded this turn
+    let toolCallsSucceeded = 0;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       if (Date.now() - turnStart > TURN_TIMEOUT_MS) break;
@@ -468,106 +682,69 @@ async function runAgentTurn(
         continue;
       }
 
-      // Tool call → persist a "pending" tool row first (it becomes the
-      // message id reported to the client).
-      const toolMessage = await db.message.create({
-        data: {
-          threadId,
-          role: "tool",
-          content: "",
-          toolName: call.tool,
-          toolArgs: JSON.stringify(call.args),
-          toolResult: "pending",
-        },
-      });
-      io.to(room).emit("tool:start", {
+      const result = await executeToolCall({
+        room,
+        userRoom,
         threadId,
-        messageId: toolMessage.id,
-        tool: call.tool,
-        args: call.args,
+        userId: user.sub,
+        thread,
+        call,
       });
-
-      // Execute (never throws into the loop — errors become tool results).
-      // ctx is rebuilt every iteration: create_project may have bound the
-      // thread's projectId in a previous iteration of this same turn.
-      const ctx: ToolContext = {
-        threadId,
-        mode: thread.mode,
-        projectId: thread.projectId,
-      };
-      let result: unknown;
-      try {
-        const tool = getTool(call.tool);
-        result = tool
-          ? await tool.execute(call.args, user.sub, ctx)
-          : { error: `Неизвестный инструмент: ${call.tool}` };
-      } catch (err) {
-        result = { error: err instanceof Error ? err.message : String(err) };
-      }
-
-      const resultJson = (JSON.stringify(result) ?? "{}").slice(0, MAX_TOOL_RESULT_CHARS);
-      await db.message.update({
-        where: { id: toolMessage.id },
-        data: { toolResult: resultJson },
-      });
-      io.to(room).emit("tool:end", {
-        threadId,
-        messageId: toolMessage.id,
-        tool: call.tool,
-        args: call.args,
-        result,
-      });
-
-      // Project WS events (contract 3-ctr §5) — emitted HERE by the
-      // transport layer, tools stay io-free.
       const r = resultObject(result);
       if (r && r.error === undefined) {
-        if (call.tool === "complete_task") {
-          // Live plan progress → push the fresh task list to the user room.
-          await emitTasksUpdated(threadId, user.sub);
-        } else if (call.tool === "create_project") {
-          const p = resultObject(r.project);
-          if (p && typeof p.id === "string") {
-            // Keep the local binding fresh for later iterations + the
-            // auto-checkpoint below.
-            thread.projectId = p.id;
-            io.to(userRoom).emit("project:created", {
-              project: { id: p.id, name: p.name, origin: p.origin },
-            });
-            await createNotification(
-              io,
-              user.sub,
-              "project_created",
-              `Агент создал проект «${p.name}»`,
-              "Проект создан из шаблона и привязан к диалогу",
-              p.id,
-            );
-          }
-        } else if (
+        toolCallsSucceeded++;
+        if (
           (call.tool === "write_file" || call.tool === "delete_file") &&
           thread.projectId
         ) {
           turnDirty = true;
-          io.to(userRoom).emit("project:updated", {
-            projectId: thread.projectId,
-            reason: "files",
-          });
-        } else if (
-          call.tool === "checkpoint" &&
-          thread.projectId &&
-          r.noop === false
-        ) {
-          io.to(userRoom).emit("project:updated", {
-            projectId: thread.projectId,
-            reason: "checkpoint",
-          });
-          const cp = resultObject(r.commit);
-          const commitMsg =
-            cp && typeof cp.message === "string" ? cp.message : "контрольная точка";
-          await notifyCheckpoint(user.sub, thread.projectId, commitMsg);
         }
       }
       // Loop continues — the next iteration sees [TOOL_CALL]/[TOOL_RESULT].
+    }
+
+    // 3b. Completion sweep (Stage 4c): the coder often finishes with a text
+    // answer before checking off the plan steps it already completed. Give
+    // it up to 3 nudged iterations to call complete_task for them — this is
+    // what makes the checklist finish and arms the reviewer phase.
+    if (orchestrated && toolCallsSucceeded > 0) {
+      try {
+        let sweepCalls = 0;
+        while (sweepCalls < 3 && Date.now() - turnStart < TURN_TIMEOUT_MS - 15000) {
+          const pending = (await threadTasks(threadId)).filter((t) => !t.done);
+          if (pending.length === 0) break;
+          emitPhase(room, threadId, "act", "Отмечаю шаги плана…");
+          io.to(room).emit("agent:thinking", { threadId });
+          const sweepHistory = await buildLLMHistory(threadId);
+          sweepHistory.push({
+            role: "user",
+            content:
+              "[SYSTEM] Перед финальным ответом отметь выполненные шаги плана инструментом complete_task (по одному вызову на шаг, шаг = номер в плане). " +
+              `Шаги плана: ${pending.map((t) => `#${t.order} «${t.text}»`).join("; ")}. ` +
+              "Вызывай complete_task ТОЛЬКО для шагов, которые ты реально уже выполнил в этом диалоге. Если ни один не выполнен — просто ответь текстом.",
+          });
+          const raw = await generateLLMResponse(systemPrompt, sweepHistory);
+          const call = parseToolCall(raw);
+          if (!call) break; // model answered with text — accept it
+          sweepCalls++;
+          await executeToolCall({
+            room,
+            userRoom,
+            threadId,
+            userId: user.sub,
+            thread,
+            call,
+          });
+          if (call.tool !== "complete_task") break; // unexpected tool — stop sweeping
+        }
+        // Restore the phase label after the sweep.
+        emitPhase(room, threadId, "act", "Выполняю план…");
+      } catch (err) {
+        console.warn(
+          "[agent] completion sweep failed (ignored):",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
 
     // 4. Auto-checkpoint a dirty act-mode turn (contract 3-ctr §5) — BEFORE
@@ -596,12 +773,53 @@ async function runAgentTurn(
     // 5. Final answer (or the fallback when the loop ended without text).
     //    Plan-mode answers may carry a ```план fence → save as Task rows.
     //    Done BEFORE streaming so the card appears with the answer.
-    const answerText = finalText ?? FALLBACK_REPLY;
+    let answerText = finalText ?? FALLBACK_REPLY;
     if (thread.mode === "plan" && finalText) {
       const plan = parsePlanFence(answerText);
-      if (plan) await savePlanTasks(threadId, user.sub, plan);
+      if (plan) {
+        await savePlanTasks(threadId, user.sub, plan);
+        // The checklist now renders as the live PlanCard above the composer —
+        // strip the raw ```план fence from the streamed message so the plan
+        // is not shown twice (guard: keep the original if nothing remains).
+        const withoutFence = answerText
+          .replace(/```(?:план|plan)\s*\n[\s\S]*?```/i, "")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+        if (withoutFence) answerText = withoutFence;
+      }
     }
+
+    // 5b. Reviewer sub-agent (Stage 4c): orchestrated turns with at least
+    // one completed task get a grounded step-by-step report instead of the
+    // coder's (often terse) final line. Budget-checked so big turns skip
+    // it gracefully.
+    if (orchestrated) {
+      try {
+        const tasksNow = await threadTasks(threadId);
+        const doneCount = tasksNow.filter((t) => t.done).length;
+        const remaining = TURN_TIMEOUT_MS - (Date.now() - turnStart);
+        if (doneCount >= 1 && remaining >= REVIEWER_BUDGET_MS) {
+          emitPhase(room, threadId, "review", "Проверяю результат…");
+          const reviewerPrompt = buildReviewerPrompt(
+            tasksNow.map((t) => ({ text: t.text, done: t.done })),
+          );
+          const reviewerHistory = await buildLLMHistory(threadId);
+          const reviewRaw = await generateLLMResponse(reviewerPrompt, reviewerHistory);
+          const reviewClean = sanitizeTextAnswer(reviewRaw);
+          if (reviewClean && reviewClean.length >= 20) {
+            answerText = reviewClean;
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "[agent] reviewer failed (keeping coder answer):",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
     await streamFinalResponse(room, threadId, answerText);
+    emitPhase(room, threadId, "idle");
 
     // NOTE: nothing slow may happen after the final message:end emit —
     // the busy flag clears right after this function returns, and a

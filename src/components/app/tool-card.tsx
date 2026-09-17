@@ -20,6 +20,7 @@ import {
   FolderTree,
   GitCommitHorizontal,
   List,
+  ListChecks,
   Loader2,
   NotebookPen,
   Search,
@@ -95,6 +96,11 @@ const TOOL_META: Record<string, ToolMeta> = {
     running: "Делаю чекпоинт…",
     done: "Чекпоинт",
   },
+  complete_task: {
+    icon: ListChecks,
+    running: "Отмечаю шаг плана…",
+    done: "Шаг плана выполнен",
+  },
 };
 
 const FALLBACK_META: ToolMeta = {
@@ -116,6 +122,7 @@ function safeParse(json: string | null | undefined): unknown {
 function toolAccent(tool: string): string {
   if (tool === "delete_file") return "text-rose-500";
   if (tool === "create_project") return "text-emerald-500";
+  if (tool === "complete_task") return "text-emerald-500";
   return "text-primary";
 }
 
@@ -219,6 +226,17 @@ function summarizeResult(tool: string, result: unknown): string | null {
     return parts.length > 0
       ? `${parts.join(" · ")}${commit && typeof commit.message === "string" ? ` — ${commit.message}` : ""}`
       : null;
+  }
+
+  if (tool === "complete_task") {
+    if (r.noop === true) return "Уже был отмечен";
+    const task = r.task as { order?: unknown; text?: unknown } | null;
+    const order = typeof task?.order === "number" ? task.order : null;
+    const text = typeof task?.text === "string" ? task.text : null;
+    if (text) {
+      return order !== null ? `${order}. ${text}` : text;
+    }
+    return null;
   }
 
   return null;
