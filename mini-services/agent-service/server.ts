@@ -62,6 +62,8 @@ const PROMPT_COMMITS = 5; // recent commits embedded in the system prompt
 const AUTO_CHECKPOINT_MESSAGE = "Агент: изменения за ход";
 const FALLBACK_REPLY =
   "Я обработал запрос, но что-то пошло не так — попробуйте переформулировать.";
+const PLAN_MAX_TASKS = 20;
+const PLAN_MAX_TEXT_CHARS = 200;
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
@@ -133,8 +135,12 @@ async function buildTurnSystemPrompt(
   thread: ThreadTurnInfo,
 ): Promise<string> {
   try {
+    // Active plan (any mode — act works through it, plan replaces it).
+    const tasks = await threadTasks(thread.id);
+    const planTasks = tasks.map((t) => ({ text: t.text, done: t.done }));
+
     if (!thread.projectId) {
-      return buildAgentSystemPrompt({ mode: thread.mode });
+      return buildAgentSystemPrompt({ mode: thread.mode, planTasks });
     }
     const project = await db.project.findFirst({
       where: { id: thread.projectId, userId },
@@ -157,6 +163,7 @@ async function buildTurnSystemPrompt(
         .map((e) => e.path)
         .slice(0, PROMPT_TREE_PATHS),
       recentCommits: commits.map((c) => `${c.short} ${c.message}`),
+      planTasks,
     });
   } catch (err) {
     console.warn(
@@ -272,6 +279,94 @@ async function streamFinalResponse(
     threadId,
     message: serializeMessage(assistantMessage),
   });
+}
+
+// ─────────────────────── plan tasks (Stage 4c) ───────────────────────
+
+/** Wire shape for Task rows (mirrors src/lib/types.ts Task, ISO date). */
+function serializeTask(t: {
+  id: string;
+  order: number;
+  text: string;
+  done: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: t.id,
+    order: t.order,
+    text: t.text,
+    done: t.done,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  };
+}
+
+/** Load the thread's plan tasks in order. */
+async function threadTasks(threadId: string) {
+  return db.task.findMany({ where: { threadId }, orderBy: { order: "asc" } });
+}
+
+/** Push the current task list of a thread to the user room (WS). */
+async function emitTasksUpdated(threadId: string, userId: string): Promise<void> {
+  try {
+    const tasks = await threadTasks(threadId);
+    io.to(`user:${userId}`).emit("tasks:updated", {
+      threadId,
+      tasks: tasks.map(serializeTask),
+    });
+  } catch (err) {
+    console.warn(
+      "[agent] tasks:updated emit failed (ignored):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/**
+ * Parse a ```план fence from a plan-mode final answer.
+ * Lenient line formats: "- [ ] text", "- [x] text", "* [ ] text", "1. text".
+ * Returns null when no fence / no parseable lines (the prose stays as-is).
+ */
+export function parsePlanFence(text: string): string[] | null {
+  const fence = text.match(/```(?:план|plan)\s*\n([\s\S]*?)```/i);
+  if (!fence) return null;
+  const lines = fence[1]
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^\s*(?:[-*+]|\d+[.)])\s*(?:\[[ xX]\])?\s*/, "")
+        .trim(),
+    )
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice(0, PLAN_MAX_TEXT_CHARS))
+    .slice(0, PLAN_MAX_TASKS);
+  return lines.length > 0 ? lines : null;
+}
+
+/**
+ * Replace the thread's plan with the parsed tasks (transactional-ish:
+ * deleteMany + createMany). Emits tasks:updated. Never throws — a failed
+ * plan save must not break the turn (the prose answer is already streamed).
+ */
+async function savePlanTasks(
+  threadId: string,
+  userId: string,
+  texts: string[],
+): Promise<void> {
+  try {
+    await db.task.deleteMany({ where: { threadId } });
+    await db.task.createMany({
+      data: texts.map((text, i) => ({ threadId, order: i + 1, text })),
+    });
+    await emitTasksUpdated(threadId, userId);
+    console.log(`[agent] plan saved for thread ${threadId.slice(-6)}: ${texts.length} step(s)`);
+  } catch (err) {
+    console.warn(
+      "[agent] plan save failed (ignored):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 /** Checkpoint → bell notification with the project name (best-effort). */
@@ -427,7 +522,10 @@ async function runAgentTurn(
       // transport layer, tools stay io-free.
       const r = resultObject(result);
       if (r && r.error === undefined) {
-        if (call.tool === "create_project") {
+        if (call.tool === "complete_task") {
+          // Live plan progress → push the fresh task list to the user room.
+          await emitTasksUpdated(threadId, user.sub);
+        } else if (call.tool === "create_project") {
           const p = resultObject(r.project);
           if (p && typeof p.id === "string") {
             // Keep the local binding fresh for later iterations + the
@@ -496,7 +594,14 @@ async function runAgentTurn(
     }
 
     // 5. Final answer (or the fallback when the loop ended without text).
-    await streamFinalResponse(room, threadId, finalText ?? FALLBACK_REPLY);
+    //    Plan-mode answers may carry a ```план fence → save as Task rows.
+    //    Done BEFORE streaming so the card appears with the answer.
+    const answerText = finalText ?? FALLBACK_REPLY;
+    if (thread.mode === "plan" && finalText) {
+      const plan = parsePlanFence(answerText);
+      if (plan) await savePlanTasks(threadId, user.sub, plan);
+    }
+    await streamFinalResponse(room, threadId, answerText);
 
     // NOTE: nothing slow may happen after the final message:end emit —
     // the busy flag clears right after this function returns, and a

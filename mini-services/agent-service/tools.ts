@@ -715,6 +715,56 @@ const checkpointTool: ToolDef = {
   },
 };
 
+// ─────────────────────────── tool: complete_task ───────────────────────────
+
+const completeTask: ToolDef = {
+  name: "complete_task",
+  description:
+    "Отметить шаг плана диалога выполненным. Вызывай сразу после того, как закончил работу по шагу (номер — позиция в плане, начиная с 1).",
+  argsSchema: {
+    task: "номер шага плана (целое число, 1-based)",
+  },
+  async execute(args: any, _userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+
+    // task number: 1-based position in the plan (lenient parse like parseLimit).
+    const n =
+      typeof args.task === "number"
+        ? args.task
+        : typeof args.task === "string" && args.task.trim() !== "" && !isNaN(Number(args.task))
+          ? Number(args.task)
+          : NaN;
+    if (!Number.isInteger(n) || n < 1 || n > 50) {
+      return { error: "Аргумент task должен быть целым номером шага (от 1)" };
+    }
+
+    const tasks = await db.task.findMany({
+      where: { threadId: ctx.threadId },
+      orderBy: { order: "asc" },
+    });
+    if (tasks.length === 0) {
+      return { error: "У диалога пока нет плана — сначала составьте план в режиме «План»" };
+    }
+    const target = tasks[n - 1] ?? null;
+    if (!target) {
+      return { error: `В плане ${tasks.length} шаг(ов) — шага №${n} нет` };
+    }
+    if (target.done) {
+      return { task: { id: target.id, order: target.order, text: target.text, done: true }, noop: true };
+    }
+
+    const updated = await db.task.update({
+      where: { id: target.id },
+      data: { done: true },
+    });
+    return {
+      task: { id: updated.id, order: updated.order, text: updated.text, done: updated.done },
+    };
+  },
+};
+
 // ─────────────────────────── registry ───────────────────────────
 
 export const TOOLS: ToolDef[] = [
@@ -729,6 +779,7 @@ export const TOOLS: ToolDef[] = [
   writeFile,
   deleteFile,
   checkpointTool,
+  completeTask,
 ];
 
 export function getTool(name: string): ToolDef | undefined {

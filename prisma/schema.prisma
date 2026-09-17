@@ -168,8 +168,26 @@ model Thread {
 
   messages Message[]
   runs     AgentRun[]
+  tasks    Task[]
 
   @@index([userId, updatedAt])
+}
+
+/// Structured plan step produced by the agent in «План» mode (Stage 4c).
+/// A new plan REPLACES the thread's task list; progress is tracked here
+/// (agent complete_task tool + user checkbox toggles).
+model Task {
+  id        String   @id @default(cuid())
+  threadId  String
+  thread    Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  /// 1-based position in the plan.
+  order     Int
+  text      String
+  done      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([threadId, order])
 }
 
 model Message {
