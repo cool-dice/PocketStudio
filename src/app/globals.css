@@ -43,73 +43,81 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/*
+  VibeFlow design system — stone neutrals + emerald accent.
+  Values follow the Tailwind v4 stone / emerald scales (oklch).
+*/
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.001 106.423);        /* stone-50 */
+  --foreground: oklch(0.216 0.006 56.043);          /* stone-900 */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.216 0.006 56.043);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.216 0.006 56.043);
+  --primary: oklch(0.596 0.145 163.225);            /* emerald-600 */
+  --primary-foreground: oklch(0.985 0.001 106.423); /* stone-50 */
+  --secondary: oklch(0.97 0.001 106.424);           /* stone-100 */
+  --secondary-foreground: oklch(0.268 0.007 34.298);/* stone-800 */
+  --muted: oklch(0.97 0.001 106.424);               /* stone-100 */
+  --muted-foreground: oklch(0.553 0.013 58.071);    /* stone-500 */
+  --accent: oklch(0.97 0.001 106.424);              /* stone-100 */
+  --accent-foreground: oklch(0.268 0.007 34.298);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --border: oklch(0.923 0.003 48.717);              /* stone-200 */
+  --input: oklch(0.923 0.003 48.717);
+  --ring: oklch(0.696 0.17 162.48);                 /* emerald-500 */
+  --chart-1: oklch(0.696 0.17 162.48);
+  --chart-2: oklch(0.596 0.145 163.225);
+  --chart-3: oklch(0.845 0.143 164.978);
+  --chart-4: oklch(0.553 0.013 58.071);
+  --chart-5: oklch(0.709 0.01 56.259);
+  --sidebar: oklch(0.97 0.001 106.424);             /* stone-100 */
+  --sidebar-foreground: oklch(0.216 0.006 56.043);
+  --sidebar-primary: oklch(0.596 0.145 163.225);
+  --sidebar-primary-foreground: oklch(0.985 0.001 106.423);
+  --sidebar-accent: oklch(0.923 0.003 48.717);
+  --sidebar-accent-foreground: oklch(0.216 0.006 56.043);
+  --sidebar-border: oklch(0.923 0.003 48.717);
+  --sidebar-ring: oklch(0.696 0.17 162.48);
+  --vf-scroll-thumb: oklch(0.869 0.005 56.366 / 0.9);
+  --vf-scroll-thumb-hover: oklch(0.709 0.01 56.259 / 0.9);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.147 0.004 49.25);           /* stone-950 */
+  --foreground: oklch(0.97 0.001 106.424);          /* stone-100 */
+  --card: oklch(0.216 0.006 56.043);                /* stone-900 */
+  --card-foreground: oklch(0.97 0.001 106.424);
+  --popover: oklch(0.216 0.006 56.043);
+  --popover-foreground: oklch(0.97 0.001 106.424);
+  --primary: oklch(0.696 0.17 162.48);              /* emerald-500 */
+  --primary-foreground: oklch(0.147 0.004 49.25);   /* stone-950 */
+  --secondary: oklch(0.268 0.007 34.298);           /* stone-800 */
+  --secondary-foreground: oklch(0.97 0.001 106.424);
+  --muted: oklch(0.268 0.007 34.298);
+  --muted-foreground: oklch(0.709 0.01 56.259);     /* stone-400 */
+  --accent: oklch(0.268 0.007 34.298);
+  --accent-foreground: oklch(0.97 0.001 106.424);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.696 0.17 162.48);
+  --chart-1: oklch(0.696 0.17 162.48);
+  --chart-2: oklch(0.596 0.145 163.225);
+  --chart-3: oklch(0.845 0.143 164.978);
+  --chart-4: oklch(0.709 0.01 56.259);
+  --chart-5: oklch(0.553 0.013 58.071);
+  --sidebar: oklch(0.185 0.005 56.043);
+  --sidebar-foreground: oklch(0.97 0.001 106.424);
+  --sidebar-primary: oklch(0.696 0.17 162.48);
+  --sidebar-primary-foreground: oklch(0.147 0.004 49.25);
+  --sidebar-accent: oklch(0.268 0.007 34.298);
+  --sidebar-accent-foreground: oklch(0.97 0.001 106.424);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.696 0.17 162.48);
+  --vf-scroll-thumb: oklch(0.374 0.01 67.558 / 0.9);
+  --vf-scroll-thumb-hover: oklch(0.553 0.013 58.071 / 0.9);
 }
 
 @layer base {
@@ -119,4 +127,96 @@
   body {
     @apply bg-background text-foreground;
   }
+  ::selection {
+    background: oklch(0.696 0.17 162.48 / 0.25);
+  }
+}
+
+/* ── Custom slim scrollbars (threads list, chat, code blocks) ── */
+.vf-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--vf-scroll-thumb) transparent;
+}
+.vf-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.vf-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.vf-scroll::-webkit-scrollbar-thumb {
+  background: var(--vf-scroll-thumb);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.vf-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--vf-scroll-thumb-hover);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* ── Typing indicator dots ("VibeFlow печатает…") ── */
+@keyframes vf-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+.vf-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: vf-bounce 1.2s infinite ease-in-out;
+}
+.vf-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.vf-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* ── Streaming caret ── */
+@keyframes vf-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.vf-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--primary);
+  animation: vf-blink 1s step-end infinite;
+}
+
+/* ── Connection status pulse (amber, reconnecting) ── */
+@keyframes vf-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.769 0.188 70.08 / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 5px oklch(0.769 0.188 70.08 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.769 0.188 70.08 / 0);
+  }
+}
+.vf-status-pulse {
+  animation: vf-pulse-ring 1.8s infinite ease-out;
 }

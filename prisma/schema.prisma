@@ -1,8 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// VibeFlow — unified platform schema (SQLite)
+// Dual storage: project sources live on disk + git; platform data lives here.
 
 generator client {
   provider = "prisma-client-js"
@@ -13,20 +10,267 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─────────────────────────── Users & Auth ───────────────────────────
+
 model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  // 'client' | 'admin' (IDE modes are NOT roles)
+  role         String   @default("client")
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  notes         Note[]
+  categories    Category[]
+  tags          Tag[]
+  projects      Project[]
+  threads       Thread[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+}
+
+// ─────────────────────────── Notebook ───────────────────────────
+
+/// Dynamic user category — classifier picks existing or creates new ones.
+model Category {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  // Tailwind-ish color key: emerald, amber, rose, sky, violet...
+  color       String   @default("stone")
+  // Lucide icon name
+  icon        String   @default("lightbulb")
+  description String?
+  createdAt   DateTime @default(now())
+
+  notes Note[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model Note {
   id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  rawText   String?
+  audioUrl  String?
+
+  // 'pending' | 'processing' | 'processed' | 'error'
+  status    String   @default("pending")
+
+  transcription String?
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  favorite Boolean  @default(false)
+
+  // 4-block analysis (filled by pipeline)
+  positiveBlock   String?
+  negativeBlock   String?
+  finalBlock      String?
+  recommendations String? // JSON array string
+  analysisRaw     String?
+  analyzedAt      DateTime?
+  errorMessage    String?
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tags  NoteTag[]
+  links NoteLink[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  color     String   @default("stone")
+  createdAt DateTime @default(now())
+
+  notes NoteTag[]
+
+  @@unique([userId, name])
+}
+
+model NoteTag {
+  noteId String
+  note   Note   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  tagId  String
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([noteId, tagId])
+}
+
+// ─────────────────────────── Projects (sources on disk + git) ───────────────────────────
+
+model Project {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  // workspace/<id> on disk
+  rootPath    String
+  // 'template' | 'github' | 'zip'
+  origin      String   @default("template")
+  remoteUrl   String?
+  templateVersion String?
+  lastBranch  String?
+  lastCommit  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  threads Thread[]
+  noteLinks NoteLink[]
+
+  @@index([userId])
+}
+
+/// Link between a note and a project (reference / context / proposal).
+model NoteLink {
+  id        String   @id @default(cuid())
+  noteId    String
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // 'reference' | 'context' | 'proposal'
+  kind      String   @default("reference")
+  createdAt DateTime @default(now())
+
+  @@unique([noteId, projectId])
+}
+
+// ─────────────────────────── Chat (agent cockpit) ───────────────────────────
+
+model Thread {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  title     String   @default("Новый диалог")
+  // 'ask' | 'plan' | 'act' | 'review'
+  mode      String   @default("ask")
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+  runs     AgentRun[]
+
+  @@index([userId, updatedAt])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  threadId  String
+  thread    Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  // 'user' | 'assistant' | 'system' | 'tool'
+  role      String
+  content   String
+  toolName  String?
+  toolArgs  String? // JSON string
+  toolResult String?
+  createdAt DateTime @default(now())
+
+  @@index([threadId, createdAt])
+}
+
+// ─────────────────────────── Agent runs & events ───────────────────────────
+
+model AgentRun {
+  id        String   @id @default(cuid())
+  threadId  String
+  thread    Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  projectId String?
+  // 'queued' | 'running' | 'completed' | 'error' | 'cancelled'
+  status    String   @default("queued")
+  mode      String   @default("ask")
+  startedAt DateTime?
+  finishedAt DateTime?
+  error     String?
+  createdAt DateTime @default(now())
+
+  events AgentEvent[]
+
+  @@index([threadId, createdAt])
+}
+
+/// Append-only event journal (OpenHands-style event stream).
+model AgentEvent {
+  id        String   @id @default(cuid())
+  runId     String
+  run       AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  seq       Int
+  // 'llm_start' | 'llm_end' | 'tool_call' | 'tool_result' | 'file_diff' | 'checkpoint' | 'plan_update' | 'subagent' | ...
+  type      String
+  data      String // JSON string
+  createdAt DateTime @default(now())
+
+  @@index([runId, seq])
+}
+
+// ─────────────────────────── Notifications ───────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // 'analysis_ready' | 'agent_done' | 'diff_pending' | 'system'
+  type      String
+  title     String
+  body      String?
+  entityId  String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
+
+// ─────────────────────────── Admin / settings ───────────────────────────
+
+model SystemSetting {
+  key       String   @id
+  value     String
   updatedAt DateTime @updatedAt
 }
 
-model Post {
+model AIProvider {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  name      String
+  baseUrl   String
+  apiKey    String
+  model     String
+  priority  Int      @default(10)
+  enabled   Boolean  @default(true)
+  kind      String   @default("chat")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([enabled, priority])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String?
+  entityId  String?
+  meta      String? // JSON string
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
 }

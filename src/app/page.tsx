@@ -1,31 +1,60 @@
-'use client'
+"use client";
+
+/**
+ * VibeFlow SPA root — single "/" route.
+ * loading → skeleton · !user → LandingScreen · user → AppShell (chat-first).
+ * SocketProvider / ThreadsProvider mount only for authenticated users, so
+ * logout naturally tears the socket and thread state down.
+ */
+
+import { AppShell } from "@/components/app/app-shell";
+import { LandingScreen } from "@/components/landing/landing-screen";
+import { LogoMark } from "@/components/logo";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { SocketProvider } from "@/hooks/use-socket";
+import { ThreadsProvider } from "@/hooks/use-threads";
+
+function RootScreen() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <BootSkeleton />;
+  }
+
+  if (!user) {
+    return <LandingScreen />;
+  }
+
+  return (
+    <SocketProvider key={user.id}>
+      <ThreadsProvider>
+        <AppShell />
+      </ThreadsProvider>
+    </SocketProvider>
+  );
+}
+
+/** Full-screen skeleton while /api/auth/me resolves (first paint). */
+function BootSkeleton() {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-background p-4">
+      <LogoMark className="size-12 animate-pulse rounded-xl" />
+      <div className="w-full max-w-xs space-y-2">
+        <Skeleton className="h-3 w-3/4 mx-auto rounded-full" />
+        <Skeleton className="h-3 w-1/2 mx-auto rounded-full" />
+      </div>
+      <span className="sr-only" role="status">
+        Загрузка VibeFlow…
+      </span>
+    </div>
+  );
+}
 
 export default function Home() {
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      gap: '2rem',
-      padding: '1rem'
-    }}>
-      <div style={{
-        position: 'relative',
-        width: '6rem',
-        height: '6rem'
-      }}>
-        <img
-          src="/logo.svg"
-          alt="Z.ai Logo"
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain'
-          }}
-        />
-      </div>
-    </div>
-  )
+    <AuthProvider>
+      <RootScreen />
+    </AuthProvider>
+  );
 }
