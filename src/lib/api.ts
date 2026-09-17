@@ -175,6 +175,25 @@ export const api = {
     });
   },
 
+  /** Re-queue a note for LLM analysis (Stage 2). */
+  reanalyzeNote(id: string): Promise<Note> {
+    return request<{ note: Note }>(
+      `/api/notes/${encodeURIComponent(id)}/analyze`,
+      { method: "POST" },
+    ).then((r) => r.note);
+  },
+
+  /** Voice capture: audio (WAV base64) → ASR → new note (Stage 2). */
+  createVoiceNote(data: {
+    audioBase64: string;
+    mime: string;
+  }): Promise<Note> {
+    return request<{ note: Note }>("/api/notes/voice", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => r.note);
+  },
+
   listCategories(): Promise<Category[]> {
     return request<{ categories: Category[] }>("/api/categories").then(
       (r) => r.categories,

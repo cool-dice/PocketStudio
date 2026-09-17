@@ -33,6 +33,7 @@ import {
 } from "./agent";
 import { AGENT_SYSTEM_PROMPT, deriveThreadTitle } from "./prompts";
 import { getTool } from "./tools";
+import { startAnalyzer, stopAnalyzer } from "./analyzer";
 
 const PORT = 3003;
 const MAX_CONTENT_LENGTH = 20000;
@@ -456,6 +457,7 @@ async function main() {
 
   httpServer.listen(PORT, () => {
     console.log(`agent-service listening on ${PORT}`);
+    void startAnalyzer(io);
   });
 }
 
@@ -467,11 +469,13 @@ main().catch((err) => {
 // Graceful shutdown.
 process.on("SIGTERM", () => {
   console.log("[agent-service] SIGTERM, shutting down…");
+  stopAnalyzer();
   io.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000);
 });
 process.on("SIGINT", () => {
   console.log("[agent-service] SIGINT, shutting down…");
+  stopAnalyzer();
   io.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000);
 });

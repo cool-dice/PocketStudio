@@ -83,10 +83,33 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     }
   }
 
-  const data: { favorite?: boolean; categoryId?: string | null; rawText?: string } = {};
+  const data: {
+    favorite?: boolean;
+    categoryId?: string | null;
+    rawText?: string;
+    // Editing the text invalidates the old analysis → re-queue (Stage 2).
+    status?: string;
+    positiveBlock?: null;
+    negativeBlock?: null;
+    finalBlock?: null;
+    recommendations?: null;
+    analysisRaw?: null;
+    analyzedAt?: null;
+    errorMessage?: null;
+  } = {};
   if (parsed.data.favorite !== undefined) data.favorite = parsed.data.favorite;
   if (parsed.data.categoryId !== undefined) data.categoryId = parsed.data.categoryId;
-  if (parsed.data.rawText !== undefined) data.rawText = parsed.data.rawText;
+  if (parsed.data.rawText !== undefined) {
+    data.rawText = parsed.data.rawText;
+    data.status = "pending";
+    data.positiveBlock = null;
+    data.negativeBlock = null;
+    data.finalBlock = null;
+    data.recommendations = null;
+    data.analysisRaw = null;
+    data.analyzedAt = null;
+    data.errorMessage = null;
+  }
 
   const note = await db.note.update({
     where: { id },

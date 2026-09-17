@@ -9,12 +9,15 @@
  */
 
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion, type Variants } from "framer-motion";
 import {
+  AlertTriangle,
   Loader2,
+  ListChecks,
   Menu,
   NotebookPen,
   PenLine,
+  Sparkles,
   Star,
   Trash2,
 } from "lucide-react";
@@ -39,7 +42,7 @@ import {
   CategoryGlyph,
   categoryColorStyle,
 } from "@/lib/category-style";
-import type { Category, Note } from "@/lib/types";
+import type { Category, Note, NoteStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface NotebookScreenProps {
@@ -279,6 +282,73 @@ function FilterChip({
 
 /* ── Note card ── */
 
+/** Status chip swap animation (150ms fade/scale, popLayout keeps the row flow). */
+const statusChipVariants: Variants = {
+  initial: { opacity: 0, scale: 0.9 },
+  animate: {
+    opacity: 1,
+    scale: 1,
+    transition: { duration: 0.15, ease: "easeOut" },
+  },
+  exit: {
+    opacity: 0,
+    scale: 0.9,
+    transition: { duration: 0.15, ease: "easeIn" },
+  },
+};
+
+/** Analysis pipeline mini-chip: pending / processing / processed / error. */
+function NoteStatusChip({ status }: { status: NoteStatus }) {
+  return (
+    <AnimatePresence initial={false} mode="popLayout">
+      {status === "processed" ? (
+        <motion.span
+          key="processed"
+          variants={statusChipVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 px-2 py-0.5 text-[11px] font-medium text-emerald-700/90 dark:border-emerald-400/20 dark:bg-emerald-400/5 dark:text-emerald-300/90"
+        >
+          <Sparkles className="size-3" aria-hidden="true" />
+          Проанализирована
+        </motion.span>
+      ) : status === "error" ? (
+        <motion.span
+          key="error"
+          variants={statusChipVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:text-rose-300"
+        >
+          <AlertTriangle className="size-3" aria-hidden="true" />
+          Ошибка анализа
+        </motion.span>
+      ) : (
+        <motion.span
+          key={status}
+          variants={statusChipVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+        >
+          {status === "processing" ? (
+            <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="vf-status-pulse size-1.5 rounded-full bg-amber-500"
+            />
+          )}
+          {status === "processing" ? "Анализируем…" : "Анализ в очереди"}
+        </motion.span>
+      )}
+    </AnimatePresence>
+  );
+}
+
 function NoteCard({
   note,
   onOpen,
@@ -314,15 +384,7 @@ function NoteCard({
               <span className="max-w-40 truncate">{note.category.name}</span>
             </span>
           )}
-          {note.status === "pending" && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-              <span
-                aria-hidden="true"
-                className="vf-status-pulse size-1.5 rounded-full bg-amber-500"
-              />
-              Анализ скоро
-            </span>
-          )}
+          <NoteStatusChip status={note.status} />
         </div>
         <Button
           variant="ghost"
@@ -353,6 +415,21 @@ function NoteCard({
       >
         {note.rawText || ""}
       </button>
+
+      {note.status === "processed" && note.recommendations?.[0] && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18 }}
+          className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground"
+        >
+          <ListChecks
+            className="mt-0.5 size-3.5 shrink-0 text-emerald-600/70 dark:text-emerald-400/70"
+            aria-hidden="true"
+          />
+          <span className="line-clamp-1">{note.recommendations[0]}</span>
+        </motion.p>
+      )}
 
       <footer className="mt-3 flex items-center justify-between gap-2">
         <time

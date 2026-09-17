@@ -73,12 +73,24 @@ export interface NoteCategoryRef {
   icon: string;
 }
 
-export interface Note {
+/** 4-block LLM analysis of a note (null until status === "processed"). */
+export interface NoteAnalysis {
+  positive: string | null;
+  negative: string | null;
+  final: string | null;
+  recommendations: string[] | null;
+  analyzedAt: string | null;
+}
+
+export interface Note extends NoteAnalysis {
   id: string;
   rawText: string | null;
   status: NoteStatus;
   favorite: boolean;
   createdAt: string;
+  updatedAt?: string;
+  transcription?: string | null;
+  errorMessage?: string | null;
   category: NoteCategoryRef | null;
 }
 
@@ -137,6 +149,16 @@ export interface WsThreadUpdatedPayload {
 
 export interface WsErrorPayload {
   message: string;
+}
+
+/* ── Note analysis pipeline events (Stage 2, worklog Task 2-ctr) ── */
+
+export interface WsNoteAnalyzingPayload {
+  noteId: string;
+}
+
+export interface WsNoteAnalyzedPayload {
+  note: Note;
 }
 
 export const MODE_LABELS: Record<ThreadMode, string> = {

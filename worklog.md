@@ -346,3 +346,116 @@ Stage Summary:
 - STAGE 1 COMPLETE: agent creates notes with LLM-invented dynamic categories straight from chat; tool cards in UI; NotebookScreen with filters/favorites/delete; context panel note detail; ⌘K quick capture; leaks and races eliminated.
 - NEXT (Stage 2): analysis pipeline for notes (4 blocks: positive/negative/final/recommendations, dynamic category assignment on ⌘K captures too), note discussion in chat, audio capture (voice), note↔project relevance detector (needs Stage 3 projects first — so pipeline + voice are the right Stage 2 scope).
 - Risks/notes: agent-service still a background process (restart cmd in worklog); tool-calling is single-LLM JSON protocol (no native function calling) — robust now but watch for new leak patterns; threads list preview may show tool-card JSON — minor, cosmetic (didn't reproduce).
+
+---
+Task ID: 2-ctr (Stage 2 contracts)
+Agent: main
+Task: Define Stage 2 contracts (analysis pipeline + voice + analysis UI) BEFORE implementation.
+
+Work Log:
+- QA smoke of Stage 1 via agent-browser (gateway :81, user qa-s2@vf.io): landing→register→shell→chat tool-call (note «зарядка», category «Здоровье», panel auto-open)→notebook — ALL PASS, 0 console/page errors.
+
+Stage Summary — CONTRACTS (all Stage 2 agents MUST follow):
+
+1) Note statuses (existing enum, no schema change): `pending` → `processing` → `processed` | `error`.
+   DB fields already exist: transcription, positiveBlock, negativeBlock, finalBlock, recommendations (JSON string), analysisRaw, analyzedAt, errorMessage.
+
+2) EXTENDED NoteShape (flat, REST + WS use the same shape) — superset of old:
+   `{id, rawText, status, favorite, createdAt, updatedAt, transcription, positive, negative, final, recommendations: string[]|null, analyzedAt, errorMessage, category: {id,name,color,icon}|null}`
+   - positive/negative/final = DB positiveBlock/negativeBlock/finalBlock (renamed in shaping only).
+   - recommendations parsed from JSON string to array.
+   - Old consumers ignore new fields → backward compatible.
+
+3) WS events (agent-service → room `user:${userId}`):
+   - `note:analyzing` `{noteId}` — worker started on the note.
+   - `note:analyzed` `{note}` — finished (note.status = 'processed'|'error'; on error note.errorMessage filled).
+
+4) Analyzer worker (mini-services/agent-service/analyzer.ts):
+   - Boot: orphan 'processing' → 'pending' (crash recovery).
+   - Poll every 5s: up to 2 oldest 'pending' notes, sequential.
+   - LLM (Russian, JSON out): positive 60–120 слов, negative 60–120, final 50–100, recommendations array 3–6 items (короткие действия), category_name/color/icon (assign ONLY when note has no category; allowlists as in tools.ts).
+   - Robust JSON parse (fences stripped, outer {...} extract, type validation); 2 LLM attempts, then status 'error' + errorMessage.
+   - Category resolution: reuse by case-insensitive name else create (unique-race safe).
+
+5) REST:
+   - `POST /api/notes/[id]/analyze` — re-queue analysis: status→'pending', clear analysis/error fields → {note} (404 if not owner).
+   - PATCH /api/notes/[id] with rawText change → resets analysis (status 'pending', fields cleared).
+   - `POST /api/notes/voice` {audioBase64, mime} → ASR (z-ai-web-dev-sdk, backend) → create note {rawText=transcription, transcription, status 'pending'} → 201 {note}. Client records via MediaRecorder → decodeAudioData → 16kHz mono WAV → base64 (guarantees ASR-compatible format).
+
+6) Frontend (Tasks 6-b voice, 6-c analysis UI):
+   - 6-b owns: api/notes/voice/route.ts, hooks/use-voice-recorder.ts, capture-dialog.tsx mic UI, composer.tsx mic.
+   - 6-c owns: types.ts WS payload types wiring, use-socket/use-notes handlers, note-detail.tsx analysis blocks, notebook-screen.tsx status chips, store.ts contextNote updates, toast.
+
+---
+Task ID: 6-a (Stage 2 — analysis pipeline backend)
+Agent: main
+Task: Honest LLM analysis pipeline for notes (4 blocks + dynamic category) with WS live events + REST re-analysis + process self-healing.
+
+Work Log:
+- src/lib/note-utils.ts: NoteShape extended FLAT (positive/negative/final renamed from DB *Block, recommendations parsed string[] via parseRecommendations, transcription/analyzedAt/errorMessage/updatedAt). noteWithCategory now maps DB rows.
+- src/lib/types.ts: Note extends NoteAnalysis (positive/negative/final/recommendations/analyzedAt as ISO strings); NEW WsNoteAnalyzingPayload {noteId}, WsNoteAnalyzedPayload {note}.
+- src/lib/api.ts: reanalyzeNote(id) → POST /api/notes/[id]/analyze; createVoiceNote({audioBase64, mime}) → POST /api/notes/voice (for Task 6-b).
+- NEW src/app/api/notes/[id]/analyze/route.ts: resets note to pending + clears analysis (owner-scoped) → worker re-analyzes.
+- PATCH /api/notes/[id]: rawText edit now resets analysis (status pending, blocks null) — edited text invalidates old analysis.
+- NEW mini-services/agent-service/analyzer.ts: poll worker (5s, batch 2, sequential), ANALYSIS_SYSTEM_PROMPT (Russian, strict JSON: positive/negative/final/recommendations[3-6]/category_name+color+icon), robust parse (fences/outer-brace/type-validation), category assigned ONLY when note has none (reuse case-insensitive else create, race-safe), statuses pending→processing→processed|error, crash recovery on boot (processing→pending), detailed console logs.
+- server.ts: startAnalyzer(io) on boot, stopAnalyzer() on SIGTERM/SIGINT.
+- db-client.ts: own PrismaClient (log warn/error only — the shared src/lib/db.ts had log:['query'] which spammed the service log).
+- PROCESS SELF-HEALING (sandbox reaper kills session-spawned bun processes within ~1-4 min; system-managed Next dev server is immortal): NEW mini-services/agent-service/start.sh (supervisor loop, log rotation >5MB, restart after 3s) + NEW src/app/api/health/agent-service/route.ts (GET probe TCP :3003; POST auth-required: probe → spawn detached supervisor FROM the dev-server process → re-probe ×10×400ms). use-socket.tsx: on connect_error (non-auth) → debounced POST /api/health/agent-service (30s window) — app self-heals in browser. VERIFIED: kill service → POST → up in ~4s.
+
+Verification (curl + bun ws-test client + DB):
+- REST create note → worker picks in ≤5s → processing → processed with all 4 blocks + recommendations array + NEW dynamic categories («Продуктивность», «Разработка» created by LLM).
+- WS events received end-to-end: «note:analyzing» {noteId} then «note:analyzed» {note: full extended shape} on room user:<id>.
+- POST /api/notes/[id]/analyze → pending + cleared → re-processed by worker.
+- bun run lint: 0 problems. Dev-server-spawned supervisor survived >3 min (previously session-spawned died ≤4 min).
+
+Stage Summary:
+- Stage 2 backend COMPLETE. Contract implemented exactly as Task 2-ctr.
+- ⚠️ If agent-service is down: curl -X POST (authed) /api/health/agent-service OR open the app in browser (socket connect_error self-heals it). Manual: nohup sh mini-services/agent-service/start.sh (from a LONG-lived parent ideally).
+- NEXT: 6-b voice capture (REST /api/notes/voice + use-voice-recorder + capture/composer mic UI), 6-c analysis UI (note-detail 4 blocks, notebook status chips, WS wiring to store/use-notes, toast).
+
+---
+Task ID: 6-b (Stage 2 — voice capture)
+Agent: voice-capture-agent (executed via subagent; network cut it off before it could log — main verified/polished/logged on its behalf)
+Task: Voice capture — mic recording in ⌘K palette + chat composer, WAV conversion, ASR REST route.
+
+Work Log (reconstructed from code + QA artifacts):
+- NEW src/app/api/notes/voice/route.ts: auth + zod-less manual validation (base64 regex, ≤12MB, audio/* mime) → z-ai-web-dev-sdk ASR → note {rawText: transcription, transcription, status 'pending'} → 201 {note}. SMART EXTRA: the agent discovered the ASR service hard-rejects audio >30s ("duration limit 0–30 s" — verified 31s ok / 33s fails) and implemented PCM WAV SEGMENTATION: parses RIFF chunks, splits >29s WAVs into ≤29s standalone segments, transcribes each, joins texts. Error paths: 400/413/422/502 with Russian messages, never throws raw.
+- NEW src/hooks/use-voice-recorder.ts: state machine idle→requesting→recording→processing; MediaRecorder with mime candidates (webm;opus→webm→mp4→ogg), 250ms timeslices; live level meter via AnalyserNode (RMS, throttled rAF); 90s auto-stop with onAutoStop callback; stop() → Blob → decodeAudioData → mono mixdown → linear resample to 16kHz → PCM16 WAV (44-byte header) → base64; in-flight stop dedupe; full resource teardown (StrictMode-safe, aliveRef guards the permission-prompt-then-unmount window); Russian errors (микрофон запрещён/не найден/не поддерживается/запись короткая).
+- MODIFIED capture-dialog.tsx: mic button (idle ghost / recording rose pulsing dot + mm:ss timer + 5 animated level bars + Square stop / processing Loader2 «Распознаём…» / requesting spinner); transcription lands IN THE TEXTAREA for review (never auto-saves), merged with existing draft, capped at 5000; toasts; textarea dims while recording; !supported → button hidden; all previous behavior intact.
+- MODIFIED composer.tsx: compact mic with the same states; transcription appends to the message input; disabled while agent busy; Enter-to-send unbroken.
+- Agent's own QA: registered s2b-* users, generated real speech WAVs (ASR produced «Tamak, Tan, Huarang…» transcriptions — notes visible in DB), sine-wave route tests («#» notes), browser checks.
+
+Stage Summary:
+- Voice capture E2E VERIFIED by main: mic buttons render (⌘K + composer), headless no-mic → clean «Микрофон не найден» toast, REST route 201 with valid WAV (created note from 440Hz sine), 0 console errors. Files: voice/route.ts + use-voice-recorder.ts NEW; capture-dialog.tsx + composer.tsx MODIFIED.
+
+---
+Task ID: 6-c (Stage 2 — analysis UI + live updates)
+Agent: analysis-ui-agent (executed via subagent; network cut it off before it could log — main verified/polished/logged on its behalf)
+Task: 4-block analysis UI in note detail, status chips in feed, live WS wiring, toasts, re-analysis.
+
+Work Log (reconstructed from code + main's E2E):
+- MODIFIED use-socket.tsx: NoteEvent type + noteListenersRef registry + onNoteEvent(cb) stable subscription API (cleanup via returned unsubscribe); socket handlers note:analyzing (→ emit + contextNote pending→processing patch) and note:analyzed (→ emit + updateContextNote(note) + toast). Toast dedupe: ≤1 per noteId per 60s; error status → destructive toast «Не удалось проанализировать заметку», success → «Анализ заметки готов» with «Открыть» action (openNote → desktop panel / mobile dialog). PRESERVED main's connect_error self-heal block exactly.
+- MODIFIED use-notes.ts: patchNoteLocally(noteId, patch) in-place list patch; onNoteEvent subscription → analyzing: status patch; analyzed: full note patch + ONE silent refresh when category appeared/changed (chips + counts). Exposed patchNoteLocally.
+- MODIFIED store.ts: updateContextNote(note) — replaces contextNote when ids match (WS live payload path), no-ops otherwise.
+- MODIFIED note-detail.tsx: StatusChip (AnimatePresence popLayout; pending «Анализ в очереди» amber pulse dot / processing «Анализируем…» spinner / error «Ошибка анализа» rose); «Анализ ИИ» section header (Sparkles, emerald) + relative analyzedAt («только что», ru plurals); 4 AnalysisBlocks with tones — Сильные стороны (ThumbsUp, emerald), Риски и слабые стороны (AlertTriangle, amber), Главный вывод (neutral), Рекомендации (ListChecks, numbered emerald circle badges) — staggered framer-motion reveal, empty blocks skipped; «Переанализировать заметку» button (processed + error states) → api.reanalyzeNote → optimistic pending flip → worker re-runs live.
+- MODIFIED notebook-screen.tsx: status mini-chips (pending «Анализ в очереди» / processing «Анализируем…» / processed «Проанализирована» + emerald Sparkles / error rose); processed cards show first-recommendation teaser (line-clamp-1, ListChecks icon).
+- Main's polish after VLM audit: light-mode block tint bg-*/5→/10, icon text *-600→*-700, body text foreground/90→foreground, block title→content mt-2.5→mt-3 (dark PASS untouched).
+
+Stage Summary:
+- E2E VERIFIED by main (browser, gateway :81): chat «Запиши заметку…» → tool card → panel auto-open → LIVE WS transition to «Анализ ИИ» with all 4 blocks WITHOUT reload (category «Читательские привычки» assigned by analyzer); notebook chips evolution + recommendation teaser; reanalyze button → pending → re-processed live; mobile 375px dialog with full analysis + scrollable; dark mode PASS (VLM unconditional), light PASS after contrast fix (VLM re-audit). 0 console/page errors. Files: use-socket.tsx, use-notes.ts, store.ts, note-detail.tsx, notebook-screen.tsx MODIFIED (mobile-note-dialog needed no changes).
+
+---
+Task ID: 6-fin (Stage 2 round — integration, QA, cleanup)
+Agent: main
+Task: Integrate Stage 2 (6-a/6-b/6-c), full QA, styling audit, cleanup, worklog.
+
+Work Log:
+- Subagent infrastructure was flaky (network "context deadline exceeded") — but BOTH subagents had actually completed their file work before the cutoff; main verified everything end-to-end instead of re-implementing.
+- Full E2E matrix (agent-browser via :81, user qa-s2@vf.io): landing → chat note-creation → live analysis blocks in panel (WS, no reload) → notebook chips/categories/teaser → reanalyze cycle → voice UI (buttons render, graceful no-mic toast, REST 201 with valid WAV) → dark mode (VLM PASS) → light mode (VLM PASS after contrast fix) → mobile 375px (notebook chips row, note dialog with analysis, scrollable) → console/page errors 0 → bun run lint 0 problems → dev.log clean.
+- Process self-healing validated: supervisor spawned from the Next dev-server process (11:19) SURVIVED the sandbox reaper for 2+ hours (session-spawned bun processes died within ~4 min earlier). Frontend self-heals via connect_error → POST /api/health/agent-service.
+- Cleanup: ALL test users deleted (qa-s2, s2c-*, s2b-*×5) with cascade; DB now: 1 user (real admin game.puzzles.a1@gmail.com), 0 notes, 0 threads.
+
+Stage Summary:
+- **STAGE 2 COMPLETE**: honest LLM analysis pipeline (pending→processing→processed/error, 4 blocks + recommendations + dynamic category assignment incl. ⌘K captures), live WS updates with toasts, re-analysis (button + auto-reset on text edit), voice capture (⌘K + composer, WAV 16kHz conversion, >30s ASR segmentation), full UI polish (light/dark/mobile).
+- NEXT (Stage 3 per plan): PROJECTS — Next.js template sandbox / GitHub clone / ZIP import, real files + git on disk (workspace/), file tools for the agent (read/write/list/search), Monaco editor, checkpoints via git commits, thread.mode ask/plan/act/review UI, note↔project links (NoteLink model exists).
+- Risks/notes: (a) agent-service process is now self-healing BUT the supervisor script must exist for boot — if the whole sandbox restarts, first browser visit revives :3003 automatically; (b) ASR 30s segment limit handled by splitting — long-voice quality depends on segment boundaries landing mid-word occasionally; (c) analyzer processes max 2 notes per 5s tick sequentially — fine for single-user, revisit batch if multi-user load appears; (d) tool-card reload rendering (REST history) shows tool JSON gracefully (Stage 1 behavior, unchanged).

@@ -6,12 +6,16 @@
  * saves, Shift+Enter inserts a newline, Esc cancels. Success toast offers
  * a jump straight to the notebook.
  *
+ * Voice (Stage 2): the mic button records via useVoiceRecorder, the
+ * backend transcribes (POST /api/notes/voice) and the text lands in the
+ * textarea for review — the user still saves with the regular flow.
+ *
  * The form lives in an inner component: Radix unmounts dialog content on
  * close, so the draft state resets naturally without reset effects.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, PenLine } from "lucide-react";
+import { Loader2, Mic, PenLine, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -22,6 +26,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  formatRecordingTime,
+  LEVEL_BAR_FACTORS,
+  useVoiceRecorder,
+  type VoiceClip,
+} from "@/hooks/use-voice-recorder";
 import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
@@ -69,6 +79,57 @@ function CaptureForm() {
   const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
+  // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
+  const finalizingRef = useRef(false);
+
+  const finalizeRecording = async (clipArg?: VoiceClip) => {
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
+    try {
+      const clip = clipArg ?? (await recorder.stop());
+      const note = await api.createVoiceNote({
+        audioBase64: clip.audioBase64,
+        mime: clip.mime,
+      });
+      const text = (note.rawText ?? note.transcription ?? "").trim();
+      if (!text) {
+        toast.error("Не удалось распознать речь — попробуйте записать ещё раз");
+      } else {
+        // Text goes INTO the textarea — the user reviews and saves manually.
+        setValue((prev) => {
+          const base = prev.trim();
+          const merged = base ? `${base}\n${text}` : text;
+          return merged.slice(0, MAX_NOTE_LENGTH);
+        });
+        taRef.current?.focus();
+        toast.success("Голос распознан — проверьте текст");
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError || err instanceof Error
+          ? err.message
+          : "Не удалось распознать голос",
+      );
+    } finally {
+      finalizingRef.current = false;
+      recorder.reset();
+    }
+  };
+
+  const recorder = useVoiceRecorder({
+    onAutoStop: (clip) => void finalizeRecording(clip),
+  });
+  const { state: voiceState, elapsedMs, level, supported } = recorder;
+  const isRecording = voiceState === "recording";
+
+  const startRecording = async () => {
+    try {
+      await recorder.start();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось начать запись");
+    }
+  };
+
   // Auto-grow: 2 rows initially, capped at MAX_TEXTAREA_HEIGHT.
   useEffect(() => {
     const ta = taRef.current;
@@ -78,7 +139,8 @@ function CaptureForm() {
   }, [value]);
 
   const trimmed = value.trim();
-  const canSubmit = !submitting && trimmed.length > 0;
+  const canSubmit =
+    !submitting && voiceState === "idle" && trimmed.length > 0;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -127,15 +189,99 @@ function CaptureForm() {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Мысль, идея, наблюдение…"
+        placeholder={isRecording ? "Слушаем вас…" : "Мысль, идея, наблюдение…"}
         maxLength={MAX_NOTE_LENGTH}
-        disabled={submitting}
-        className="vf-scroll min-h-[3.4rem] w-full resize-none rounded-xl border bg-card px-3 py-2.5 text-sm leading-relaxed outline-none transition-shadow duration-150 placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={submitting || isRecording}
+        className="vf-scroll min-h-[3.4rem] w-full resize-none rounded-xl border bg-card px-3 py-2.5 text-sm leading-relaxed outline-none transition-all duration-150 placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-not-allowed disabled:opacity-60"
       />
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] leading-snug text-muted-foreground">
-          Enter — сохранить · Shift+Enter — перенос · Esc — отмена
-        </p>
+        <div className="flex min-w-0 items-center gap-2">
+          {supported && isRecording && (
+            <>
+              <span
+                className="flex h-11 shrink-0 items-center gap-2 rounded-xl bg-rose-500/10 px-3 text-rose-600 transition-colors duration-150 dark:text-rose-400"
+                aria-hidden="true"
+              >
+                <span className="relative flex size-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                  <span className="relative inline-flex size-2 rounded-full bg-rose-500" />
+                </span>
+                <span className="font-mono text-sm font-medium tabular-nums">
+                  {formatRecordingTime(elapsedMs)}
+                </span>
+                <span className="flex h-4 items-end gap-[3px]">
+                  {LEVEL_BAR_FACTORS.map((factor, i) => (
+                    <span
+                      key={i}
+                      className="w-[3px] rounded-full bg-rose-500/80 transition-[height] duration-100 ease-out"
+                      style={{
+                        height: `${Math.max(3, Math.round(3 + level * 13 * factor))}px`,
+                      }}
+                    />
+                  ))}
+                </span>
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => void finalizeRecording()}
+                className="size-11 shrink-0 rounded-xl text-rose-600 transition-colors duration-150 hover:bg-rose-500/10 hover:text-rose-700 dark:text-rose-400 dark:hover:bg-rose-500/10 dark:hover:text-rose-300"
+                aria-label="Остановить запись"
+                aria-pressed={true}
+              >
+                <Square className="size-3.5 fill-current" aria-hidden="true" />
+              </Button>
+              <span className="sr-only" role="status">
+                Идёт запись голоса
+              </span>
+            </>
+          )}
+          {supported && voiceState === "processing" && (
+            <span
+              className="flex h-11 shrink-0 items-center gap-2 px-1 text-sm text-muted-foreground"
+              role="status"
+            >
+              <Loader2
+                className="size-4 animate-spin text-rose-500"
+                aria-hidden="true"
+              />
+              Распознаём…
+              <span className="sr-only">Обрабатываем голосовую запись</span>
+            </span>
+          )}
+          {supported && voiceState === "requesting" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled
+              className="size-11 shrink-0 rounded-xl text-muted-foreground"
+              aria-label="Запрос доступа к микрофону"
+            >
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            </Button>
+          )}
+          {supported && voiceState === "idle" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => void startRecording()}
+              className="size-11 shrink-0 rounded-xl text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
+              aria-label="Записать голос"
+              aria-pressed={false}
+              title="Записать голос"
+            >
+              <Mic className="size-4" aria-hidden="true" />
+            </Button>
+          )}
+          {!isRecording && (
+            <p className="truncate text-[11px] leading-snug text-muted-foreground">
+              Enter — сохранить · Shift+Enter — перенос · Esc — отмена
+            </p>
+          )}
+        </div>
         <span
           className={`shrink-0 text-[11px] tabular-nums ${
             value.length > MAX_NOTE_LENGTH * 0.9

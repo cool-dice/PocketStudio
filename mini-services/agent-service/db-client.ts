@@ -1,7 +1,20 @@
-// Single Prisma client & schema: reuse the main app's client.
-// Dependencies (@prisma/client) resolve from /home/z/my-project/node_modules
-// (module resolution walks up under bun; this service has no node_modules).
+// Agent-service Prisma client.
+//
+// Own instance (NOT the shared src/lib/db.ts one) because the main app's
+// client enables `log: ['query']` for dev visibility — in this long-running
+// service that would spam /tmp/agent-service.log with every analyzer poll.
+// Same SQLite file (DATABASE_URL from index.ts bootstrap).
 
-import { db } from "../../src/lib/db";
+import { PrismaClient } from "@prisma/client";
 
-export { db };
+const globalForPrisma = globalThis as unknown as {
+  vfAgentPrisma?: PrismaClient;
+};
+
+export const db =
+  globalForPrisma.vfAgentPrisma ??
+  new PrismaClient({
+    log: ["warn", "error"],
+  });
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.vfAgentPrisma = db;

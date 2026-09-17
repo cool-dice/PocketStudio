@@ -5,6 +5,11 @@
  * optimistic favorite/delete, silent refresh on note mutations
  * (store notesVersion) and manual refresh().
  *
+ * Stage 2: subscribes to the note analysis pipeline (WS note:analyzing /
+ * note:analyzed via use-socket's onNoteEvent) and patches the cached list
+ * in place; a changed/new category also triggers one silent refresh so the
+ * filter chips and counts pick it up.
+ *
  * Loading semantics: full skeleton only for the initial load and filter
  * changes; version-bump refreshes keep the current list visible.
  */
@@ -12,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { useSocket, type NoteEvent } from "@/hooks/use-socket";
 import { api } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import type { Category, Note } from "@/lib/types";
@@ -25,6 +31,7 @@ export interface NotesFilters {
 
 export function useNotes() {
   const notesVersion = useAppUi((s) => s.notesVersion);
+  const { onNoteEvent } = useSocket();
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [total, setTotal] = useState(0);
@@ -119,6 +126,38 @@ export function useNotes() {
     setTick((t) => t + 1);
   }, []);
 
+  /** Patch a note in the cached list in place (WS live updates). */
+  const patchNoteLocally = useCallback(
+    (noteId: string, patch: Partial<Note>) => {
+      setNotes((prev) =>
+        prev.map((n) => (n.id === noteId ? { ...n, ...patch } : n)),
+      );
+    },
+    [],
+  );
+
+  // Live analysis pipeline: patch the cached list without a refetch; when
+  // the analyzed note gained/changed its category, do one silent refresh
+  // so the category filter chips and counts update.
+  useEffect(
+    () =>
+      onNoteEvent((event: NoteEvent) => {
+        if (event.type === "note:analyzing") {
+          patchNoteLocally(event.noteId, { status: "processing" });
+          return;
+        }
+        const note = event.note;
+        const prevCategory = notesRef.current.find(
+          (n) => n.id === note.id,
+        )?.category;
+        patchNoteLocally(note.id, note);
+        if (note.category && prevCategory?.id !== note.category.id) {
+          refresh();
+        }
+      }),
+    [onNoteEvent, patchNoteLocally, refresh],
+  );
+
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMore) return;
     loadingMoreRef.current = true;
@@ -201,6 +240,7 @@ export function useNotes() {
     setFilter,
     loadMore,
     refresh,
+    patchNoteLocally,
     toggleFavorite,
     deleteNote,
   };

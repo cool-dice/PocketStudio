@@ -36,7 +36,11 @@ interface AppUiState {
   openNote: (note: Note, opts?: { auto?: boolean }) => void;
   /** Close the note → panel falls back to the placeholder. */
   closeNote: () => void;
-  /** Replace the open note in place (favorite toggle, fresh REST data). */
+  /**
+   * Replace the open note in place (favorite toggle, fresh REST data, or a
+   * live WS pipeline payload — note:analyzing / note:analyzed). No-op when
+   * the ids don't match, so stale events never hijack the panel.
+   */
   updateContextNote: (note: Note) => void;
   /** Refetch the open note from the REST API (no-op when closed). */
   refreshNote: () => Promise<void>;
