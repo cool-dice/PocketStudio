@@ -828,3 +828,20 @@ Stage Summary:
 - Roadmap with prototype-migration inventory + phases A–E at docs/ROADMAP.md.
 - Pre-existing tsc debts: 4 errors in tool-card.tsx/use-threads.tsx/use-voice-recorder.ts (dev compiles fine, lint clean).
 - NEXT per roadmap: Phase A — unified AI interface layer (src/lib/ai/), Document/Chapter schema + API + real editor, agent tools for documents, prompt merge, tsc debt cleanup.
+
+---
+Task ID: PS-2-plan
+Agent: main
+Task: Включить обратную связь пользователя (4 упущенных редактора) в роадмап и подготовить план «PS-2 — Волна редакторов» на апрув (до апрува разработку не начинать)
+
+Work Log:
+- Получен feedback: начало (PS-1, 8 модулей) — хорошее, но упущено: (1) NarrativeCore без документации — только зачаток книг/доков, нет кодекса мира, лора, сущностей, персонажей с состояниями, генерации портрета по описанию → в альбом; (2) редактор изображений должен быть упрощённым Photoshop (ручная правка) + аналог Figma для IDE, инструмент унифицирован, режимы предпросмотра/дизайнера; (3) аудио — аналог FL Studio; (4) видео — аналог Premiere/Vegas.
+- Зафиксирован принцип пользователя: НЕ конкурируем с крупными игроками — минимально базовый набор для тех, кто умеет в про-инструментах; главный инструмент платформы — чат-оркестратор. Сценарии: песня→DAW (дорожки, тональности, сэмплы AI/свои)→клип в NLE; сценарий→раскадровка→видеоряд+озвучка→фильм 10–20 мин (перспектива 2 ч), кусками → сборка в единый.
+- Обновил docs/ROADMAP.md v2: раздел «Принцип редакторов» + опорные сценарии; секция «PS-2 — Волна редакторов» (N1 NarrativeCore: Рукопись/Кодекс/Персонажи/Альбом/Канон; N2 Дизайн: растр Photoshop-lite + фигма-лайт + режимы Предпросмотр/Дизайнер для IDE; N3 DAW во вкладке Студия; N4 NLE во вкладке Монтаж); фазы A–C дополнены схемами (WorldEntity, Character+CharacterState, Portrait, DesignDoc/Layer, AudioProject/DawTrack/DawClip, VideoProject/TimelineClip); таблица миграции vb.md (VibeCompositor/VibeMovieMaker/NarrativeCore/VibeWriter → куда легли в PocketStudio).
+- Создал cron webDevReview (15 мин) с гардом: пока PS-2 не апрувнут — только QA/багфиксы, новые фазы не начинать.
+
+Stage Summary:
+- План PS-2 оформлен в docs/ROADMAP.md и представлен пользователю на апрув в чате.
+- Разработка редакторов НЕ начата — ждём одобрения (жёсткое правило пользователя «Перед началом план мне на апрув»).
+- Следующий шаг после апрува: 4 параллельных субагента (PS-2-a NarrativeCore, PS-2-b Дизайн, PS-2-c DAW, PS-2-d NLE) → интеграция + браузерная верификация.
+
