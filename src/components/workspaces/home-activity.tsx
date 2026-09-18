@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * HomeActivity — лента «Активность» на Главной (PS-3-a): события всех
- * воркспейсов с тип-окрашенными иконками; клик по событию открывает
- * воркспейс, в котором оно произошло.
+ * HomeActivity — лента «Активность» на Главной (PS-3-a → PS-4):
+ * события всех воркспейсов с тип-окрашенными иконками; клик по событию
+ * открывает воркспейс, в котором оно произошло. Карточка растягивается
+ * по высоте соседнего чат-виджета, список скроллится внутри.
  */
 
 import { ChevronRight } from "lucide-react";
@@ -20,13 +21,18 @@ export function HomeActivity() {
   const openWorkspace = useAppUi((s) => s.openWorkspace);
 
   return (
-    <section aria-label="Активность студии" className="rounded-xl border bg-card">
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b px-4 py-3">
+    <section
+      aria-label="Активность студии"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm"
+    >
+      <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
         <h2 className="text-sm font-semibold">Активность</h2>
-        <p className="truncate text-xs text-muted-foreground">по всем воркспейсам</p>
+        <p className="truncate text-[11px] text-muted-foreground">
+          по всем воркспейсам
+        </p>
       </div>
 
-      <ul className="vf-scroll max-h-96 overflow-y-auto p-2">
+      <ul className="vf-scroll min-h-0 flex-1 divide-y divide-border/60 overflow-y-auto p-2">
         {HOME_ACTIVITY.map((item) => {
           const workspace = findWorkspace(item.workspaceId);
           if (!workspace) return null;
@@ -36,7 +42,7 @@ export function HomeActivity() {
                 type="button"
                 onClick={() => openWorkspace(item.workspaceId)}
                 title={`Открыть «${workspace.title}»`}
-                className="group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                className="group flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 <span
                   className={cn(
@@ -49,7 +55,7 @@ export function HomeActivity() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm">{item.text}</span>
-                  <span className="block truncate text-[11px] text-muted-foreground">
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
                     {item.time} · {workspace.title}
                   </span>
                 </span>

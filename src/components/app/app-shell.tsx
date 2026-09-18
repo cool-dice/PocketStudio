@@ -143,8 +143,10 @@ export function AppShell() {
         <ProjectsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       )}
 
-      {/* ── Right: context (xl+) ── */}
-      {contextOpen && <ContextPanel onClose={() => setContextOpen(false)} />}
+      {/* ── Right: context (xl+, только в полном чате) ── */}
+      {mainArea === "chat" && contextOpen && (
+        <ContextPanel onClose={() => setContextOpen(false)} />
+      )}
 
       {/* ── Overlays ── */}
       <CaptureDialog />
