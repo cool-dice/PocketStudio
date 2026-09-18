@@ -22,6 +22,7 @@ import {
   Moon,
   NotebookPen,
   PenLine,
+  PenTool,
   Pencil,
   Rocket,
   Search,
@@ -458,6 +459,13 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             icon={ImagePlus}
             label="Изображения"
             area="images"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+          <StudioNavItem
+            icon={PenTool}
+            label="Дизайн"
+            area="design"
             mainArea={mainArea}
             onOpen={handleOpenStudio}
           />

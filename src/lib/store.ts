@@ -25,6 +25,7 @@ export type MainArea =
   /* ── PocketStudio modules (visual vision first, functionality later) ── */
   | "documents" // Книги / статьи / сценарии
   | "images" // Генерация изображений + галерея
+  | "design" // Универсальный редактор: растр + макеты
   | "audio" // Аудио: озвучка, музыка, подкасты
   | "video" // Карманная киностудия
   | "deploy" // Сборка → реестр → хост

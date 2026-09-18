@@ -24,6 +24,7 @@ import { ProjectsScreen } from "@/components/app/projects-screen";
 import { SidebarContent } from "@/components/app/sidebar";
 import { DocumentsScreen } from "@/components/studio/documents/documents-screen";
 import { ImagesScreen } from "@/components/studio/images/images-screen";
+import { DesignScreen } from "@/components/studio/design/design-screen";
 import { AudioScreen } from "@/components/studio/audio/audio-screen";
 import { VideoScreen } from "@/components/studio/video/video-screen";
 import { DeployScreen } from "@/components/studio/deploy/deploy-screen";
@@ -105,6 +106,8 @@ export function AppShell() {
         <DocumentsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : mainArea === "images" ? (
         <ImagesScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "design" ? (
+        <DesignScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : mainArea === "audio" ? (
         <AudioScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : mainArea === "video" ? (

@@ -30,6 +30,12 @@ export interface StudioDoc {
   /** Готовность в процентах, 0–100. */
   progress: number;
   chapters?: Chapter[];
+  /** Коллекция/цикл для группировки в библиотеке. */
+  collection?: string;
+  /** Теги для фильтрации в каталоге. */
+  tags: string[];
+  /** Сколько минут назад правили документ — для сортировки. */
+  updatedAgo: number;
 }
 
 export const KIND_META: Record<DocKind, { label: string; plural: string; icon: LucideIcon }> = {
@@ -61,7 +67,53 @@ export const STATUS_META: Record<DocStatus, { label: string; className: string; 
   },
 };
 
+export const DOC_COLLECTIONS: { id: string; label: string; hint: string }[] = [
+  { id: "cycle-winter", label: "Хроники Долгой Зимы", hint: "цикл романа" },
+  { id: "articles", label: "Статьи", hint: "заметки и гайды" },
+  { id: "scripts", label: "Сценарии", hint: "экранизации и промо" },
+];
+
 export const MOCK_DOCS: StudioDoc[] = [
+  {
+    id: "khroniki-dolgoy-zimy",
+    title: "Хроники Долгой Зимы",
+    kind: "book",
+    status: "writing",
+    words: 21240,
+    progress: 38,
+    collection: "cycle-winter",
+    tags: ["фэнтези", "цикл", "зима"],
+    updatedAgo: 4,
+    chapters: [
+      { id: "dz-1", number: 1, title: "Сорок первое утро зимы", status: "done", words: 5120 },
+      { id: "dz-2", number: 2, title: "Тихая Пристань", status: "done", words: 4890 },
+      { id: "dz-3", number: 3, title: "Стеклянный компас", status: "done", words: 4310 },
+      { id: "dz-4", number: 4, title: "Дозор на Слюдяном мосту", status: "current", words: 2764 },
+      { id: "dz-5", number: 5, title: "Ночь без огней", status: "pending", words: 0 },
+      { id: "dz-6", number: 6, title: "Исход девяти родов", status: "pending", words: 0 },
+      { id: "dz-7", number: 7, title: "Разговор с хранителем", status: "pending", words: 0 },
+      { id: "dz-8", number: 8, title: "Обет снега", status: "pending", words: 0 },
+      { id: "dz-9", number: 9, title: "Весна, которой не было", status: "pending", words: 0 },
+      { id: "dz-10", number: 10, title: "Эпилог. Тепло", status: "pending", words: 0 },
+    ],
+  },
+  {
+    id: "dolgaya-zima-rasskazy",
+    title: "Долгая Зима: Рассказы",
+    kind: "book",
+    status: "draft",
+    words: 3980,
+    progress: 12,
+    collection: "cycle-winter",
+    tags: ["рассказы", "цикл", "зима"],
+    updatedAgo: 38,
+    chapters: [
+      { id: "rz-1", number: 1, title: "Шапка для снеговика", status: "done", words: 1740 },
+      { id: "rz-2", number: 2, title: "Тёплый ломоть", status: "done", words: 1290 },
+      { id: "rz-3", number: 3, title: "Счёт шагов", status: "current", words: 950 },
+      { id: "rz-4", number: 4, title: "Голос за стеной", status: "pending", words: 0 },
+    ],
+  },
   {
     id: "sozvezdie-pikselya",
     title: "Созвездие Пикселя",
@@ -69,6 +121,8 @@ export const MOCK_DOCS: StudioDoc[] = [
     status: "writing",
     words: 19044,
     progress: 64,
+    tags: ["нон-фикшн", "студия"],
+    updatedAgo: 26,
     chapters: [
       { id: "sp-1", number: 1, title: "Всё началось с кассеты", status: "done", words: 4680 },
       { id: "sp-2", number: 2, title: "Тетрадь в клеточку", status: "done", words: 5240 },
@@ -97,6 +151,9 @@ export const MOCK_DOCS: StudioDoc[] = [
     status: "done",
     words: 6480,
     progress: 100,
+    collection: "articles",
+    tags: ["гайд", "студия"],
+    updatedAgo: 1440,
   },
   {
     id: "scenariy-pervyy-kontakt",
@@ -105,6 +162,9 @@ export const MOCK_DOCS: StudioDoc[] = [
     status: "draft",
     words: 3120,
     progress: 12,
+    collection: "scripts",
+    tags: ["экранизация", "короткий метр"],
+    updatedAgo: 72,
   },
   {
     id: "ritmy-goroda",
@@ -113,6 +173,8 @@ export const MOCK_DOCS: StudioDoc[] = [
     status: "published",
     words: 7380,
     progress: 31,
+    tags: ["рассказы", "город"],
+    updatedAgo: 4320,
     chapters: [
       { id: "rg-1", number: 1, title: "Мост в шесть утра", status: "done", words: 2940 },
       { id: "rg-2", number: 2, title: "Трамвай «Пульс»", status: "done", words: 2610 },
@@ -127,6 +189,9 @@ export const MOCK_DOCS: StudioDoc[] = [
     status: "writing",
     words: 5760,
     progress: 78,
+    collection: "articles",
+    tags: ["гайд", "оркестратор"],
+    updatedAgo: 320,
   },
 ];
 

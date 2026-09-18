@@ -9,7 +9,7 @@
  */
 
 import { motion } from "framer-motion";
-import { BookOpenText, Clapperboard, FolderGit2, NotebookPen, Sparkles } from "lucide-react";
+import { AudioWaveform, BookOpenText, Clapperboard, FolderGit2, NotebookPen, Sparkles } from "lucide-react";
 
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -72,6 +72,15 @@ export function Welcome() {
         >
           <BookOpenText className="size-4" aria-hidden="true" />
           Писать книгу
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 gap-2 rounded-xl transition-transform duration-150 hover:-translate-y-0.5"
+          onClick={() => setMainArea("audio")}
+        >
+          <AudioWaveform className="size-4" aria-hidden="true" />
+          Собрать трек
         </Button>
         <Button
           variant="outline"

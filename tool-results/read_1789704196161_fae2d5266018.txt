@@ -1,0 +1,663 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * Режим «Превью (IDE)» — курсор-стиль связки с кодом проекта.
+     5→ * Мок браузера с приложением-дашбордом: в режиме «Дизайнер» наведение
+     6→ * подсвечивает элемент и показывает его селектор, клик — выбирает
+     7→ * элемент в инспекторе (тег/класс, свойства, путь к файлу, промпт правки).
+     8→ */
+     9→
+    10→import { useState } from "react";
+    11→import type { ReactNode } from "react";
+    12→import {
+    13→  Check,
+    14→  Coins,
+    15→  Copy,
+    16→  Eye,
+    17→  FileCode,
+    18→  FolderKanban,
+    19→  LayoutDashboard,
+    20→  Lock,
+    21→  Monitor,
+    22→  MousePointer2,
+    23→  Palette,
+    24→  RotateCw,
+    25→  SlidersHorizontal,
+    26→  Smartphone,
+    27→  Sparkles,
+    28→  Type,
+    29→  Wand2,
+    30→} from "lucide-react";
+    31→import type { LucideIcon } from "lucide-react";
+    32→
+    33→import { Button } from "@/components/ui/button";
+    34→import { Label } from "@/components/ui/label";
+    35→import { Textarea } from "@/components/ui/textarea";
+    36→import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+    37→import { cn } from "@/lib/utils";
+    38→import { IDE_ELEMENTS, type DesignFile, type IdeElement } from "./design-data";
+    39→import { WipMiniBadge } from "./raster-panels";
+    40→
+    41→type PreviewMode = "clean" | "design";
+    42→type Device = "desktop" | "mobile";
+    43→
+    44→const IDE_ELEMENT_MAP: Record<string, IdeElement> = Object.fromEntries(
+    45→  IDE_ELEMENTS.map((e) => [e.id, e]),
+    46→);
+    47→
+    48→const MINI_TOOLS: { id: string; name: string; icon: LucideIcon }[] = [
+    49→  { id: "select", name: "Выбрать", icon: MousePointer2 },
+    50→  { id: "text", name: "Текст", icon: Type },
+    51→  { id: "color", name: "Цвет", icon: Palette },
+    52→];
+    53→
+    54→const NAV_ITEMS = [
+    55→  { label: "Обзор", icon: LayoutDashboard, active: true },
+    56→  { label: "Работы", icon: FolderKanban, active: false },
+    57→  { label: "Доходы", icon: Coins, active: false },
+    58→  { label: "Настройки", icon: SlidersHorizontal, active: false },
+    59→];
+    60→
+    61→const STATS = [
+    62→  { label: "Доход за месяц", value: "128 400 ₽", delta: "+12%" },
+    63→  { label: "Опубликованных работ", value: "24", delta: "+3" },
+    64→  { label: "Подписчики", value: "3 918", delta: "+4%" },
+    65→];
+    66→
+    67→const CHART_BARS = [
+    68→  { m: "апр", v: 32 },
+    69→  { m: "май", v: 44 },
+    70→  { m: "июн", v: 38 },
+    71→  { m: "июл", v: 52 },
+    72→  { m: "авг", v: 48 },
+    73→  { m: "сен", v: 60 },
+    74→  { m: "окт", v: 56 },
+    75→  { m: "ноя", v: 68 },
+    76→  { m: "дек", v: 64 },
+    77→  { m: "янв", v: 76 },
+    78→  { m: "фев", v: 84 },
+    79→  { m: "мар", v: 96 },
+    80→];
+    81→
+    82→const TABLE_ROWS = [
+    83→  { name: "Кошелькин Артём", status: "Оплачено", paid: true, amount: "2 400 ₽" },
+    84→  { name: "Мельникова Дарья", status: "Ожидает", paid: false, amount: "1 800 ₽" },
+    85→  { name: "Ковалёв Степан", status: "Оплачено", paid: true, amount: "3 200 ₽" },
+    86→  { name: "Никитина Аня", status: "Оплачено", paid: true, amount: "980 ₽" },
+    87→];
+    88→
+    89→/* ────────────────────────── Интерактивный элемент ────────────────────────── */
+    90→
+    91→function IdeRegion({
+    92→  el,
+    93→  designer,
+    94→  hovered,
+    95→  selected,
+    96→  onHover,
+    97→  onSelect,
+    98→  className,
+    99→  badgeSide = "left",
+   100→  dashedHover = false,
+   101→  children,
+   102→}: {
+   103→  el: IdeElement;
+   104→  designer: boolean;
+   105→  hovered: boolean;
+   106→  selected: boolean;
+   107→  onHover: (id: string | null) => void;
+   108→  onSelect: (id: string) => void;
+   109→  className?: string;
+   110→  badgeSide?: "left" | "right";
+   111→  dashedHover?: boolean;
+   112→  children: ReactNode;
+   113→}) {
+   114→  if (!designer) {
+   115→    return <div className={className}>{children}</div>;
+   116→  }
+   117→  const outlined = hovered || selected;
+   118→  return (
+   119→    <div
+   120→      role="button"
+   121→      tabIndex={0}
+   122→      aria-pressed={selected}
+   123→      aria-label={`Элемент ${el.label}`}
+   124→      className={cn(
+   125→        "relative cursor-pointer outline-none",
+   126→        className,
+   127→        selected && "outline-2 outline-primary",
+   128→        !selected &&
+   129→          hovered &&
+   130→          (dashedHover
+   131→            ? "outline-1 outline-dashed outline-emerald-600/60"
+   132→            : "outline-1 outline-primary/70"),
+   133→      )}
+   134→      onMouseEnter={() => onHover(el.id)}
+   135→      onMouseLeave={() => onHover(null)}
+   136→      onClick={(e) => {
+   137→        e.stopPropagation();
+   138→        onSelect(el.id);
+   139→      }}
+   140→      onKeyDown={(e) => {
+   141→        if (e.key === "Enter" || e.key === " ") {
+   142→          e.preventDefault();
+   143→          e.stopPropagation();
+   144→          onSelect(el.id);
+   145→        }
+   146→      }}
+   147→    >
+   148→      {outlined ? (
+   149→        <span
+   150→          className={cn(
+   151→            "absolute -top-5 z-20 rounded bg-primary px-1.5 py-0.5 font-mono text-[10px] leading-4 whitespace-nowrap text-primary-foreground shadow-md",
+   152→            badgeSide === "left" ? "left-0" : "right-0",
+   153→          )}
+   154→        >
+   155→          {el.label}
+   156→        </span>
+   157→      ) : null}
+   158→      {children}
+   159→    </div>
+   160→  );
+   161→}
+   162→
+   163→/* ────────────────────────── Основной таб ────────────────────────── */
+   164→
+   165→export function PreviewTab({ file }: { file: DesignFile }) {
+   166→  const [mode, setMode] = useState<PreviewMode>("design");
+   167→  const [device, setDevice] = useState<Device>("desktop");
+   168→  const [hoveredId, setHoveredId] = useState<string | null>(null);
+   169→  const [selectedId, setSelectedId] = useState<string | null>(null);
+   170→  const [miniToolId, setMiniToolId] = useState("select");
+   171→  const [prompt, setPrompt] = useState("");
+   172→  const [copied, setCopied] = useState(false);
+   173→
+   174→  const designer = mode === "design";
+   175→  const els = IDE_ELEMENT_MAP;
+   176→  const selected =
+   177→    Object.values(IDE_ELEMENT_MAP).find((e) => e.id === selectedId) ?? null;
+   178→
+   179→  return (
+   180→    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+   181→      <div className="flex min-w-0 flex-1 flex-col">
+   182→        {/* Тумблер режимов */}
+   183→        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-card/50 px-3 py-2">
+   184→          <ToggleGroup
+   185→            type="single"
+   186→            value={mode}
+   187→            onValueChange={(v) => {
+   188→              if (v) setMode(v as PreviewMode);
+   189→            }}
+   190→            variant="outline"
+   191→            size="sm"
+   192→            aria-label="Режим превью"
+   193→          >
+   194→            <ToggleGroupItem value="clean">
+   195→              <Eye className="size-3.5" aria-hidden="true" />
+   196→              Предпросмотр
+   197→            </ToggleGroupItem>
+   198→            <ToggleGroupItem value="design">
+   199→              <MousePointer2 className="size-3.5" aria-hidden="true" />
+   200→              Дизайнер
+   201→            </ToggleGroupItem>
+   202→          </ToggleGroup>
+   203→          <span className="ml-auto hidden items-center gap-1.5 text-[11px] text-muted-foreground lg:flex">
+   204→            <Sparkles className="size-3.5 text-primary" aria-hidden="true" />
+   205→            {designer
+   206→              ? "Наведите на элемент — появится путь к исходнику"
+   207→              : "Чистый предпросмотр приложения"}
+   208→          </span>
+   209→          <span className="max-w-40 truncate font-mono text-[10px] text-muted-foreground">
+   210→            {file.name}
+   211→          </span>
+   212→        </div>
+   213→
+   214→        {/* Браузер */}
+   215→        <div
+   216→          className="relative flex min-h-[440px] flex-1 items-start justify-center overflow-auto p-3 sm:p-5"
+   217→          style={{
+   218→            backgroundImage:
+   219→              "radial-gradient(circle, rgba(120,113,108,0.22) 1px, transparent 1px)",
+   220→            backgroundSize: "22px 22px",
+   221→          }}
+   222→          aria-label="Окно предпросмотра"
+   223→        >
+   224→          <div className="relative w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-2xl">
+   225→            {/* Хром браузера */}
+   226→            <div className="flex items-center gap-2 border-b bg-muted/60 px-3 py-2">
+   227→              <span className="flex shrink-0 gap-1.5" aria-hidden="true">
+   228→                {["bg-stone-500/60", "bg-stone-400/50", "bg-stone-300/40"].map(
+   229→                  (dot, i) => (
+   230→                    <span key={i} className={cn("size-2.5 rounded-full", dot)} />
+   231→                  ),
+   232→                )}
+   233→              </span>
+   234→              <div className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border bg-background px-2.5">
+   235→                <Lock className="size-3 shrink-0 text-emerald-600" aria-hidden="true" />
+   236→                <span className="truncate font-mono text-[11px] text-muted-foreground">
+   237→                  preview.localhost:3000
+   238→                </span>
+   239→                <RotateCw
+   240→                  className="ml-auto size-3 shrink-0 text-muted-foreground"
+   241→                  aria-hidden="true"
+   242→                />
+   243→              </div>
+   244→              <span className="flex shrink-0 items-center rounded-md border bg-background p-0.5" role="group" aria-label="Устройство">
+   245→                <Button
+   246→                  variant="ghost"
+   247→                  size="icon"
+   248→                  className={cn(
+   249→                    "size-6",
+   250→                    device === "desktop" && "bg-primary/15 text-primary",
+   251→                  )}
+   252→                  onClick={() => setDevice("desktop")}
+   253→                  aria-label="Десктоп"
+   254→                  aria-pressed={device === "desktop"}
+   255→                >
+   256→                  <Monitor className="size-3.5" aria-hidden="true" />
+   257→                </Button>
+   258→                <Button
+   259→                  variant="ghost"
+   260→                  size="icon"
+   261→                  className={cn(
+   262→                    "size-6",
+   263→                    device === "mobile" && "bg-primary/15 text-primary",
+   264→                  )}
+   265→                  onClick={() => setDevice("mobile")}
+   266→                  aria-label="Мобильный"
+   267→                  aria-pressed={device === "mobile"}
+   268→                >
+   269→                  <Smartphone className="size-3.5" aria-hidden="true" />
+   270→                </Button>
+   271→              </span>
+   272→            </div>
+   273→
+   274→            {/* Вьюпорт с мок-приложением */}
+   275→            <div className="bg-muted/40 p-3 sm:p-4">
+   276→              <IdeRegion
+   277→                el={els.root}
+   278→                designer={designer}
+   279→                hovered={hoveredId === "root"}
+   280→                selected={selectedId === "root"}
+   281→                onHover={setHoveredId}
+   282→                onSelect={setSelectedId}
+   283→                badgeSide="right"
+   284→                dashedHover
+   285→                className={cn(
+   286→                  "mx-auto overflow-hidden rounded-lg border bg-[#100f0e] text-stone-300 shadow-inner",
+   287→                  device === "mobile"
+   288→                    ? "flex max-w-[390px] flex-col"
+   289→                    : "flex w-full",
+   290→                )}
+   291→              >
+   292→                {/* Сайдбар приложения */}
+   293→                {device === "desktop" ? (
+   294→                  <IdeRegion
+   295→                    el={els.sidebar}
+   296→                    designer={designer}
+   297→                    hovered={hoveredId === "sidebar"}
+   298→                    selected={selectedId === "sidebar"}
+   299→                    onHover={setHoveredId}
+   300→                    onSelect={setSelectedId}
+   301→                    className="w-48 shrink-0 border-r border-stone-800/80 bg-[#131110]"
+   302→                  >
+   303→                    <div className="flex flex-col gap-1 p-3">
+   304→                      <div className="mb-2 flex items-center gap-2 px-1">
+   305→                        <span className="flex size-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
+   306→                          <Sparkles className="size-4" aria-hidden="true" />
+   307→                        </span>
+   308→                        <span className="text-sm font-semibold text-stone-100">
+   309→                          PocketStudio
+   310→                        </span>
+   311→                      </div>
+   312→                      <ul className="space-y-0.5">
+   313→                        {NAV_ITEMS.map((item) => (
+   314→                          <li key={item.label}>
+   315→                            <span
+   316→                              className={cn(
+   317→                                "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs",
+   318→                                item.active
+   319→                                  ? "bg-primary/10 font-medium text-primary"
+   320→                                  : "text-stone-400",
+   321→                              )}
+   322→                            >
+   323→                              <item.icon className="size-4" aria-hidden="true" />
+   324→                              {item.label}
+   325→                            </span>
+   326→                          </li>
+   327→                        ))}
+   328→                      </ul>
+   329→                      <div className="mt-6 flex items-center gap-2 rounded-lg border border-stone-800 px-2.5 py-2">
+   330→                        <span className="flex size-7 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+   331→                          АС
+   332→                        </span>
+   333→                        <span className="min-w-0">
+   334→                          <span className="block truncate text-xs font-medium text-stone-200">
+   335→                            Алиса Совина
+   336→                          </span>
+   337→                          <span className="block text-[10px] text-stone-500">
+   338→                            Про-аккаунт
+   339→                          </span>
+   340→                        </span>
+   341→                      </div>
+   342→                    </div>
+   343→                  </IdeRegion>
+   344→                ) : null}
+   345→
+   346→                <div className="flex min-w-0 flex-1 flex-col">
+   347→                  {/* Топбар */}
+   348→                  <IdeRegion
+   349→                    el={els.topbar}
+   350→                    designer={designer}
+   351→                    hovered={hoveredId === "topbar"}
+   352→                    selected={selectedId === "topbar"}
+   353→                    onHover={setHoveredId}
+   354→                    onSelect={setSelectedId}
+   355→                    className="flex h-14 shrink-0 items-center gap-3 border-b border-stone-800/80 px-5"
+   356→                  >
+   357→                    <span className="flex h-8 min-w-0 max-w-64 flex-1 items-center gap-2 rounded-lg border border-stone-800 bg-[#161514] px-3 text-xs text-stone-500">
+   358→                      Поиск по кабинету…
+   359→                    </span>
+   360→                    <span className="ml-auto flex items-center gap-3">
+   361→                      <IdeRegion
+   362→                        el={els.cta}
+   363→                        designer={designer}
+   364→                        hovered={hoveredId === "cta"}
+   365→                        selected={selectedId === "cta"}
+   366→                        onHover={setHoveredId}
+   367→                        onSelect={setSelectedId}
+   368→                        className="rounded-lg bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground"
+   369→                      >
+   370→                        Обновить данные
+   371→                      </IdeRegion>
+   372→                    </span>
+   373→                  </IdeRegion>
+   374→
+   375→                  {/* Контент */}
+   376→                  <main className="flex-1 space-y-4 p-4 sm:p-5">
+   377→                    <div>
+   378→                      <h3 className="text-base font-semibold text-stone-100">
+   379→                        Кабинет автора
+   380→                      </h3>
+   381→                      <p className="text-xs text-stone-500">
+   382→                        март 2026 · все проекты
+   383→                      </p>
+   384→                    </div>
+   385→
+   386→                    {/* Стат-карточки */}
+   387→                    <IdeRegion
+   388→                      el={els.stats}
+   389→                      designer={designer}
+   390→                      hovered={hoveredId === "stats"}
+   391→                      selected={selectedId === "stats"}
+   392→                      onHover={setHoveredId}
+   393→                      onSelect={setSelectedId}
+   394→                      className={cn(
+   395→                        "grid gap-3",
+   396→                        device === "mobile" ? "grid-cols-1" : "grid-cols-3",
+   397→                      )}
+   398→                    >
+   399→                      {STATS.map((s) => (
+   400→                        <div
+   401→                          key={s.label}
+   402→                          className="rounded-xl border border-stone-800/80 bg-[#171512] p-4"
+   403→                        >
+   404→                          <p className="text-[11px] text-stone-500">{s.label}</p>
+   405→                          <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-stone-100">
+   406→                            {s.value}
+   407→                          </p>
+   408→                          <span className="mt-1.5 inline-flex rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+   409→                            {s.delta}
+   410→                          </span>
+   411→                        </div>
+   412→                      ))}
+   413→                    </IdeRegion>
+   414→
+   415→                    {/* График */}
+   416→                    <IdeRegion
+   417→                      el={els.chart}
+   418→                      designer={designer}
+   419→                      hovered={hoveredId === "chart"}
+   420→                      selected={selectedId === "chart"}
+   421→                      onHover={setHoveredId}
+   422→                      onSelect={setSelectedId}
+   423→                      className="rounded-xl border border-stone-800/80 bg-[#171512] p-4"
+   424→                    >
+   425→                      <div className="mb-3 flex items-center gap-2">
+   426→                        <p className="text-xs font-medium text-stone-200">
+   427→                          Доход по месяцам
+   428→                        </p>
+   429→                        <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-stone-500">
+   430→                          <span className="size-2 rounded-sm bg-emerald-500" aria-hidden="true" />
+   431→                          12 мес
+   432→                        </span>
+   433→                      </div>
+   434→                      <div
+   435→                        className="flex h-28 items-end gap-1.5 border-b border-stone-800/70 pb-px"
+   436→                        role="img"
+   437→                        aria-label="Столбчатый график дохода за 12 месяцев"
+   438→                      >
+   439→                        {CHART_BARS.map((bar) => (
+   440→                          <span
+   441→                            key={bar.m}
+   442→                            title={`${bar.m} · доход`}
+   443→                            className="w-full cursor-default rounded-t-sm bg-gradient-to-t from-emerald-800 to-emerald-500 transition-opacity hover:opacity-80"
+   444→                            style={{ height: `${bar.v}%` }}
+   445→                            aria-hidden="true"
+   446→                          />
+   447→                        ))}
+   448→                      </div>
+   449→                    </IdeRegion>
+   450→
+   451→                    {/* Таблица */}
+   452→                    <IdeRegion
+   453→                      el={els.table}
+   454→                      designer={designer}
+   455→                      hovered={hoveredId === "table"}
+   456→                      selected={selectedId === "table"}
+   457→                      onHover={setHoveredId}
+   458→                      onSelect={setSelectedId}
+   459→                      className="rounded-xl border border-stone-800/80 bg-[#171512] p-2"
+   460→                    >
+   461→                      <ul className="divide-y divide-stone-800/60">
+   462→                        {TABLE_ROWS.map((row) => (
+   463→                          <li
+   464→                            key={row.name}
+   465→                            className="flex items-center gap-3 px-2 py-2.5"
+   466→                          >
+   467→                            <span className="size-6 shrink-0 rounded-full bg-stone-700" aria-hidden="true" />
+   468→                            <span className="min-w-0 flex-1 truncate text-xs text-stone-300">
+   469→                              {row.name}
+   470→                            </span>
+   471→                            <span
+   472→                              className={cn(
+   473→                                "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+   474→                                row.paid
+   475→                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   476→                                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+   477→                              )}
+   478→                            >
+   479→                              {row.status}
+   480→                            </span>
+   481→                            <span className="shrink-0 font-mono text-xs tabular-nums text-stone-400">
+   482→                              {row.amount}
+   483→                            </span>
+   484→                          </li>
+   485→                        ))}
+   486→                      </ul>
+   487→                    </IdeRegion>
+   488→                  </main>
+   489→                </div>
+   490→              </IdeRegion>
+   491→            </div>
+   492→
+   493→            {/* Плавающая мини-панель (только Дизайнер) */}
+   494→            {designer ? (
+   495→              <div
+   496→                role="toolbar"
+   497→                aria-label="Мини-инструменты дизайнера"
+   498→                className="absolute bottom-3 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border bg-background/90 p-1 shadow-lg backdrop-blur"
+   499→              >
+   500→                {MINI_TOOLS.map((t) => (
+   501→                  <Button
+   502→                    key={t.id}
+   503→                    variant="ghost"
+   504→                    size="icon"
+   505→                    title={t.name}
+   506→                    aria-pressed={miniToolId === t.id}
+   507→                    aria-label={t.name}
+   508→                    onClick={() => setMiniToolId(t.id)}
+   509→                    className={cn(
+   510→                      "size-8 rounded-full",
+   511→                      miniToolId === t.id &&
+   512→                        "bg-primary text-primary-foreground hover:bg-primary",
+   513→                    )}
+   514→                  >
+   515→                    <t.icon className="size-4" aria-hidden="true" />
+   516→                  </Button>
+   517→                ))}
+   518→              </div>
+   519→            ) : null}
+   520→          </div>
+   521→        </div>
+   522→      </div>
+   523→
+   524→      {/* ── Правая панель ── */}
+   525→      <aside
+   526→        aria-label="Инспектор превью"
+   527→        className="w-full shrink-0 border-t bg-card/50 md:w-80 md:border-l md:border-t-0"
+   528→      >
+   529→        {designer ? (
+   530→          selected ? (
+   531→            <div className="vf-scroll md:h-full md:overflow-y-auto">
+   532→              <div className="flex items-center gap-2 border-b px-4 py-3">
+   533→                <FileCode
+   534→                  className="size-4 shrink-0 text-primary"
+   535→                  aria-hidden="true"
+   536→                />
+   537→                <code className="min-w-0 flex-1 truncate font-mono text-xs">
+   538→                  &lt;{selected.tag} class=&quot;{selected.className}&quot;&gt;
+   539→                </code>
+   540→              </div>
+   541→              <dl className="px-4">
+   542→                <PropRow label="Размер" value={selected.size} />
+   543→                <PropRow label="Цвет" value={selected.color} swatch={selected.color} />
+   544→                <PropRow label="Отступы" value={selected.padding} />
+   545→              </dl>
+   546→              <div className="px-4 pt-3">
+   547→                <p className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+   548→                  Путь к файлу
+   549→                </p>
+   550→                <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
+   551→                  <FileCode
+   552→                    className="size-4 shrink-0 text-primary"
+   553→                    aria-hidden="true"
+   554→                  />
+   555→                  <code className="min-w-0 flex-1 truncate font-mono text-xs">
+   556→                    {selected.filePath} : {selected.line}
+   557→                  </code>
+   558→                  <Button
+   559→                    variant="ghost"
+   560→                    size="icon"
+   561→                    className="size-7 shrink-0"
+   562→                    onClick={() => setCopied((c) => !c)}
+   563→                    aria-label="Скопировать путь к файлу"
+   564→                  >
+   565→                    {copied ? (
+   566→                      <Check className="size-3.5 text-primary" aria-hidden="true" />
+   567→                    ) : (
+   568→                      <Copy className="size-3.5" aria-hidden="true" />
+   569→                    )}
+   570→                  </Button>
+   571→                </div>
+   572→              </div>
+   573→              <div className="space-y-2 px-4 pt-4 pb-5">
+   574→                <Label htmlFor="ide-prompt" className="text-xs">
+   575→                  Опишите правку
+   576→                </Label>
+   577→                <Textarea
+   578→                  id="ide-prompt"
+   579→                  rows={3}
+   580→                  value={prompt}
+   581→                  onChange={(e) => setPrompt(e.target.value)}
+   582→                  placeholder="Например: увеличь отступы в сайдбаре и сделай фон чуть темнее"
+   583→                  className="resize-none text-xs"
+   584→                />
+   585→                <Button className="w-full gap-2">
+   586→                  <Wand2 className="size-4" aria-hidden="true" />
+   587→                  Применить через агента
+   588→                  <WipMiniBadge />
+   589→                </Button>
+   590→                <p className="text-[11px] leading-relaxed text-muted-foreground">
+   591→                  Агент получит элемент, файл и ваш комментарий — правка
+   592→                  кода подключается на следующем этапе.
+   593→                </p>
+   594→              </div>
+   595→            </div>
+   596→          ) : (
+   597→            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+   598→              <span
+   599→                className="flex size-12 items-center justify-center rounded-full border bg-muted/50 text-muted-foreground"
+   600→                aria-hidden="true"
+   601→              >
+   602→                <MousePointer2 className="size-5" />
+   603→              </span>
+   604→              <div>
+   605→                <p className="text-sm font-medium">Кликните элемент в превью</p>
+   606→                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+   607→                  В инспекторе появятся тег, класс, размеры, путь к файлу
+   608→                  и поле промпт-правки.
+   609→                </p>
+   610→              </div>
+   611→            </div>
+   612→          )
+   613→        ) : (
+   614→          <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+   615→            <span
+   616→              className="flex size-12 items-center justify-center rounded-full border bg-muted/50 text-muted-foreground"
+   617→              aria-hidden="true"
+   618→            >
+   619→              <Eye className="size-5" />
+   620→            </span>
+   621→            <div>
+   622→              <p className="text-sm font-medium">Чистый предпросмотр</p>
+   623→              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+   624→                Переключитесь в режим «Дизайнер», чтобы выделять элементы
+   625→                и отправлять правки агенту.
+   626→              </p>
+   627→            </div>
+   628→            <p className="rounded-lg border bg-background px-2.5 py-1 font-mono text-[10px] text-muted-foreground">
+   629→              {device === "desktop" ? "1440 × 900" : "390 × 844"}
+   630→            </p>
+   631→          </div>
+   632→        )}
+   633→      </aside>
+   634→    </div>
+   635→  );
+   636→}
+   637→
+   638→function PropRow({
+   639→  label,
+   640→  value,
+   641→  swatch,
+   642→}: {
+   643→  label: string;
+   644→  value: string;
+   645→  swatch?: string;
+   646→}) {
+   647→  return (
+   648→    <div className="flex items-center gap-3 border-b py-2 text-sm">
+   649→      <dt className="w-20 shrink-0 text-xs text-muted-foreground">{label}</dt>
+   650→      <dd className="flex min-w-0 flex-1 items-center gap-2">
+   651→        {swatch ? (
+   652→          <span
+   653→            className="size-3.5 shrink-0 rounded-[4px] border"
+   654→            style={{ background: swatch }}
+   655→            aria-hidden="true"
+   656→          />
+   657→        ) : null}
+   658→        <span className="truncate font-mono text-xs">{value}</span>
+   659→      </dd>
+   660→    </div>
+   661→  );
+   662→}
+   663→

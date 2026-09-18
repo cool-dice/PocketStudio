@@ -15,6 +15,9 @@ import {
 
 export type TrackType = "voice" | "music" | "podcast" | "noise";
 export type TrackStatus = "ready" | "generating" | "queued";
+export type TrackMood = "Спокойное" | "Энергичное" | "Эпичное" | "Лиричное";
+
+export const TRACK_MOODS: TrackMood[] = ["Спокойное", "Энергичное", "Эпичное", "Лиричное"];
 
 export interface AudioTrack {
   id: string;
@@ -27,6 +30,14 @@ export interface AudioTrack {
   gradient: string;
   icon: LucideIcon;
   createdAt: string;
+  /** Для сортировки по дате (мс). */
+  createdAtMs: number;
+  /** Настроение — фильтр-чип каталогизации. */
+  mood: TrackMood;
+  /** Темп дорожки. */
+  bpm: number;
+  /** Тональность («Am», «F#m», «—» если неприменимо). */
+  key: string;
   /** 24 высоты полос волны (0–100) — детерминированная псевдослучайная форма. */
   bars: number[];
 }
@@ -133,6 +144,11 @@ export function formatSpeed(v: number): string {
 
 /** —— Библиотека студии: 10 дорожек —— */
 
+/** Фиксированное «сегодня» мок-данных (для сортировки по дате). */
+const NOW = 1_780_000_000_000;
+const HOUR = 3_600_000;
+const DAY = 86_400_000;
+
 export const TRACKS: AudioTrack[] = [
   {
     id: "trk-01",
@@ -144,6 +160,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#0d9488,#115e59)",
     icon: Podcast,
     createdAt: "Сегодня, 10:14",
+    createdAtMs: NOW - 2 * HOUR,
+    mood: "Энергичное",
+    bpm: 92,
+    key: "—",
     bars: makeBars(17),
   },
   {
@@ -156,6 +176,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#059669,#064e3b)",
     icon: Music,
     createdAt: "Сегодня, 09:02",
+    createdAtMs: NOW - 5 * HOUR,
+    mood: "Спокойное",
+    bpm: 78,
+    key: "Am",
     bars: makeBars(31),
   },
   {
@@ -168,6 +192,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#b45309,#7c2d12)",
     icon: AudioWaveform,
     createdAt: "Вчера, 21:40",
+    createdAtMs: NOW - 14 * HOUR,
+    mood: "Лиричное",
+    bpm: 84,
+    key: "—",
     bars: makeBars(53),
   },
   {
@@ -180,6 +208,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#52525b,#18181b)",
     icon: Orbit,
     createdAt: "Вчера, 19:12",
+    createdAtMs: NOW - 17 * HOUR,
+    mood: "Спокойное",
+    bpm: 62,
+    key: "Em",
     bars: makeBars(71),
   },
   {
@@ -192,6 +224,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#115e59,#134e4a)",
     icon: CloudDrizzle,
     createdAt: "Вчера, 15:30",
+    createdAtMs: NOW - 20 * HOUR,
+    mood: "Спокойное",
+    bpm: 60,
+    key: "—",
     bars: makeBars(97),
   },
   {
@@ -204,6 +240,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#d97706,#92400e)",
     icon: Megaphone,
     createdAt: "2 дня назад",
+    createdAtMs: NOW - 2 * DAY,
+    mood: "Энергичное",
+    bpm: 128,
+    key: "Cm",
     bars: makeBars(41),
   },
   {
@@ -216,6 +256,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#9f1239,#4c0519)",
     icon: AudioWaveform,
     createdAt: "2 дня назад",
+    createdAtMs: NOW - 2 * DAY - 3 * HOUR,
+    mood: "Эпичное",
+    bpm: 112,
+    key: "F#m",
     bars: makeBars(67),
   },
   {
@@ -228,6 +272,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#3f6212,#1a2e05)",
     icon: Radio,
     createdAt: "3 дня назад",
+    createdAtMs: NOW - 3 * DAY,
+    mood: "Энергичное",
+    bpm: 96,
+    key: "—",
     bars: makeBars(83),
   },
   {
@@ -240,6 +288,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#a8a29e,#57534e)",
     icon: Coffee,
     createdAt: "4 дня назад",
+    createdAtMs: NOW - 4 * DAY,
+    mood: "Спокойное",
+    bpm: 74,
+    key: "—",
     bars: makeBars(29),
   },
   {
@@ -252,6 +304,10 @@ export const TRACKS: AudioTrack[] = [
     gradient: "linear-gradient(135deg,#10b981,#065f46)",
     icon: Waves,
     createdAt: "5 дней назад",
+    createdAtMs: NOW - 5 * DAY,
+    mood: "Эпичное",
+    bpm: 88,
+    key: "Dm",
     bars: makeBars(59),
   },
 ];

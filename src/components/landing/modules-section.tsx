@@ -2,7 +2,7 @@
 
 /**
  * Modules — «Всё творчество — в одном окне».
- * Eight studio module cards: icon in an emerald-soft gradient tile,
+ * Nine studio module cards: icon in an emerald-soft gradient tile,
  * title, one-line description; gentle lift + emerald border on hover.
  */
 
@@ -13,6 +13,7 @@ import {
   Clapperboard,
   Coins,
   ImagePlus,
+  PenTool,
   Rocket,
   Wand2,
   type LucideIcon,
@@ -34,6 +35,11 @@ const MODULES: {
     icon: ImagePlus,
     title: "Изображения",
     description: "Обложки и концепты по текстовому описанию.",
+  },
+  {
+    icon: PenTool,
+    title: "Дизайн",
+    description: "Редактор: растр, макеты и правки интерфейса руками.",
   },
   {
     icon: AudioWaveform,
@@ -74,7 +80,7 @@ export function ModulesSection() {
         <SectionHeader
           overline="Модули"
           title="Всё творчество — в одном окне"
-          description="Восемь модулей студии работают над одной задачей: превратить идею в готовый продукт, не выпуская её из диалога."
+          description="Девять модулей студии работают над одной задачей: превратить идею в готовый продукт, не выпуская её из диалога."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {MODULES.map((module, i) => (

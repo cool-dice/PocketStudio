@@ -1,6 +1,7 @@
 "use client";
 
-import { Copy, Download, Trash2 } from "lucide-react";
+import { useAppUi } from "@/lib/store";
+import { Copy, Download, PenTool, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -62,7 +63,17 @@ export function TileDrawer({
                 <MetaRow label="Создано" value={tile.createdAt} />
               </dl>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    onOpenChange(false);
+                    useAppUi.getState().setMainArea("design");
+                  }}
+                >
+                  <PenTool className="size-4" aria-hidden="true" />
+                  Редактировать в Дизайне
+                </Button>
                 <Button variant="outline">
                   <Download className="size-4" aria-hidden="true" />
                   Скачать
