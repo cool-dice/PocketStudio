@@ -41,6 +41,15 @@ export interface DocumentSectionDto {
   updatedAt: string;
 }
 
+/** Снапшот главы из истории версий (PS-6). */
+export interface SectionRevisionDto {
+  id: string;
+  source: "manual" | "ai" | "restore";
+  size: number;
+  createdAt: string;
+  preview: string;
+}
+
 export interface DocumentDto {
   id: string;
   projectId: string;
@@ -97,6 +106,8 @@ export interface EntityDto {
   tags: string[];
   refs: EntityRefs;
   portrait: EntityPortrait | null;
+  /** URL персистентного сгенерированного портрета/иллюстрации (PS-6). */
+  image: string | null;
   favorite: boolean;
   related?: string[];
   updatedAt: string;

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
+import { snapshotSection } from "@/lib/section-revisions";
 import { sectionDto } from "@/lib/workspace-shapes";
 
 export const dynamic = "force-dynamic";
@@ -29,8 +30,10 @@ const patchSchema = z.object({
 export async function PATCH(req: Request, { params }: Params) {
   const { id } = await params;
   const section = await loadSection(id);
-  const document = section?.document ?? null;
-  const check = await ensureOwned(req, document);
+  if (!section) {
+    return NextResponse.json({ error: "Глава не найдена" }, { status: 404 });
+  }
+  const check = await ensureOwned(req, section.document);
   if (!check.ok) return check.response;
   const documentRow = check.row;
 
@@ -40,6 +43,15 @@ export async function PATCH(req: Request, { params }: Params) {
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
       { status: 400 },
     );
+  }
+
+  // Снапшот старого текста перед перезаписью (PS-6: история версий).
+  if (parsed.data.content !== undefined && parsed.data.content !== section.content) {
+    try {
+      await snapshotSection(id, section.content, "manual");
+    } catch (err) {
+      console.error("[sections/patch] snapshot failed:", err instanceof Error ? err.message : err);
+    }
   }
 
   const [updated] = await db.$transaction([

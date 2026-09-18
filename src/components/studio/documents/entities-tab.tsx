@@ -58,7 +58,6 @@ export function EntitiesTab({
   const [createOpen, setCreateOpen] = useState(false);
   const [describingId, setDescribingId] = useState<string | null>(null);
   const [portraitGenId, setPortraitGenId] = useState<string | null>(null);
-  const [portraitUrls, setPortraitUrls] = useState<Record<string, string>>({});
 
   /* ── Загрузка ── */
   useEffect(() => {
@@ -171,20 +170,15 @@ export function EntitiesTab({
 
   const handleGeneratePortrait = useCallback(
     async (entity: EntityDto) => {
-      if (!workspaceId || portraitGenId) return;
+      if (portraitGenId) return;
       setPortraitGenId(entity.id);
       try {
-        const artifact = await api.aiGenerateImage({
-          projectId: workspaceId,
-          prompt: `Портрет персонажа ${entity.name}: ${(entity.short ?? "") + " "}${entity.description.slice(0, 300)}, кинематографично`,
-          entityId: entity.id,
-          title: `${entity.name} — портрет`,
-        });
-        if (artifact.url) {
-          setPortraitUrls((prev) => ({ ...prev, [entity.id]: artifact.url! }));
-        }
+        const { entity: updated } = await api.generateEntityPortrait(entity.id);
+        setEntities((prev) =>
+          prev.map((candidate) => (candidate.id === entity.id ? updated : candidate)),
+        );
         toast.success("Портрет готов", {
-          description: "Картинка — в карточке персонажа и тайлом в Альбоме.",
+          description: "Карточка сохранена с картинкой — тайл появился в Альбоме.",
         });
       } catch {
         toast.error("Не удалось сгенерировать портрет", {
@@ -194,8 +188,20 @@ export function EntitiesTab({
         setPortraitGenId(null);
       }
     },
-    [workspaceId, portraitGenId],
+    [portraitGenId],
   );
+
+  const handleClearPortrait = useCallback(async (entity: EntityDto) => {
+    try {
+      const updated = await api.clearEntityPortrait(entity.id);
+      setEntities((prev) => prev.map((c) => (c.id === entity.id ? updated : c)));
+      toast.success("Картинка убрана", {
+        description: "Осталась заглушка-градиент — портрет можно сгенерировать снова.",
+      });
+    } catch {
+      toast.error("Не удалось убрать портрет");
+    }
+  }, []);
 
   const handleCreate = useCallback(
     async (payload: CreateEntityPayload) => {
@@ -386,7 +392,7 @@ export function EntitiesTab({
                 key={entity.id}
                 entity={entity}
                 setEntities={activeSet?.entities ?? []}
-                hasPortraitUrl={Boolean(portraitUrls[entity.id])}
+                hasPortraitUrl={Boolean(entity.image)}
                 onOpen={() => setOpenId(entity.id)}
                 onOpenRelated={(id) => setOpenId(id)}
               />
@@ -407,8 +413,9 @@ export function EntitiesTab({
           onDescribe={handleDescribe}
           describing={openEntity ? describingId === openEntity.id : false}
           onGeneratePortrait={handleGeneratePortrait}
+          onClearPortrait={handleClearPortrait}
           portraitGenerating={portraitGenId === openEntity.id}
-          portraitUrl={portraitUrls[openEntity.id] ?? null}
+          portraitUrl={openEntity.image}
         />
       ) : (
         <EntitySheet
@@ -420,6 +427,9 @@ export function EntitiesTab({
           onSave={handleSave}
           onDescribe={handleDescribe}
           describing={openEntity ? describingId === openEntity.id : false}
+          onGeneratePortrait={handleGeneratePortrait}
+          onClearPortrait={handleClearPortrait}
+          portraitGenerating={openEntity ? portraitGenId === openEntity.id : false}
         />
       )}
 

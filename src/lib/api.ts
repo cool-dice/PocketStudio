@@ -42,6 +42,7 @@ import type {
   EntityKind,
   FindingDto,
   FindingStatus,
+  SectionRevisionDto,
   WorkspaceDto,
   WorkspaceKind,
 } from "@/lib/workspace-types";
@@ -680,6 +681,24 @@ export const api = {
     });
   },
 
+  /** История версий главы (PS-6): снапшоты перед перезаписями. */
+  listSectionRevisions(sectionId: string): Promise<SectionRevisionDto[]> {
+    return request<{ revisions: SectionRevisionDto[] }>(
+      `/api/sections/${encodeURIComponent(sectionId)}/revisions`,
+    ).then((r) => r.revisions);
+  },
+
+  /** Восстановить главу из версии (текущий текст тоже попадёт в историю). */
+  restoreSectionRevision(
+    sectionId: string,
+    revisionId: string,
+  ): Promise<DocumentSectionDto> {
+    return request<{ section: DocumentSectionDto }>(
+      `/api/sections/${encodeURIComponent(sectionId)}/revisions`,
+      { method: "POST", body: JSON.stringify({ revisionId }) },
+    ).then((r) => r.section);
+  },
+
   listEntities(projectId: string): Promise<EntityDto[]> {
     return request<{ entities: EntityDto[] }>(
       `/api/workspaces/${encodeURIComponent(projectId)}/entities`,
@@ -834,6 +853,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ entityId }),
     });
+  },
+
+  /** Сгенерировать персистентный портрет сущности (PS-6): image в БД + артефакт. */
+  generateEntityPortrait(
+    entityId: string,
+  ): Promise<{ entity: EntityDto; artifact: ArtifactDto }> {
+    return request<{ entity: EntityDto; artifact: ArtifactDto }>(
+      `/api/entities/${encodeURIComponent(entityId)}/portrait`,
+      { method: "POST" },
+    );
+  },
+
+  /** Убрать сгенерированный портрет сущности. */
+  clearEntityPortrait(entityId: string): Promise<EntityDto> {
+    return request<{ entity: EntityDto }>(
+      `/api/entities/${encodeURIComponent(entityId)}/portrait`,
+      { method: "DELETE" },
+    ).then((r) => r.entity);
   },
 
   /** Собрать LLM-палитру стиля → артефакт (type file, stage style). */

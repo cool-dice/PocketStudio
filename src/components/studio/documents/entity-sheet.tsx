@@ -4,11 +4,13 @@
  * Универсальная панель сущности (Фаза A, данные из REST API): вид и набор,
  * правка name/short/description (кнопка «Сохранить» + автосейв при
  * закрытии), «Сгенерировать описание» — живой LLM (~15–20 с, «Студия
- * пишет…»), атрибуты, теги, связи-чипы и упоминания. Экспортирует
- * хелпер useEntityDraft — общий для панелей сущности и персонажа.
+ * пишет…»), блок персистентного изображения (PS-6: генерация по kind,
+ * сохраняется в БД, живёт и после перезагрузки), атрибуты, теги, связи-чипы
+ * и упоминания. Экспортирует хелпер useEntityDraft — общий для панелей
+ * сущности и персонажа.
  */
 
-import { BookOpenText, Check, FileText, Link2, Loader2, MapPin, Save, Sparkles } from "lucide-react";
+import { BookOpenText, Check, FileText, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -76,6 +78,9 @@ export function EntitySheet({
   onSave,
   onDescribe,
   describing,
+  onGeneratePortrait,
+  onClearPortrait,
+  portraitGenerating,
 }: {
   entity: EntityDto | null;
   /** Сущности набора — для имён связей. */
@@ -85,6 +90,9 @@ export function EntitySheet({
   onSave: (id: string, patch: EntityDraftPatch) => void;
   onDescribe: (entity: EntityDto) => void;
   describing: boolean;
+  onGeneratePortrait: (entity: EntityDto) => void;
+  onClearPortrait: (entity: EntityDto) => void;
+  portraitGenerating: boolean;
 }) {
   const { draft, update, isDirty } = useEntityDraft(entity);
   const meta = entity ? ENTITY_KIND_META[entity.kind] : null;
@@ -145,6 +153,46 @@ export function EntitySheet({
             </SheetHeader>
 
             <div className="vf-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+              {/* Изображение (PS-6): персистентная генерация по kind */}
+              {isNarrative ? (
+                <div className="relative">
+                  {entity.image ? (
+                    <img
+                      src={entity.image}
+                      alt={`Сгенерированное изображение: ${entity.name}`}
+                      className={cn(
+                        "w-full rounded-xl border object-cover",
+                        entity.kind === "character" ? "aspect-[4/5]" : "aspect-[16/10]",
+                      )}
+                    />
+                  ) : (
+                    <div className="flex aspect-[16/10] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed bg-muted/40 text-center">
+                      <ImagePlus className="size-5 text-muted-foreground" aria-hidden="true" />
+                      <p className="text-xs text-muted-foreground">
+                        Студия может нарисовать {meta.label.toLowerCase()} по описанию
+                      </p>
+                    </div>
+                  )}
+                  {portraitGenerating ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl bg-background/70 backdrop-blur-sm">
+                      <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
+                      <p className="text-xs font-medium">Рисуем по описанию…</p>
+                      <p className="text-[11px] text-muted-foreground">обычно до минуты</p>
+                    </div>
+                  ) : entity.image ? (
+                    <button
+                      type="button"
+                      onClick={() => onClearPortrait(entity)}
+                      className="absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full border bg-background/85 px-2.5 py-1 text-[10px] font-medium text-muted-foreground backdrop-blur-sm transition-colors hover:text-foreground"
+                      title="Убрать картинку"
+                    >
+                      <X className="size-3" aria-hidden="true" />
+                      убрать
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
               <section aria-label="Описание сущности">
                 <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Описание
@@ -271,6 +319,27 @@ export function EntitySheet({
 
             {/* Действия */}
             <div className="shrink-0 space-y-2 border-t px-5 py-3">
+              {isNarrative ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={describing || portraitGenerating}
+                  onClick={() => onGeneratePortrait(entity)}
+                >
+                  {portraitGenerating ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      Рисуем…
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="size-4" aria-hidden="true" />
+                      {entity.image ? "Перерисовать изображение" : "Нарисовать изображение"}
+                    </>
+                  )}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 className="w-full"

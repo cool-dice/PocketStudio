@@ -40,7 +40,31 @@ export function EntityCard({
   return (
     <article className="group flex flex-col rounded-xl border bg-card transition-all hover:border-primary/40 hover:shadow-sm">
       <button type="button" onClick={onOpen} className="flex-1 text-left">
-        {isCharacter && entity.portrait ? (
+        {entity.image ? (
+          <div className="relative">
+            <img
+              src={entity.image}
+              alt={`Сгенерированное изображение: ${entity.name}`}
+              className="aspect-[5/3] w-full border-b object-cover"
+              loading="lazy"
+            />
+            {roleCategory ? (
+              <span
+                className={cn(
+                  "absolute left-2.5 top-2.5 rounded-full border px-2 py-0.5 text-[10px] font-medium backdrop-blur-sm",
+                  roleCategory === "main" && "border-primary/50 bg-primary/20 text-primary",
+                  roleCategory === "secondary" && "border-border bg-background/80 text-muted-foreground",
+                  roleCategory === "antagonist" && "border-destructive/50 bg-destructive/15 text-destructive",
+                )}
+              >
+                {roleCategory === "main" ? "главный" : roleCategory === "antagonist" ? "антагонист" : "второстепенный"}
+              </span>
+            ) : null}
+            <span className="absolute right-2.5 top-2.5 rounded-full border border-primary/50 bg-primary/20 px-1.5 py-0.5 text-[9px] font-medium text-primary backdrop-blur-sm">
+              {entity.kind === "character" ? "портрет ИИ" : "иллюстрация ИИ"}
+            </span>
+          </div>
+        ) : isCharacter && entity.portrait ? (
           <div className="relative">
             <GradientArt
               gradient={entity.portrait.gradient}

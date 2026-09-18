@@ -181,7 +181,25 @@ model DocumentSection {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  revisions DocumentSectionRevision[]
+
   @@index([documentId, order])
+}
+
+/// Снапшот главы перед перезаписью: история версий и восстановление (PS-6).
+model DocumentSectionRevision {
+  id        String   @id @default(cuid())
+  sectionId String
+  section   DocumentSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  /// Снимок текста главы на момент версии.
+  content   String
+  // 'manual' | 'ai' | 'restore' — откуда пришла новая правка поверх.
+  source    String   @default("manual")
+  /// Длительность текста версии (для превью «1 240 симв.»).
+  size       Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([sectionId, createdAt])
 }
 
 // ─────────────────── Entities — универсальная картотека (PS-3.2) ───────────────────
@@ -211,6 +229,10 @@ model Entity {
   refs        String   @default("{\"kind\":\"chapter\",\"items\":[]}")
   /// JSON: {gradient, initials} — портрет-заглушка персонажа.
   portrait    String?
+  /// URL сгенерированного портрета/иллюстрации (PS-6, персистентный).
+  image       String?
+  /// Промпт генерации портрета.
+  imagePrompt String?
   favorite    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

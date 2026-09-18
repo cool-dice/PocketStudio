@@ -184,6 +184,8 @@ type EntityRow = {
   tags: string;
   refs: string;
   portrait: string | null;
+  image: string | null;
+  imagePrompt: string | null;
   favorite: boolean;
   updatedAt: Date;
 };
@@ -227,6 +229,7 @@ export function entityDto(e: EntityRow, related: string[] = []): EntityDto {
     tags,
     refs,
     portrait,
+    image: e.image ?? null,
     favorite: e.favorite,
     related,
     updatedAt: e.updatedAt.toISOString(),

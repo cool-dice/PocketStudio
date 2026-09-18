@@ -1328,3 +1328,27 @@ Stage Summary:
   - tsc src/ = 0 (впервые), lint 0, dev.log без новых ошибок. Скриншоты tool-results/ps5-*.png (7 шт).
 - Директива выполнена: все экраны-темплейты стали рабочими модулями на живых данных БД и реальных AI-пайплайнах. Осознанно отложено (вне песочницы): облако-деплой, реальные платежи/выплаты, видеорендер-микс (плеер показывает слайд-шоу сцен с озвучкой).
 - NEXT: generate_image/tts_narration/check_document из чата прогнать по-отдельности; портреты сущностей в EntitySheet; версии глав документов; дизайн-таб «палитра» — применение к UI; полировка UX мудборда/раскадровки по ходу пользования.
+
+---
+Task ID: PS-6
+Agent: main
+Task: Ревью QA + фичи из NEXT-списка: персистентные портреты сущностей и история версий глав
+
+Work Log:
+- QA-ревью (:81): дашборд 9/10 (VLM) — живые данные, дефектов нет; tsc/lint/dev.log чисты.
+- Аудит: портреты уже генерировались, но portraitUrls жил в useState (пропадали после перезагрузки), EntitySheet был без портрета.
+- Prisma: Entity.image/imagePrompt (String?) + DocumentSectionRevision (content, source manual|ai|restore, size, createdAt; индекс sectionId+createdAt). db:push ok.
+- API: POST/DELETE /api/entities/[id]/portrait — промпт по kind (character→портрет, location→атмосферная иллюстрация, item/faction/event/rule/product → свои стили), aiGenerateImage 1024x1024, entity.image в БД + Artifact type=portrait с entityId; lib/section-revisions.ts: snapshotSection (дедуп: идентичный текст и сессия <10 мин пропускаются, хвост >20 обрезается).
+- PATCH /api/sections/[id]: снапшот старого текста перед перезаписью (в try/catch, сбой не блокирует сейв). GET/POST/PUT /api/sections/[id]/revisions: список/восстановление (снапшот текущего source=restore)/ручной снапшот.
+- api.ts: generateEntityPortrait/clearEntityPortrait/listSectionRevisions/restoreSectionRevision; workspace-types: EntityDto.image, SectionRevisionDto.
+- UI: CharacterSheet — кнопка «убрать» на картинке; EntitySheet — блок изображения для narrative (4/5 у персонажей, 16/10 у остальных, dashed-заглушка с ImagePlus, кнопка «Нарисовать/Перерисовать изображение», лоадер «Рисуем по описанию…»); entity-card — <img> вместо градиента с бейджем «портрет ИИ»/«иллюстрация ИИ» (loading=lazy); EditorToolbar — кнопка «История» (иконка на мобиле); SectionHistorySheet — список версий (бейдж правка/ИИ/откат, время, N симв., превью 160) + «Восстановить этот текст»; manuscript-tab — handleRestored (локальный патч + драфт поля; PATCH-ноуп не создаёт дубль-снапшот).
+- entities-tab: portraitUrls-стейт удалён, источник истины — entity.image из DTO.
+
+Stage Summary:
+- БРАУЗЕРНАЯ ВЕРИФИКАЦИЯ (:81, 1280×800 + 390×844):
+  - Портрет Элары («Тишина фьорда» → Документы → Сущности): «Портрет» → POST 201 за 78с → арт в панели; VLM 8/10, дефектов нет. ПЕРЕЗАРЯДКА → навигация обратно → портрет в карточке из БД (/gen/0fa56da8-….png) — ПЕРСИСТЕНТНОСТЬ подтверждена.
+  - История версий («Рукопись: Тишина фьорда»): «Версий пока нет» → правка текста → автосейв PATCH 200 → снапшот создан автоматически («правка», 274 симв.) → «Восстановить этот текст» → текст откатился (239 симв., ТЕСТ-маркер удалён), в истории появился бейдж «откат». VLM 7/10 (2 замечания — ложные/ожидаемые).
+  - Мобайл 390: Сущности и Рукопись — overflowX=false; кнопка «История» — иконка без текста.
+  - tsc src/ = 0, lint = 0, dev.log без новых ошибок. Скриншоты tool-results/ps6-*.png (5 шт).
+- Бейдж «ИИ» в истории появится, когда ИИ-инструменты начнут писать главы через PATCH (путь подготовлен).
+- NEXT: дизайн-таб «палитра» — применение к UI воркспейса; generate_image/tts_narration из чата по-отдельности; полировка UX мудборда/раскадровки; ИИ-написание глав (кнопка «Написать главу» в редакторе).

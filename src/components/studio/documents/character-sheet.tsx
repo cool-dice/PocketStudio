@@ -8,7 +8,7 @@
  * а картинка — и здесь. «Сгенерировать описание» — LLM (~15–20 с).
  */
 
-import { Check, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles } from "lucide-react";
+import { Check, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,7 @@ export function CharacterSheet({
   onDescribe,
   describing,
   onGeneratePortrait,
+  onClearPortrait,
   portraitGenerating,
   portraitUrl,
 }: {
@@ -49,8 +50,9 @@ export function CharacterSheet({
   onDescribe: (entity: EntityDto) => void;
   describing: boolean;
   onGeneratePortrait: (entity: EntityDto) => void;
+  onClearPortrait: (entity: EntityDto) => void;
   portraitGenerating: boolean;
-  /** URL свежесгенерированного портрета — показать вместо градиента. */
+  /** Персистентный URL портрета из БД (PS-6). */
   portraitUrl: string | null;
 }) {
   const { draft, update, isDirty } = useEntityDraft(entity);
@@ -127,6 +129,16 @@ export function CharacterSheet({
                     <p className="text-xs font-medium">Рисуем портрет по описанию…</p>
                     <p className="text-[11px] text-muted-foreground">обычно до минуты</p>
                   </div>
+                ) : portraitUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => onClearPortrait(entity)}
+                    className="absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full border bg-background/85 px-2.5 py-1 text-[10px] font-medium text-muted-foreground backdrop-blur-sm transition-colors hover:text-foreground"
+                    title="Убрать картинку (останется градиент)"
+                  >
+                    <X className="size-3" aria-hidden="true" />
+                    убрать
+                  </button>
                 ) : null}
               </div>
 

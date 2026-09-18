@@ -25,6 +25,7 @@ import {
   useSectionAutosave,
 } from "./editor-page";
 import { EditorToolbar } from "./editor-toolbar";
+import { SectionHistorySheet } from "./section-history-sheet";
 import { countWords } from "@/hooks/use-documents";
 
 export interface ManuscriptTabProps {
@@ -68,6 +69,7 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
   } = props;
 
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const sections = doc?.sections ?? [];
@@ -114,6 +116,13 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
     });
   }
 
+  // Восстановление из истории: обновить локальное состояние и драфт поля
+  // (PATCH-ноуп в БД не создаёт дубль-снапшот — текст уже идентичен).
+  function handleRestored(section: DocumentSectionDto) {
+    void handleSaveSection(section.id, { content: section.content });
+    onChange(section.content);
+  }
+
   const draftWords = useMemo(() => countWords(draft), [draft]);
 
   return (
@@ -157,6 +166,7 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
                 onToggleStatus={() =>
                   activeSection ? handleToggleStatus(activeSection) : undefined
                 }
+                onOpenHistory={() => setHistoryOpen(true)}
                 disabled={!activeSection}
               />
               <EditorPage
@@ -188,6 +198,14 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
         {doc ? (
           <EditorFooterStats doc={doc} section={activeSection} draftWords={draftWords} />
         ) : null}
+
+        {/* История версий главы (PS-6) */}
+        <SectionHistorySheet
+          section={activeSection}
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          onRestored={handleRestored}
+        />
       </main>
 
       {/* Справа: структура и ИИ-помощник (xl+) */}

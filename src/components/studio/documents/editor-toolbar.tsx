@@ -11,6 +11,7 @@ import {
   Bold,
   Check,
   Heading2,
+  History,
   Image as ImageIcon,
   Italic,
   Link2,
@@ -57,6 +58,7 @@ export function EditorToolbar({
   savedLabel,
   sectionStatus,
   onToggleStatus,
+  onOpenHistory,
   disabled,
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -66,6 +68,8 @@ export function EditorToolbar({
   savedLabel: string;
   sectionStatus: SectionStatus | null;
   onToggleStatus: () => void;
+  /** Открыть панель истории версий главы (PS-6). */
+  onOpenHistory: () => void;
   disabled: boolean;
 }) {
   function run(action: () => void) {
@@ -221,6 +225,21 @@ export function EditorToolbar({
             {sectionStatus === "done" ? "Готово" : "Черновик"}
           </Button>
         ) : null}
+
+        {/* История версий (PS-6) */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          onClick={onOpenHistory}
+          title="История версий главы"
+          aria-label="История версий главы"
+          className="h-7 gap-1.5 rounded-full border px-2.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+        >
+          <History className="size-3 shrink-0" aria-hidden="true" />
+          <span className="hidden sm:inline">История</span>
+        </Button>
 
         {/* Индикатор автосохранения */}
         <span
