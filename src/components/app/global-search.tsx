@@ -117,7 +117,7 @@ export function GlobalSearch() {
         if (open) setSearchOpen(true);
         else close();
       }}
-      title="Поиск по VibeFlow"
+      title="Поиск по PocketStudio"
       description="Диалоги, заметки и проекты"
       className="sm:max-w-xl"
     >

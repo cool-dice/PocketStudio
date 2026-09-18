@@ -1,4 +1,4 @@
-// VibeFlow analyzer — Stage 2 honest analysis pipeline (worklog Task 2-ctr/6-a).
+// PocketStudio analyzer — Stage 2 honest analysis pipeline.
 //
 // Every new note (from ⌘K capture, the chat agent's create_note tool, or voice
 // capture) is created with status "pending". This worker polls the shared

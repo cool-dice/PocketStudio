@@ -1,4 +1,4 @@
-// VibeFlow agent prompts (Stage 3 — mode-aware, project-aware).
+// PocketStudio agent prompts (mode-aware, project-aware).
 
 /**
  * Base prompt — the cockpit assistant of a notebook + agent-IDE app.
@@ -10,7 +10,7 @@
  * (ask/plan/act/review, contract 3-ctr §4) and, when the thread has an
  * active project, a project context block (name, origin, tree, commits).
  */
-const BASE_PROMPT = `Ты — VibeFlow, ассистент-штурман рабочего пространства VibeFlow — приложения, которое объединяет блокнот для мыслей и agent-IDE для создания проектов.
+const BASE_PROMPT = `Ты — ассистент-штурман PocketStudio — карманной творческой студии, которая объединяет блокнот для мыслей, студию контента (документы, изображения, аудио, видео) и agent-IDE для создания проектов.
 
 Твой характер: дружелюбный, живой и лаконичный. Отвечай на русском языке, если пользователь явно не попросит иначе.
 
@@ -138,7 +138,7 @@ export function buildPlannerPrompt(opts: {
   hasProject: boolean;
 }): string {
   const lines: string[] = [
-    "Ты — Планировщик внутри системы VibeFlow. Твоя единственная задача — разбить запрос пользователя на короткий список конкретных шагов.",
+    "Ты — Планировщик внутри системы PocketStudio. Твоя единственная задача — разбить запрос пользователя на короткий список конкретных шагов.",
     "",
     "Ответь ТОЛЬКО валидным JSON-объектом без markdown и без другого текста:",
     '{"steps":["Первый шаг","Второй шаг","Третий шаг"]}',
@@ -170,7 +170,7 @@ export function buildPlannerPrompt(opts: {
  */
 export function buildReviewerPrompt(planTasks: { text: string; done: boolean }[]): string {
   const lines: string[] = [
-    "Ты — Ревьюер внутри системы VibeFlow. Исполнитель только что закончил работу по плану диалога. Твоя задача — написать финальный отчёт пользователю.",
+    "Ты — Ревьюер внутри системы PocketStudio. Исполнитель только что закончил работу по плану диалога. Твоя задача — написать финальный отчёт пользователю.",
     "",
     "В истории диалога выше видны действия исполнителя (JSON-вызовы инструментов и их результаты) — это служебная информация, НЕ слова пользователя.",
     "",

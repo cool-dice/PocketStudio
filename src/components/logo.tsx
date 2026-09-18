@@ -2,7 +2,7 @@ import { Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-/** VibeFlow logomark — emerald rounded square with a spark. */
+/** PocketStudio logomark — emerald rounded square with a spark. */
 export function LogoMark({ className }: { className?: string }) {
   return (
     <span
@@ -28,7 +28,7 @@ export function Logo({
     <span className={cn("flex items-center gap-2", className)}>
       <LogoMark className={markClassName} />
       <span className="text-[15px] font-semibold tracking-tight">
-        VibeFlow
+        PocketStudio
       </span>
     </span>
   );

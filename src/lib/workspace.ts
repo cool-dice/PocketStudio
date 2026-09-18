@@ -1,4 +1,4 @@
-// VibeFlow workspace — real files + real git on disk (Stage 3).
+// PocketStudio workspace — real files + real git on disk.
 //
 // Pure Node module: NO "@/..." path aliases, NO database imports, NO
 // framework types — so it can be imported BOTH by the Next.js app
@@ -24,9 +24,9 @@ export const TEMPLATE_ROOT =
 
 const GIT_IDENTITY = [
   "-c",
-  "user.name=VibeFlow Agent",
+  "user.name=PocketStudio Agent",
   "-c",
-  "user.email=agent@vibeflow.local",
+  "user.email=agent@pocketstudio.local",
 ];
 
 // ─────────────────────────── limits ───────────────────────────
@@ -99,7 +99,7 @@ function run(
   });
 }
 
-/** git with the VibeFlow agent identity (commits stay attributable). */
+/** git with the PocketStudio agent identity (commits stay attributable). */
 function git(cwd: string, args: string[], timeoutMs?: number) {
   return run(cwd, [...GIT_IDENTITY, ...args], timeoutMs);
 }
@@ -307,7 +307,7 @@ function parseCommitLine(line: string): CommitInfo | null {
     hash,
     short: hash.slice(0, 7),
     message: message ?? "(без сообщения)",
-    author: author ?? "VibeFlow Agent",
+    author: author ?? "PocketStudio Agent",
     date,
   };
 }

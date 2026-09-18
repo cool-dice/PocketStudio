@@ -15,17 +15,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VibeFlow — мысли → заметки → приложения",
+  title: "PocketStudio — идея → продукт → доход",
   description:
-    "VibeFlow — ИИ-рабочее место, где мысли превращаются в заметки, планы и готовые приложения. Диалог — главный интерфейс.",
-  keywords: ["VibeFlow", "ИИ", "заметки", "ассистент", "MVP", "агент"],
+    "PocketStudio — карманная творческая студия: диалог с ИИ превращает идею в тексты, изображения, аудио и видео, собирает приложение и публикует его. Один оркестратор на весь творческий конвейер.",
+  keywords: ["PocketStudio", "ИИ", "творческая студия", "генерация", "аудио", "видео", "деплой", "агент"],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "VibeFlow",
-    description: "Мысли → заметки → приложения",
-    siteName: "VibeFlow",
+    title: "PocketStudio",
+    description: "Идея → продукт → доход",
+    siteName: "PocketStudio",
     type: "website",
   },
 };

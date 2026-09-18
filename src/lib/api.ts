@@ -1,6 +1,9 @@
 /**
  * Typed fetch wrappers for the VibeFlow REST API (Next.js :3000).
- * All requests use relative paths and the same-origin session cookie.
+ * Auth uses a hybrid scheme:
+ *   1. `Authorization: Bearer <jwt>` from localStorage (primary — works inside
+ *      sandbox preview iframes where third-party cookies are blocked);
+ *   2. `vf_session` cookie (fallback for same-origin contexts, e.g. zip export).
  */
 
 import type {
@@ -28,6 +31,37 @@ import type {
   User,
 } from "@/lib/types";
 
+const TOKEN_STORAGE_KEY = "vf_token";
+
+export function setAuthToken(token: string): void {
+  try {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  } catch {
+    // localStorage unavailable (private mode) — cookie fallback still applies.
+  }
+}
+
+export function clearAuthToken(): void {
+  try {
+    window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function getAuthToken(): string | null {
+  try {
+    return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
 export class ApiError extends Error {
   status: number;
   fields?: Record<string, string>;
@@ -48,6 +82,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         "content-type": "application/json",
+        ...authHeaders(),
         ...init?.headers,
       },
     });
@@ -58,6 +93,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const data: unknown = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    // A stale/invalid Bearer token — drop it so the next login starts clean.
+    // 401 from login/register themselves must not wipe a valid session.
+    if (res.status === 401 && !/\/api\/auth\/(login|register)/.test(path)) {
+      clearAuthToken();
+    }
     const body = (data ?? {}) as {
       error?: string;
       fields?: Record<string, string>;
@@ -82,6 +122,7 @@ async function requestForm<T>(path: string, form: FormData): Promise<T> {
     res = await fetch(path, {
       credentials: "same-origin",
       method: "POST",
+      headers: authHeaders(),
       body: form,
     });
   } catch {
@@ -91,6 +132,7 @@ async function requestForm<T>(path: string, form: FormData): Promise<T> {
   const data: unknown = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    if (res.status === 401) clearAuthToken();
     const body = (data ?? {}) as {
       error?: string;
       fields?: Record<string, string>;
@@ -111,21 +153,31 @@ export const api = {
   },
 
   login(email: string, password: string): Promise<User> {
-    return request<{ user: User }>("/api/auth/login", {
+    return request<{ user: User; token?: string }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
-    }).then((r) => r.user);
+    }).then((r) => {
+      if (r.token) setAuthToken(r.token);
+      return r.user;
+    });
   },
 
   register(name: string, email: string, password: string): Promise<User> {
-    return request<{ user: User }>("/api/auth/register", {
+    return request<{ user: User; token?: string }>("/api/auth/register", {
       method: "POST",
       body: JSON.stringify({ name, email, password }),
-    }).then((r) => r.user);
+    }).then((r) => {
+      if (r.token) setAuthToken(r.token);
+      return r.user;
+    });
   },
 
   async logout(): Promise<void> {
-    await request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+    try {
+      await request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+    } finally {
+      clearAuthToken();
+    }
   },
 
   wsToken(): Promise<{ token: string; expiresIn: number }> {
@@ -174,8 +226,8 @@ export const api = {
     ).then((r) => r.thread);
   },
 
-  deleteThread(id: string): Promise<void> {
-    return request<{ ok: boolean }>(
+  async deleteThread(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
       `/api/threads/${encodeURIComponent(id)}`,
       { method: "DELETE" },
     );
@@ -223,8 +275,8 @@ export const api = {
     }).then((r) => r.note);
   },
 
-  deleteNote(id: string): Promise<void> {
-    return request<{ ok: boolean }>(`/api/notes/${encodeURIComponent(id)}`, {
+  async deleteNote(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/notes/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
   },
@@ -306,8 +358,8 @@ export const api = {
     ).then((r) => r.project);
   },
 
-  deleteProject(id: string): Promise<void> {
-    return request<{ ok: boolean }>(
+  async deleteProject(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
       `/api/projects/${encodeURIComponent(id)}`,
       { method: "DELETE" },
     );
@@ -403,9 +455,9 @@ export const api = {
     ).then((r) => r.link);
   },
 
-  unlinkNoteFromProject(noteId: string, projectId: string): Promise<void> {
+  async unlinkNoteFromProject(noteId: string, projectId: string): Promise<void> {
     const qs = new URLSearchParams({ projectId });
-    return request<{ ok: boolean }>(
+    await request<{ ok: boolean }>(
       `/api/notes/${encodeURIComponent(noteId)}/links?${qs.toString()}`,
       { method: "DELETE" },
     );
@@ -429,14 +481,14 @@ export const api = {
     ).then((r) => r.notification);
   },
 
-  markAllNotificationsRead(): Promise<void> {
-    return request<{ ok: boolean }>("/api/notifications/read-all", {
+  async markAllNotificationsRead(): Promise<void> {
+    await request<{ ok: boolean }>("/api/notifications/read-all", {
       method: "POST",
     });
   },
 
-  clearNotifications(): Promise<void> {
-    return request<{ ok: boolean }>("/api/notifications", {
+  async clearNotifications(): Promise<void> {
+    await request<{ ok: boolean }>("/api/notifications", {
       method: "DELETE",
     });
   },
@@ -473,8 +525,8 @@ export const api = {
     );
   },
 
-  adminDeleteUser(id: string): Promise<void> {
-    return request<{ ok: boolean }>(
+  async adminDeleteUser(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
       `/api/admin/users/${encodeURIComponent(id)}`,
       { method: "DELETE" },
     );

@@ -9,20 +9,29 @@
 
 import { useState } from "react";
 import {
+  AudioWaveform,
+  Blocks,
+  BookOpenText,
   Check,
+  Clapperboard,
+  Coins,
   FolderKanban,
+  ImagePlus,
   LogOut,
   MessageSquarePlus,
   Moon,
   NotebookPen,
   PenLine,
   Pencil,
+  Rocket,
   Search,
   Shield,
   Sun,
   Trash2,
+  Wand2,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { Logo } from "@/components/logo";
@@ -60,7 +69,7 @@ import { useProjects } from "@/hooks/use-projects";
 import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
 import { ORIGIN_META } from "@/lib/project-style";
-import { useAppUi } from "@/lib/store";
+import { useAppUi, type MainArea } from "@/lib/store";
 import type { ThreadListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +78,51 @@ interface SidebarContentProps {
   onNavigate?: () => void;
   /** Reserve space for the Sheet close button. */
   sheetMode?: boolean;
+}
+
+/** One studio module entry in the sidebar nav. */
+function StudioNavItem({
+  icon: Icon,
+  label,
+  area,
+  mainArea,
+  onOpen,
+  dense,
+}: {
+  icon: LucideIcon;
+  label: string;
+  area: MainArea;
+  mainArea: MainArea;
+  onOpen: (area: MainArea) => void;
+  dense?: boolean;
+}) {
+  const active = mainArea === area;
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(area)}
+        aria-current={active ? "true" : undefined}
+        title={label}
+        className={cn(
+          "flex w-full items-center gap-2.5 rounded-lg text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
+          dense ? "px-2 py-1.5" : "px-2 py-2",
+          active
+            ? "bg-accent font-medium text-accent-foreground"
+            : "text-foreground/90 hover:bg-accent/60",
+        )}
+      >
+        <Icon
+          className={cn(
+            "size-4 shrink-0 transition-colors duration-150",
+            active ? "text-primary" : "text-muted-foreground",
+          )}
+          aria-hidden="true"
+        />
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      </button>
+    </li>
+  );
 }
 
 export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
@@ -96,7 +150,6 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ThreadListItem | null>(null);
   const [creating, setCreating] = useState(false);
-
   const initials = (user?.name ?? "U")
     .trim()
     .split(/\s+/)
@@ -144,6 +197,11 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const handleOpenSearch = () => {
     onNavigate?.();
     setSearchOpen(true);
+  };
+
+  const handleOpenStudio = (area: MainArea) => {
+    onNavigate?.();
+    setMainArea(area);
   };
 
   const startRename = (thread: ThreadListItem) => {
@@ -198,7 +256,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
               size="icon"
               className="size-10 shrink-0 rounded-xl"
               onClick={handleOpenSearch}
-              aria-label="Поиск по VibeFlow (Ctrl+P)"
+              aria-label="Поиск по PocketStudio (Ctrl+P)"
             >
               <Search className="size-4" aria-hidden="true" />
             </Button>
@@ -312,7 +370,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
                         {thread.lastMessage && (
                           <span className="block truncate text-xs text-muted-foreground">
                             {thread.lastMessage.role === "assistant"
-                              ? "VibeFlow: "
+                              ? "Студия: "
                               : ""}
                             {thread.lastMessage.content}
                           </span>
@@ -380,6 +438,80 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
               )}
             </button>
           </li>
+        </ul>
+      </div>
+
+      {/* ── Studio modules: идея → создание ── */}
+      <div className="shrink-0 border-t p-3">
+        <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Студия
+        </h3>
+        <ul className="space-y-1">
+          <StudioNavItem
+            icon={BookOpenText}
+            label="Документы"
+            area="documents"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+          <StudioNavItem
+            icon={ImagePlus}
+            label="Изображения"
+            area="images"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+          <StudioNavItem
+            icon={AudioWaveform}
+            label="Аудио"
+            area="audio"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+          <StudioNavItem
+            icon={Clapperboard}
+            label="Видео"
+            area="video"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+        </ul>
+      </div>
+
+      {/* ── Orchestrator: публикация и автоматизация ── */}
+      <div className="shrink-0 border-t p-3">
+        <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Оркестратор
+        </h3>
+        <ul className="space-y-1">
+          <StudioNavItem
+            icon={Rocket}
+            label="Деплой"
+            area="deploy"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+          <StudioNavItem
+            icon={Blocks}
+            label="Интеграции"
+            area="mcp"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+          <StudioNavItem
+            icon={Wand2}
+            label="Скиллы"
+            area="skills"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+          <StudioNavItem
+            icon={Coins}
+            label="Монетизация"
+            area="monetize"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
         </ul>
       </div>
 

@@ -1,4 +1,4 @@
-// VibeFlow notifications — persisted bell history (Stage 4b).
+// PocketStudio notifications — persisted bell history.
 //
 // The agent-service creates a Notification row whenever something meaningful
 // happens OUTSIDE the user's current focus (the analysis pipeline finishing

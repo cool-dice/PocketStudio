@@ -143,7 +143,7 @@ export const MessageBubble = memo(function MessageBubble({
           )}
         </div>
         <span className="mt-1 px-1 text-[11px] text-muted-foreground">
-          VibeFlow · {time}
+          Студия · {time}
         </span>
       </div>
     </div>

@@ -357,7 +357,7 @@ export function Composer() {
               isRecording
                 ? "Слушаем вас…"
                 : busy
-                  ? "VibeFlow печатает…"
+                  ? "Студия печатает…"
                   : "Напишите сообщение… или / для команд"
             }
             disabled={busy || isRecording}

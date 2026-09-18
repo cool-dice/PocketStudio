@@ -132,7 +132,7 @@ export function ChatArea({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h1 className="truncate text-sm font-semibold sm:text-[15px]">
-              {activeThread?.title ?? "VibeFlow"}
+              {activeThread?.title ?? "PocketStudio"}
             </h1>
             {activeThread && (
               <ModeSelector
@@ -221,7 +221,7 @@ export function ChatArea({
 
       {/* Screen-reader live region for streaming state */}
       <span aria-live="polite" className="sr-only">
-        {busy ? "VibeFlow печатает" : ""}
+        {busy ? "Студия печатает" : ""}
       </span>
     </section>
   );
@@ -298,7 +298,7 @@ function TypingIndicator({ phase }: { phase: TurnPhase | null }) {
         ? "Исполнитель работает"
         : phase === "review"
           ? "Ревьюер проверяет результат"
-          : "VibeFlow печатает";
+          : "Студия печатает";
   return (
     <div className="flex w-full items-start gap-2.5 sm:gap-3">
       <span

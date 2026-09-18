@@ -73,6 +73,10 @@ export async function POST(req: Request) {
       role: user.role,
       createdAt: user.createdAt,
     },
+    // Session token for Bearer auth — cookies are blocked in third-party
+    // iframe contexts (sandbox preview panel), so the client falls back to
+    // the Authorization header with this token.
+    token,
   });
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
   return res;

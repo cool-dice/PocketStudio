@@ -16,7 +16,22 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import type { Note } from "@/lib/types";
 
-export type MainArea = "chat" | "notebook" | "projects" | "project" | "admin";
+export type MainArea =
+  | "chat"
+  | "notebook"
+  | "projects"
+  | "project"
+  | "admin"
+  /* ── PocketStudio modules (visual vision first, functionality later) ── */
+  | "documents" // Книги / статьи / сценарии
+  | "images" // Генерация изображений + галерея
+  | "audio" // Аудио: озвучка, музыка, подкасты
+  | "video" // Карманная киностудия
+  | "deploy" // Сборка → реестр → хост
+  | "mcp" // MCP-интеграции
+  | "skills" // Импорт и создание скиллов
+  | "monetize"; // Публикации и доход
+
 
 interface AppUiState {
   /** Which screen occupies the center zone. */

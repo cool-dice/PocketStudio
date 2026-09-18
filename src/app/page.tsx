@@ -45,7 +45,7 @@ function BootSkeleton() {
         <Skeleton className="h-3 w-1/2 mx-auto rounded-full" />
       </div>
       <span className="sr-only" role="status">
-        Загрузка VibeFlow…
+        Загрузка PocketStudio…
       </span>
     </div>
   );

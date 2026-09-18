@@ -1,4 +1,4 @@
-// VibeFlow agent — LLM access layer + tool-call parsing.
+// PocketStudio agent — LLM access layer + tool-call parsing.
 // LLM access via z-ai-web-dev-sdk (backend-only). The SDK has no native
 // streaming and no native function calling, so:
 //   - the full reply is fetched here and chunked by the transport layer

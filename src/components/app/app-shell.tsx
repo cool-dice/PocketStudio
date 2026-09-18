@@ -22,6 +22,14 @@ import { NotebookScreen } from "@/components/app/notebook-screen";
 import { ProjectScreen } from "@/components/app/project-screen";
 import { ProjectsScreen } from "@/components/app/projects-screen";
 import { SidebarContent } from "@/components/app/sidebar";
+import { DocumentsScreen } from "@/components/studio/documents/documents-screen";
+import { ImagesScreen } from "@/components/studio/images/images-screen";
+import { AudioScreen } from "@/components/studio/audio/audio-screen";
+import { VideoScreen } from "@/components/studio/video/video-screen";
+import { DeployScreen } from "@/components/studio/deploy/deploy-screen";
+import { McpScreen } from "@/components/studio/mcp/mcp-screen";
+import { SkillsScreen } from "@/components/studio/skills/skills-screen";
+import { MonetizeScreen } from "@/components/studio/monetize/monetize-screen";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAppUi } from "@/lib/store";
 
@@ -76,7 +84,7 @@ export function AppShell() {
         </SheetContent>
       </Sheet>
 
-      {/* ── Center: chat / notebook / projects / project detail / admin ── */}
+      {/* ── Center: chat / notebook / projects / project detail / admin / studio ── */}
       {mainArea === "chat" ? (
         <ChatArea
           contextOpen={contextOpen}
@@ -93,6 +101,22 @@ export function AppShell() {
         />
       ) : mainArea === "admin" ? (
         <AdminScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "documents" ? (
+        <DocumentsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "images" ? (
+        <ImagesScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "audio" ? (
+        <AudioScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "video" ? (
+        <VideoScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "deploy" ? (
+        <DeployScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "mcp" ? (
+        <McpScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "skills" ? (
+        <SkillsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "monetize" ? (
+        <MonetizeScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : (
         <ProjectsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       )}

@@ -9,7 +9,7 @@
  */
 
 import { motion } from "framer-motion";
-import { FolderGit2, NotebookPen, Sparkles } from "lucide-react";
+import { BookOpenText, Clapperboard, FolderGit2, NotebookPen, Sparkles } from "lucide-react";
 
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ export function Welcome() {
   const { sendMessage } = useThreads();
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
   const openCreateProject = useAppUi((s) => s.openCreateProject);
+  const setMainArea = useAppUi((s) => s.setMainArea);
 
   const firstName = (user?.name ?? "").trim().split(/\s+/)[0] || "друг";
 
@@ -44,8 +45,8 @@ export function Welcome() {
           Привет, {firstName}!
         </h2>
         <p className="mx-auto max-w-md text-muted-foreground text-balance">
-          Расскажите, о чём думаете, — я превращу мысли в заметки, планы
-          и приложения.
+          Карманная студия в одном диалоге: мысль превращается в текст,
+          картинку, трек, фильм и работающий продукт.
         </p>
       </motion.div>
       <motion.div
@@ -67,13 +68,28 @@ export function Welcome() {
           variant="outline"
           size="sm"
           className="h-9 gap-2 rounded-xl transition-transform duration-150 hover:-translate-y-0.5"
+          onClick={() => setMainArea("documents")}
+        >
+          <BookOpenText className="size-4" aria-hidden="true" />
+          Писать книгу
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 gap-2 rounded-xl transition-transform duration-150 hover:-translate-y-0.5"
+          onClick={() => setMainArea("video")}
+        >
+          <Clapperboard className="size-4" aria-hidden="true" />
+          Снять видео
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 gap-2 rounded-xl transition-transform duration-150 hover:-translate-y-0.5"
           onClick={() => openCreateProject()}
         >
           <FolderGit2 className="size-4" aria-hidden="true" />
           Создать проект
-          <span className="hidden text-[11px] font-normal text-muted-foreground sm:inline">
-            из шаблона, GitHub или zip
-          </span>
         </Button>
         <Button
           variant="outline"

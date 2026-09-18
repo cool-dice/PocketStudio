@@ -1,4 +1,4 @@
-// VibeFlow agent tools — Stage 1 notebook tools + Stage 3 project/file tools.
+// PocketStudio agent tools — notebook + project/file tools.
 //
 // The z-ai SDK has no native function calling, so tools are described in the
 // system prompt (JSON protocol) and the model's JSON reply is parsed by
