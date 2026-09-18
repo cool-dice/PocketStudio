@@ -1,31 +1,22 @@
 "use client";
 
 /**
- * LibraryFilterBar — панель каталогизации Библиотеки (PS-3-c):
- * поиск по названиям, чипы типов со счётчиками (фасетно: по базе,
- * отфильтрованной поиском и воркспейсом), фильтр по воркспейсу
- * (иконка типа + название), переключатель группировки по воркспейсам.
+ * LibraryFilterBar (A2-c) — панель каталогизации Библиотеки на живых
+ * данных: поиск по названиям/описаниям/промптам, чип «Только избранное»,
+ * чипы воркспейсов (api.listWorkspaces, с фасетными счётчиками) и
+ * чипы типов артефактов со счётчиками.
  */
 
-import { Search, X } from "lucide-react";
+import { Heart, Search, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import {
-  ARTIFACT_KIND_META,
-} from "@/components/workspaces/shared/artifacts-data";
-import { MOCK_WORKSPACES, WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import type { ArtifactType, WorkspaceDto } from "@/lib/workspace-types";
+import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import { cn } from "@/lib/utils";
 import {
-  LIBRARY_KIND_CHIPS,
+  LIBRARY_TYPE_META,
+  LIBRARY_TYPE_ORDER,
   type LibraryKindFilter,
 } from "@/components/workspaces/library-data";
 
@@ -34,12 +25,13 @@ interface LibraryFilterBarProps {
   onQueryChange: (value: string) => void;
   kind: LibraryKindFilter;
   onKindChange: (value: LibraryKindFilter) => void;
-  kindCounts: Record<LibraryKindFilter, number>;
+  kindCounts: Partial<Record<LibraryKindFilter, number>>;
+  workspaces: WorkspaceDto[];
   workspaceId: string;
   onWorkspaceChange: (value: string) => void;
   workspaceCounts: Record<string, number>;
-  grouped: boolean;
-  onGroupedChange: (value: boolean) => void;
+  favoritesOnly: boolean;
+  onFavoritesChange: (value: boolean) => void;
 }
 
 export function LibraryFilterBar({
@@ -48,16 +40,17 @@ export function LibraryFilterBar({
   kind,
   onKindChange,
   kindCounts,
+  workspaces,
   workspaceId,
   onWorkspaceChange,
   workspaceCounts,
-  grouped,
-  onGroupedChange,
+  favoritesOnly,
+  onFavoritesChange,
 }: LibraryFilterBarProps) {
   return (
     <div className="shrink-0 space-y-3 border-b bg-muted/30 px-4 py-4 sm:px-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        {/* Поиск по названиям */}
+        {/* Поиск */}
         <div className="relative w-full sm:max-w-xs">
           <Search
             className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -67,7 +60,7 @@ export function LibraryFilterBar({
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Поиск по названиям…"
-            aria-label="Поиск артефактов по названию"
+            aria-label="Поиск артефактов"
             className="h-8 pl-8 pr-8 text-xs"
           />
           {query !== "" ? (
@@ -82,52 +75,43 @@ export function LibraryFilterBar({
           ) : null}
         </div>
 
-        {/* Фильтр по воркспейсу */}
-        <Select value={workspaceId} onValueChange={onWorkspaceChange}>
-          <SelectTrigger
-            className="h-8 w-full text-xs sm:w-60"
-            aria-label="Фильтр по воркспейсу"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-xs">
-              <span className="font-medium">Все воркспейсы</span>
-            </SelectItem>
-            {MOCK_WORKSPACES.map((ws) => {
-              const WsIcon = WORKSPACE_TYPE_META[ws.type].icon;
-              const count = workspaceCounts[ws.id] ?? 0;
-              return (
-                <SelectItem key={ws.id} value={ws.id} className="text-xs">
-                  <WsIcon className="size-3.5" aria-hidden="true" />
-                  <span className="truncate">{ws.title}</span>
-                  <span
-                    className="ml-auto rounded-full bg-muted px-1.5 py-px text-[10px] font-semibold leading-none tabular-nums text-muted-foreground"
-                    aria-label={`${count} артефактов`}
-                  >
-                    {count}
-                  </span>
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
+        {/* Только избранное */}
+        <LibraryChip
+          icon={Heart}
+          label="Только избранное"
+          selected={favoritesOnly}
+          onClick={() => onFavoritesChange(!favoritesOnly)}
+          className="sm:ml-auto"
+        />
+      </div>
 
-        {/* Группировка по воркспейсам */}
-        <div className="flex items-center gap-2 sm:ml-auto">
-          <Switch
-            id="library-group-switch"
-            checked={grouped}
-            onCheckedChange={onGroupedChange}
-            aria-label="Группировать по воркспейсам"
-          />
-          <label
-            htmlFor="library-group-switch"
-            className="cursor-pointer select-none text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Группировать по воркспейсам
-          </label>
-        </div>
+      {/* Чипы воркспейсов */}
+      <div
+        className="vf-scroll-x flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible sm:pb-0"
+        role="group"
+        aria-label="Фильтр по воркспейсу"
+      >
+        <LibraryChip
+          label="Все воркспейсы"
+          selected={workspaceId === "all"}
+          onClick={() => onWorkspaceChange("all")}
+          count={
+            Object.values(workspaceCounts).reduce((sum, n) => sum + n, 0)
+          }
+        />
+        {workspaces.map((ws) => {
+          const WsIcon = WORKSPACE_TYPE_META[ws.type]?.icon;
+          return (
+            <LibraryChip
+              key={ws.id}
+              icon={WsIcon}
+              label={ws.name}
+              selected={workspaceId === ws.id}
+              onClick={() => onWorkspaceChange(ws.id)}
+              count={workspaceCounts[ws.id] ?? 0}
+            />
+          );
+        })}
       </div>
 
       {/* Чипы типов со счётчиками */}
@@ -140,21 +124,23 @@ export function LibraryFilterBar({
           label="Все"
           selected={kind === "all"}
           onClick={() => onKindChange("all")}
-          count={kindCounts.all}
+          count={kindCounts.all ?? 0}
         />
-        {LIBRARY_KIND_CHIPS.map((chip) => {
-          const Icon = ARTIFACT_KIND_META[chip.kind].icon;
-          return (
-            <LibraryChip
-              key={chip.kind}
-              icon={Icon}
-              label={chip.label}
-              selected={kind === chip.kind}
-              onClick={() => onKindChange(chip.kind)}
-              count={kindCounts[chip.kind]}
-            />
-          );
-        })}
+        {LIBRARY_TYPE_ORDER.filter((type) => (kindCounts[type] ?? 0) > 0).map(
+          (type) => {
+            const meta = LIBRARY_TYPE_META[type as ArtifactType];
+            return (
+              <LibraryChip
+                key={type}
+                icon={meta.icon}
+                label={meta.plural}
+                selected={kind === type}
+                onClick={() => onKindChange(type)}
+                count={kindCounts[type] ?? 0}
+              />
+            );
+          },
+        )}
       </div>
     </div>
   );
@@ -166,12 +152,14 @@ function LibraryChip({
   count,
   selected,
   onClick,
+  className,
 }: {
   icon?: LucideIcon;
   label: string;
-  count: number;
+  count?: number;
   selected: boolean;
   onClick: () => void;
+  className?: string;
 }) {
   return (
     <button
@@ -184,18 +172,21 @@ function LibraryChip({
         selected
           ? "border-primary/60 bg-primary/10 text-primary"
           : "border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground",
+        className,
       )}
     >
-      {Icon ? <Icon className="size-3.5" aria-hidden="true" /> : null}
-      {label}
-      <span
-        className={cn(
-          "rounded-full px-1.5 py-px text-[10px] font-semibold leading-none tabular-nums",
-          selected ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
-        )}
-      >
-        {count}
-      </span>
+      {Icon ? <Icon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+      <span className="max-w-44 truncate">{label}</span>
+      {typeof count === "number" ? (
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-px text-[10px] font-semibold leading-none tabular-nums",
+            selected ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+          )}
+        >
+          {count}
+        </span>
+      ) : null}
     </button>
   );
 }

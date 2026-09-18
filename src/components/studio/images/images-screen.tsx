@@ -1,99 +1,242 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ImagePlus, ImageUp } from "lucide-react";
+/**
+ * ImagesScreen (A2-c) — «Изображения» на живых данных Фазы A.
+ * Вкладка воркспейса (workspaceId передаётся швом workspace-tabs):
+ * галерея артефактов типа image/portrait этого воркспейса + РЕАЛЬНАЯ
+ * генерация через api.aiGenerateImage (≈30–45 сек, плашка прогресса).
+ * Глобальный экран (без id): выбор воркспейса чипами с counts.images.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ImagePlus, Images, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared/module-header";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api, ApiError } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
+import type { WorkspaceDto } from "@/lib/workspace-types";
+import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import { FilterBar, type GalleryFilter, type GallerySort } from "./filter-bar";
 import { GalleryGrid } from "./gallery-grid";
 import {
-  INITIAL_TILES,
-  makeGeneratingTile,
+  pendingTile,
+  presetById,
+  tileFromArtifact,
   type GalleryTile,
-  type ImageRatio,
 } from "./gallery-data";
-import { GenerationPanel } from "./generation-panel";
+import { GenerationPanel, type GenerationRequest } from "./generation-panel";
+import { SelectableChip } from "./chip";
 import { TileDrawer } from "./tile-drawer";
 
-/** Через сколько мс «генерация» превращается в градиентную заготовку. */
-const GENERATE_MS = 2400;
+export function ImagesScreen({
+  onOpenMobileNav,
+  workspaceId,
+}: ModuleScreenProps & { workspaceId?: string }) {
+  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
+  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const effectiveId = workspaceId ?? pickedId;
 
-/**
- * Экран «Изображения» — карманная галерея студии.
- * Чистый визуальный макет: локальный state, без запросов к API.
- */
-export function ImagesScreen({ onOpenMobileNav }: ModuleScreenProps) {
-  const [tiles, setTiles] = useState<GalleryTile[]>(INITIAL_TILES);
+  /* Галерея живых артефактов. */
+  const [tiles, setTiles] = useState<GalleryTile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  /* Каталогизация. */
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<GalleryFilter>("all");
   const [sort, setSort] = useState<GallerySort>("new");
 
-  // Идентификатор выбранной плитки живёт отдельно от open, чтобы контент
-  // панели не исчезал во время анимации закрытия.
+  /* Генерация (30–45 сек). */
+  const [generating, setGenerating] = useState<{
+    prompt: string;
+    sizeLabel: string;
+    aspect: GalleryTile["aspect"];
+  } | null>(null);
+
+  /* Просмотр выбранной работы. */
   const [drawerTileId, setDrawerTileId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const setMainArea = useAppUi((s) => s.setMainArea);
+
+  /* Загрузка списка воркспейсов для глобального экрана. */
   useEffect(() => {
-    const pending = timers.current;
+    if (workspaceId) return;
+    let cancelled = false;
+    api
+      .listWorkspaces()
+      .then((ws) => {
+        if (!cancelled) setWorkspaces(ws);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaces([]);
+      });
     return () => {
-      pending.forEach(clearTimeout);
+      cancelled = true;
     };
-  }, []);
+  }, [workspaceId]);
 
-  /** Ставит плитки в очередь «генерация → заготовка». */
-  const scheduleReveal = (ids: string[]) => {
-    ids.forEach((id, i) => {
-      const timer = setTimeout(() => {
-        setTiles((prev) =>
-          prev.map((t) => (t.id === id ? { ...t, status: "draft" as const } : t)),
+  /* Загрузка галереи воркспейса: image + portrait. */
+  const loadGallery = useCallback(async () => {
+    if (!effectiveId) {
+      setTiles([]);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [images, portraits] = await Promise.all([
+        api.listArtifacts(effectiveId, "image"),
+        api.listArtifacts(effectiveId, "portrait"),
+      ]);
+      const merged = [...images, ...portraits].sort(
+        (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
+      );
+      setTiles(merged.map((a) => tileFromArtifact(a)));
+    } catch (err) {
+      setTiles([]);
+      setLoadError(
+        err instanceof ApiError ? err.message : "Не удалось загрузить галерею",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [effectiveId]);
+
+  useEffect(() => {
+    void loadGallery();
+  }, [loadGallery]);
+
+  /* РЕАЛЬНАЯ генерация → api.aiGenerateImage. */
+  const runGenerate = useCallback(
+    async ({ prompt, title, size }: GenerationRequest) => {
+      if (!effectiveId) return;
+      const preset = presetById(size);
+      setGenerating({ prompt, sizeLabel: preset.size, aspect: preset.aspect });
+      try {
+        const artifact = await api.aiGenerateImage({
+          projectId: effectiveId,
+          prompt,
+          title: title || undefined,
+          size,
+        });
+        setTiles((prev) => [
+          tileFromArtifact(artifact, preset.aspect),
+          ...prev.filter((t) => t.status !== "generating"),
+        ]);
+        toast.success("Изображение готово", {
+          description: artifact.title,
+        });
+      } catch (err) {
+        setTiles((prev) => prev.filter((t) => t.status !== "generating"));
+        toast.error(
+          err instanceof ApiError ? err.message : "Генерация не удалась",
+          { description: "Попробуйте ещё раз — обычно это помогает." },
         );
-      }, GENERATE_MS + i * 600);
-      timers.current.push(timer);
-    });
-  };
+      } finally {
+        setGenerating(null);
+      }
+    },
+    [effectiveId],
+  );
 
-  const generate = (prompt: string, style: string, ratio: ImageRatio, count: number) => {
-    const created = Array.from({ length: count }, () =>
-      makeGeneratingTile(prompt, style, ratio),
-    );
-    setTiles((prev) => [...created, ...prev]);
-    scheduleReveal(created.map((t) => t.id));
-  };
+  /* Вариации: повторная генерация по промпту существующей работы. */
+  const makeVariations = useCallback(
+    (tile: GalleryTile) => {
+      if (generating) {
+        toast.info("Студия уже рисует — дождитесь результата");
+        return;
+      }
+      void runGenerate({
+        prompt: tile.prompt,
+        title: `${tile.title} — вариация`,
+        size: presetByAspectId(tile.aspect),
+      });
+    },
+    [generating, runGenerate],
+  );
 
-  const makeVariations = (tile: GalleryTile) => {
-    const created = [makeGeneratingTile(tile.prompt, tile.style, tile.ratio)];
-    setTiles((prev) => [...created, ...prev]);
-    scheduleReveal(created.map((t) => t.id));
-  };
+  /* Избранное — оптимистично, с откатом при ошибке. */
+  const toggleFavorite = useCallback(
+    async (id: string) => {
+      const tile = tiles.find((t) => t.id === id);
+      if (!tile) return;
+      const next = !tile.favorite;
+      setTiles((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, favorite: next } : t)),
+      );
+      try {
+        await api.updateArtifact(id, { favorite: next });
+      } catch {
+        setTiles((prev) =>
+          prev.map((t) => (t.id === id ? { ...t, favorite: !next } : t)),
+        );
+        toast.error("Не удалось обновить избранное");
+      }
+    },
+    [tiles],
+  );
 
-  const toggleFavorite = (id: string) =>
-    setTiles((prev) => prev.map((t) => (t.id === id ? { ...t, favorite: !t.favorite } : t)));
-
-  const removeTile = (id: string) => setTiles((prev) => prev.filter((t) => t.id !== id));
+  /* Удаление — оптимистично, с откатом при ошибке. */
+  const removeTile = useCallback(
+    async (id: string) => {
+      const snapshot = tiles;
+      setTiles((prev) => prev.filter((t) => t.id !== id));
+      try {
+        await api.deleteArtifact(id);
+        toast.success("Работа удалена");
+      } catch {
+        setTiles(snapshot);
+        toast.error("Не удалось удалить работу");
+      }
+    },
+    [tiles],
+  );
 
   const visibleTiles = useMemo(() => {
-    let list = tiles;
+    const pending = generating
+      ? [pendingTile(generating.prompt, generating.aspect, generating.sizeLabel)]
+      : [];
+    let list = [...pending, ...tiles];
+
     if (filter === "favorites") list = list.filter((t) => t.favorite);
-    else if (filter !== "all") list = list.filter((t) => t.style === filter);
+    else if (filter === "image" || filter === "portrait")
+      list = list.filter((t) => t.kind === filter);
 
     const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter(
-        (t) => t.prompt.toLowerCase().includes(q) || t.style.toLowerCase().includes(q),
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.prompt.toLowerCase().includes(q),
       );
     }
 
     const sorted = [...list];
     if (sort === "old") sorted.reverse();
-    else if (sort === "popular") sorted.sort((a, b) => b.likes - a.likes);
+    else if (sort === "title")
+      sorted.sort((a, b) => a.title.localeCompare(b.title, "ru"));
     return sorted;
-  }, [tiles, filter, query, sort]);
+  }, [tiles, generating, filter, query, sort]);
+
+  const counts = useMemo(
+    () => ({
+      all: tiles.length,
+      favorites: tiles.filter((t) => t.favorite).length,
+      image: tiles.filter((t) => t.kind === "image").length,
+      portrait: tiles.filter((t) => t.kind === "portrait").length,
+    }),
+    [tiles],
+  );
 
   const drawerTile = useMemo(
-    () => tiles.find((t) => t.id === drawerTileId) ?? null,
-    [tiles, drawerTileId],
+    () => visibleTiles.find((t) => t.id === drawerTileId) ??
+      tiles.find((t) => t.id === drawerTileId) ?? null,
+    [visibleTiles, tiles, drawerTileId],
   );
 
   const openTile = (id: string) => {
@@ -101,6 +244,115 @@ export function ImagesScreen({ onOpenMobileNav }: ModuleScreenProps) {
     setDrawerOpen(true);
   };
 
+  /* Глобальный экран без воркспейса. */
+  if (!workspaceId) {
+    return (
+      <section
+        aria-label="Изображения"
+        className="flex h-full min-w-0 flex-1 flex-col bg-background"
+      >
+        <ModuleHeader
+          icon={ImagePlus}
+          title="Изображения"
+          description="Иллюстрации, обложки и концепты по текстовому описанию"
+          stage="beta"
+          onOpenMobileNav={onOpenMobileNav}
+        />
+        <main className="vf-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
+          <GenerationPanel
+            projectId={effectiveId}
+            busy={generating !== null}
+            generating={generating}
+            onGenerate={(request) => void runGenerate(request)}
+          />
+          <section aria-label="Выбор воркспейса" className="rounded-xl border bg-card p-4">
+            <h2 className="text-sm font-medium">Галерея какого воркспейса?</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Генерация и галерея живут внутри воркспейса — выберите, куда рисуем.
+            </p>
+            {workspaces === null ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {Array.from({ length: 4 }, (_, i) => (
+                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
+                ))}
+              </div>
+            ) : workspaces.length === 0 ? (
+              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
+                <p className="text-sm text-muted-foreground">
+                  Пока нет ни одного воркспейса — сначала создайте его.
+                </p>
+                <Button size="sm" onClick={() => setMainArea("workspaces")}>
+                  <Images className="size-4" aria-hidden="true" />
+                  К воркспейсам
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {workspaces.map((ws) => {
+                  const Meta = WORKSPACE_TYPE_META[ws.type];
+                  const Icon = Meta.icon;
+                  return (
+                    <SelectableChip
+                      key={ws.id}
+                      label={ws.name}
+                      icon={Icon}
+                      selected={pickedId === ws.id}
+                      count={ws.counts.images}
+                      onClick={() => setPickedId(pickedId === ws.id ? null : ws.id)}
+                      className="max-w-full"
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </section>
+          {effectiveId ? (
+            <>
+              <FilterBar
+                query={query}
+                onQueryChange={setQuery}
+                filter={filter}
+                onFilterChange={setFilter}
+                counts={counts}
+                sort={sort}
+                onSortChange={setSort}
+                count={visibleTiles.length}
+                disabled={loading}
+              />
+              <GalleryGrid
+                tiles={visibleTiles}
+                loading={loading}
+                onOpen={openTile}
+                onVariations={makeVariations}
+                onToggleFavorite={(id) => void toggleFavorite(id)}
+                onDelete={(id) => void removeTile(id)}
+              />
+            </>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center">
+              <Images
+                className="size-8 text-muted-foreground/50"
+                aria-hidden="true"
+              />
+              <p className="text-sm text-muted-foreground">
+                Выберите воркспейс — покажем его галерею
+              </p>
+            </div>
+          )}
+        </main>
+        <TileDrawer
+          tile={drawerTile}
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
+          onVariations={makeVariations}
+          onToggleFavorite={(id) => void toggleFavorite(id)}
+          onDelete={(id) => void removeTile(id)}
+        />
+      </section>
+    );
+  }
+
+  /* Вкладка воркспейса. */
   return (
     <section
       aria-label="Изображения"
@@ -110,48 +362,67 @@ export function ImagesScreen({ onOpenMobileNav }: ModuleScreenProps) {
         icon={ImagePlus}
         title="Изображения"
         description="Иллюстрации, обложки и концепты по текстовому описанию"
-        stage="wip"
+        stage="beta"
         onOpenMobileNav={onOpenMobileNav}
-      >
-        <Button variant="outline" size="sm">
-          <ImageUp className="size-4" aria-hidden="true" />
-          Загрузить референс
-        </Button>
-      </ModuleHeader>
-
+      />
       <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
-        <GenerationPanel onGenerate={generate} />
+        <GenerationPanel
+          projectId={effectiveId}
+          busy={generating !== null}
+          generating={generating}
+          onGenerate={(request) => void runGenerate(request)}
+        />
         <FilterBar
           query={query}
           onQueryChange={setQuery}
           filter={filter}
           onFilterChange={setFilter}
+          counts={counts}
           sort={sort}
           onSortChange={setSort}
           count={visibleTiles.length}
+          disabled={loading}
         />
-        <GalleryGrid
-          tiles={visibleTiles}
-          onOpen={openTile}
-          onVariations={makeVariations}
-          onToggleFavorite={toggleFavorite}
-          onDelete={removeTile}
-        />
+        {loadError ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
+            <p className="text-sm text-muted-foreground">{loadError}</p>
+            <Button size="sm" variant="outline" onClick={() => void loadGallery()}>
+              <RefreshCw className="size-4" aria-hidden="true" />
+              Повторить
+            </Button>
+          </div>
+        ) : (
+          <GalleryGrid
+            tiles={visibleTiles}
+            loading={loading}
+            onOpen={openTile}
+            onVariations={makeVariations}
+            onToggleFavorite={(id) => void toggleFavorite(id)}
+            onDelete={(id) => void removeTile(id)}
+          />
+        )}
       </main>
 
       <TileDrawer
         tile={drawerTile}
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        onVariations={(tile) => {
-          setDrawerOpen(false);
-          makeVariations(tile);
-        }}
-        onDelete={(id) => {
-          setDrawerOpen(false);
-          removeTile(id);
-        }}
+        onVariations={makeVariations}
+        onToggleFavorite={(id) => void toggleFavorite(id)}
+        onDelete={(id) => void removeTile(id)}
       />
     </section>
   );
+}
+
+/** Пресет размера по известной пропорции плитки (для «Вариаций»). */
+function presetByAspectId(aspect: GalleryTile["aspect"]): string {
+  const map: Record<GalleryTile["aspect"], string> = {
+    square: "1024x1024",
+    landscape: "1152x864",
+    portrait: "864x1152",
+    wide: "1440x720",
+    tall: "720x1440",
+  };
+  return map[aspect];
 }

@@ -1,17 +1,15 @@
 "use client";
 
 /**
- * Вкладка «Сущности»: универсальный каталог записей воркспейса.
- * Два набора — «Хроники Долгой Зимы» (лор романа) и «Спека
- * PocketStudio» (пользователи, роли, требования, модули): виды
- * сущностей меняются под задачу. Поиск и фильтры по видам со
- * счётчиками, сортировка; карточки со связями и упоминаниями.
- * Персонажи открываются в CharacterSheet (портретный мок-флоу),
- * прочие записи — в универсальной EntitySheet.
+ * Вкладка «Сущности» (Фаза A): записи воркспейса из REST API. Наборы
+ * (по setId) — чипы-переключатели; виды со счётчиками, поиск, сортировка.
+ * Карточки открываются в панелях: персонажи — CharacterSheet (портрет,
+ * aiGenerateImage), остальные — EntitySheet (правка, aiDescribe).
+ * «+ Сущность» — диалог создания (домен → вид → название).
  */
 
 import { ArrowUpDown, Check, Plus, Search, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -22,141 +20,243 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
-import { GradientArt } from "./art-placeholder";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import type { EntityDto } from "@/lib/workspace-types";
 import { CharacterSheet } from "./character-sheet";
-import { EntitySheet } from "./entity-sheet";
-import { MiniChip, SelectableChip } from "./narrative-chip";
-import { agoLabel } from "./narrative-data";
-import {
-  CHARACTER_ROLE_META,
-  getCharacter,
-  type StoryCharacter,
-} from "./character-data";
+import { EntityCard } from "./entity-card";
+import { EntitySheet, type EntityDraftPatch } from "./entity-sheet";
+import { EntityCreateDialog, type CreateEntityPayload } from "./entity-create-dialog";
+import { SelectableChip } from "./narrative-chip";
+import { ENTITY_KIND_META, entitySetsOf, kindsOfSet } from "./entities-data";
 import { pluralRu } from "./types";
-import {
-  ENTITY_KIND_META,
-  ENTITY_SETS,
-  GENERATED_ENTITY_TEMPLATES,
-  getEntity,
-  getEntitySet,
-  kindsOfSet,
-  type EntityKind,
-  type EntitySet,
-  type StudioEntity,
-} from "./entities-data";
 
 type EntitySort = "title" | "updated";
 
 const SORT_ITEMS: { id: EntitySort; label: string }[] = [
-  { id: "title", label: "по названию" },
   { id: "updated", label: "по обновлению" },
+  { id: "title", label: "по названию" },
 ];
 
-/** Набор, в котором живёт сущность из альбома (фокус при открытии вкладки). */
-function initialSetId(focusEntityId: string | null): string {
-  if (!focusEntityId) return ENTITY_SETS[0].id;
-  const set = ENTITY_SETS.find((candidate) =>
-    candidate.entities.some((entity) => entity.id === focusEntityId),
-  );
-  return set?.id ?? ENTITY_SETS[0].id;
-}
-
 export function EntitiesTab({
+  workspaceId,
   focusEntityId,
-  portraitOverrides,
-  generatingPortraitId,
-  onGeneratePortrait,
+  onCountChange,
 }: {
+  workspaceId: string | null;
   focusEntityId: string | null;
-  portraitOverrides: Record<string, string>;
-  generatingPortraitId: string | null;
-  onGeneratePortrait: (character: StoryCharacter) => void;
+  onCountChange?: (count: number) => void;
 }) {
-  const [setId, setSetId] = useState(() => initialSetId(focusEntityId));
+  const [entities, setEntities] = useState<EntityDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [setId, setSetId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<EntityKind | "all">("all");
+  const [kind, setKind] = useState<string>("all");
   const [sort, setSort] = useState<EntitySort>("updated");
-  const [openId, setOpenId] = useState<string | null>(focusEntityId);
-  const [generated, setGenerated] = useState<Record<string, string>>({});
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
-  const timerRef = useRef<number | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [describingId, setDescribingId] = useState<string | null>(null);
+  const [portraitGenId, setPortraitGenId] = useState<string | null>(null);
+  const [portraitUrls, setPortraitUrls] = useState<Record<string, string>>({});
 
-  useEffect(
-    () => () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    },
-    [],
-  );
+  /* ── Загрузка ── */
+  useEffect(() => {
+    if (!workspaceId) {
+      setEntities([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    api
+      .listEntities(workspaceId)
+      .then((list) => {
+        if (cancelled) return;
+        setEntities(list);
+        setLoadError(false);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
 
-  const activeSet = getEntitySet(setId) ?? ENTITY_SETS[0];
-  const kinds = useMemo(() => kindsOfSet(activeSet), [activeSet]);
+  const sets = useMemo(() => entitySetsOf(entities), [entities]);
+  const activeSet = sets.find((set) => set.id === setId) ?? sets[0] ?? null;
+
+  // Смена списка наборов: держим валидный выбор (или фокус из альбома).
+  useEffect(() => {
+    if (focusEntityId) {
+      const owner = entities.find((entity) => entity.id === focusEntityId);
+      if (owner) {
+        setSetId(owner.setId);
+        setOpenId(owner.id);
+        return;
+      }
+    }
+    if (!sets.some((set) => set.id === setId)) setSetId(sets[0]?.id ?? null);
+  }, [entities, focusEntityId]);
+
+  useEffect(() => {
+    onCountChange?.(entities.length);
+  }, [entities, onCountChange]);
+
+  const kinds = useMemo(() => (activeSet ? kindsOfSet(activeSet) : []), [activeSet]);
 
   const visible = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    if (!activeSet) return [];
+    const normalized = query.trim().toLowerCase();
     const filtered = activeSet.entities.filter((entity) => {
       if (kind !== "all" && entity.kind !== kind) return false;
       if (
-        normalizedQuery &&
-        !entity.name.toLowerCase().includes(normalizedQuery) &&
-        !entity.short.toLowerCase().includes(normalizedQuery) &&
-        !entity.tags.some((tag) => tag.toLowerCase().includes(normalizedQuery))
+        normalized &&
+        !entity.name.toLowerCase().includes(normalized) &&
+        !(entity.short ?? "").toLowerCase().includes(normalized) &&
+        !entity.tags.some((tag) => tag.toLowerCase().includes(normalized))
       ) {
         return false;
       }
       return true;
     });
     return [...filtered].sort((a, b) =>
-      sort === "title" ? a.name.localeCompare(b.name, "ru") : a.updatedAgo - b.updatedAgo,
+      sort === "title"
+        ? a.name.localeCompare(b.name, "ru")
+        : new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     );
   }, [activeSet, query, kind, sort]);
 
-  /** Смена набора: проверка не наследуется — сбрасываем всё локальное. */
+  const openEntity = openId ? entities.find((entity) => entity.id === openId) ?? null : null;
+
+  /* ── Мутации и AI ── */
+
+  const handleSave = useCallback(async (id: string, patch: EntityDraftPatch) => {
+    try {
+      const updated = await api.updateEntity(id, patch);
+      setEntities((prev) => prev.map((entity) => (entity.id === id ? updated : entity)));
+      toast.success("Сохранено", {
+        description: `Карточка «${updated.name}» обновлена.`,
+      });
+    } catch {
+      toast.error("Не удалось сохранить сущность");
+    }
+  }, []);
+
+  const handleDescribe = useCallback(async (entity: EntityDto) => {
+    if (describingId) return;
+    setDescribingId(entity.id);
+    try {
+      const { description } = await api.aiDescribe(entity.id);
+      setEntities((prev) =>
+        prev.map((candidate) =>
+          candidate.id === entity.id ? { ...candidate, description } : candidate,
+        ),
+      );
+      toast.success("Описание готово", {
+        description: `Студия вписала текст в карточку «${entity.name}».`,
+      });
+    } catch {
+      toast.error("Не удалось сгенерировать описание", {
+        description: "Попробуйте ещё раз через минуту.",
+      });
+    } finally {
+      setDescribingId(null);
+    }
+  }, [describingId]);
+
+  const handleGeneratePortrait = useCallback(
+    async (entity: EntityDto) => {
+      if (!workspaceId || portraitGenId) return;
+      setPortraitGenId(entity.id);
+      try {
+        const artifact = await api.aiGenerateImage({
+          projectId: workspaceId,
+          prompt: `Портрет персонажа ${entity.name}: ${(entity.short ?? "") + " "}${entity.description.slice(0, 300)}, кинематографично`,
+          entityId: entity.id,
+          title: `${entity.name} — портрет`,
+        });
+        if (artifact.url) {
+          setPortraitUrls((prev) => ({ ...prev, [entity.id]: artifact.url! }));
+        }
+        toast.success("Портрет готов", {
+          description: "Картинка — в карточке персонажа и тайлом в Альбоме.",
+        });
+      } catch {
+        toast.error("Не удалось сгенерировать портрет", {
+          description: "Попробуйте ещё раз — генерация занимает до минуты.",
+        });
+      } finally {
+        setPortraitGenId(null);
+      }
+    },
+    [workspaceId, portraitGenId],
+  );
+
+  const handleCreate = useCallback(
+    async (payload: CreateEntityPayload) => {
+      if (!workspaceId) return;
+      try {
+        const created = await api.createEntity(workspaceId, payload);
+        setEntities((prev) => [created, ...prev]);
+        setSetId(created.setId);
+        setKind("all");
+        setOpenId(created.id);
+        toast.success("Сущность создана", {
+          description: `«${created.name}» добавлена в набор «${created.setName}».`,
+        });
+      } catch {
+        toast.error("Не удалось создать сущность");
+        throw new Error("Не удалось создать сущность");
+      }
+    },
+    [workspaceId],
+  );
+
   function switchSet(nextId: string) {
     if (nextId === setId) return;
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
     setSetId(nextId);
     setQuery("");
     setKind("all");
     setOpenId(null);
-    setGenerated({});
-    setGeneratingId(null);
   }
 
-  /** Мок «Сгенерировать описание»: спиннер → абзац в карточку + тост. */
-  function handleGenerate(entity: StudioEntity) {
-    if (generatingId !== null) return;
-    setGeneratingId(entity.id);
-    timerRef.current = window.setTimeout(() => {
-      setGenerated((prev) => ({ ...prev, [entity.id]: GENERATED_ENTITY_TEMPLATES[entity.kind] }));
-      setGeneratingId(null);
-      toast.success("Описание сгенерировано", {
-        description: `Черновик абзаца добавлен в карточку «${entity.name}».`,
-      });
-    }, 1500);
+  /* ── Рендер ── */
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 gap-3 px-4 py-4 sm:grid-cols-2 sm:px-6 xl:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton key={index} className="h-44 rounded-xl" />
+        ))}
+      </div>
+    );
   }
 
-  const openEntity = openId
-    ? activeSet.entities.find((entity) => entity.id === openId)
-    : undefined;
+  if (loadError) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
+        <p className="text-sm font-medium">Сущности не загрузились</p>
+        <p className="text-xs text-muted-foreground">Проверьте соединение и обновите вкладку.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Каталогизация: набор, поиск, фильтры, сортировка */}
+      {/* Каталогизация */}
       <div className="shrink-0 space-y-3 border-b bg-muted/30 px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">Сущности</h3>
             <p className="text-xs text-muted-foreground">
-              {activeSet.label}: {activeSet.entities.length}{" "}
-              {pluralRu(activeSet.entities.length, "запись", "записи", "записей")} ·{" "}
-              {activeSet.hint} ·{" "}
-              <span className="text-[11px] text-muted-foreground/70">
-                виды меняются под задачу: от лора мира до ролей и требований
-              </span>
+              {entities.length > 0
+                ? `${entities.length} ${pluralRu(entities.length, "запись", "записи", "записей")} воркспейса · виды меняются под задачу: от лора мира до ролей и требований`
+                : "записей пока нет — создайте первую"}
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -184,34 +284,33 @@ export function EntitiesTab({
               type="button"
               size="sm"
               className="h-8 gap-1.5 text-xs"
-              onClick={() =>
-                toast.info("Конструктор сущностей", {
-                  description: "Создание записей подключается на следующем этапе.",
-                })
-              }
+              onClick={() => setCreateOpen(true)}
             >
               <Plus className="size-3.5" aria-hidden="true" />
-              Запись
+              Сущность
             </Button>
           </div>
         </div>
 
-        {/* Переключатель набора */}
-        <div
-          className="vf-scroll-x flex items-center gap-1.5 overflow-x-auto pb-0.5"
-          role="group"
-          aria-label="Набор сущностей"
-        >
-          {ENTITY_SETS.map((set) => (
-            <SelectableChip
-              key={set.id}
-              label={set.label}
-              icon={set.icon}
-              selected={activeSet.id === set.id}
-              onClick={() => switchSet(set.id)}
-            />
-          ))}
-        </div>
+        {/* Переключатель наборов */}
+        {sets.length > 0 ? (
+          <div
+            className="vf-scroll-x flex items-center gap-1.5 overflow-x-auto pb-0.5"
+            role="group"
+            aria-label="Набор сущностей"
+          >
+            {sets.map((set) => (
+              <SelectableChip
+                key={set.id}
+                label={set.name}
+                icon={set.icon}
+                selected={activeSet?.id === set.id}
+                onClick={() => switchSet(set.id)}
+                count={set.entities.length}
+              />
+            ))}
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative w-full sm:max-w-xs">
@@ -246,7 +345,7 @@ export function EntitiesTab({
               label="Все"
               selected={kind === "all"}
               onClick={() => setKind("all")}
-              count={activeSet.entities.length}
+              count={activeSet?.entities.length ?? 0}
             />
             {kinds.map((kindId) => (
               <SelectableChip
@@ -254,21 +353,31 @@ export function EntitiesTab({
                 label={ENTITY_KIND_META[kindId].plural}
                 selected={kind === kindId}
                 onClick={() => setKind(kindId)}
-                count={activeSet.entities.filter((entity) => entity.kind === kindId).length}
+                count={activeSet?.entities.filter((entity) => entity.kind === kindId).length ?? 0}
               />
             ))}
           </div>
         </div>
       </div>
 
-      {/* Сетка карточек сущностей */}
+      {/* Сетка карточек */}
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-        {visible.length === 0 ? (
+        {entities.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+            <p className="text-sm font-medium">Сущностей пока нет</p>
+            <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
+              Создайте первую запись: для книги это персонажи и локации, для документации —
+              пользователи, роли и требования.
+            </p>
+            <Button type="button" size="sm" className="mt-1" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-3.5" aria-hidden="true" />
+              Сущность
+            </Button>
+          </div>
+        ) : visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
             <p className="text-sm font-medium">Сущностей не нашлось</p>
-            <p className="text-xs text-muted-foreground">
-              Попробуйте другой вид или очистите поиск.
-            </p>
+            <p className="text-xs text-muted-foreground">Попробуйте другой вид или очистите поиск.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -276,9 +385,8 @@ export function EntitiesTab({
               <EntityCard
                 key={entity.id}
                 entity={entity}
-                set={activeSet}
-                portraitGradientOverride={portraitOverrides[entity.id]}
-                hasGenerated={Boolean(generated[entity.id])}
+                setEntities={activeSet?.entities ?? []}
+                hasPortraitUrl={Boolean(portraitUrls[entity.id])}
                 onOpen={() => setOpenId(entity.id)}
                 onOpenRelated={(id) => setOpenId(id)}
               />
@@ -287,166 +395,42 @@ export function EntitiesTab({
         )}
       </div>
 
-      {/* Детальные панели: персонажи — CharacterSheet, прочее — EntitySheet */}
+      {/* Детальные панели */}
       {openEntity?.kind === "character" ? (
         <CharacterSheet
-          characterId={openEntity.id}
-          portraitGradientOverride={portraitOverrides[openEntity.id]}
-          isGeneratingPortrait={generatingPortraitId === openEntity.id}
+          key={openEntity.id}
+          entity={openEntity}
+          entities={entities}
           onClose={() => setOpenId(null)}
-          onOpenCharacter={(id) => setOpenId(id)}
-          onGeneratePortrait={onGeneratePortrait}
+          onOpenEntity={(id) => setOpenId(id)}
+          onSave={handleSave}
+          onDescribe={handleDescribe}
+          describing={openEntity ? describingId === openEntity.id : false}
+          onGeneratePortrait={handleGeneratePortrait}
+          portraitGenerating={portraitGenId === openEntity.id}
+          portraitUrl={portraitUrls[openEntity.id] ?? null}
         />
       ) : (
         <EntitySheet
-          setId={activeSet.id}
-          entityId={openEntity ? openEntity.id : null}
+          key={openEntity?.id ?? "none"}
+          entity={openEntity}
+          entities={entities}
           onClose={() => setOpenId(null)}
           onOpenEntity={(id) => setOpenId(id)}
-          generated={generated}
-          generatingId={generatingId}
-          onGenerate={handleGenerate}
+          onSave={handleSave}
+          onDescribe={handleDescribe}
+          describing={openEntity ? describingId === openEntity.id : false}
         />
       )}
+
+      {/* Создание */}
+      <EntityCreateDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreate={handleCreate}
+        sets={sets}
+        activeSetId={activeSet?.id ?? null}
+      />
     </div>
-  );
-}
-
-function EntityCard({
-  entity,
-  set,
-  portraitGradientOverride,
-  hasGenerated,
-  onOpen,
-  onOpenRelated,
-}: {
-  entity: StudioEntity;
-  set: EntitySet;
-  portraitGradientOverride?: string;
-  hasGenerated: boolean;
-  onOpen: () => void;
-  onOpenRelated: (id: string) => void;
-}) {
-  const meta = ENTITY_KIND_META[entity.kind];
-  const KindIcon = meta.icon;
-  const isNarrative = set.domain === "narrative";
-  const character = entity.kind === "character" ? getCharacter(entity.id) : undefined;
-  const roleMeta = character ? CHARACTER_ROLE_META[character.roleCategory] : null;
-
-  return (
-    <article className="group flex flex-col rounded-xl border bg-card transition-all hover:border-primary/40 hover:shadow-sm">
-      <button type="button" onClick={onOpen} className="flex-1 text-left">
-        {character && entity.portrait ? (
-          <div className="relative">
-            <GradientArt
-              gradient={portraitGradientOverride ?? entity.portrait.gradient}
-              initials={entity.portrait.initials}
-              ariaLabel={`Портрет-заглушка: ${entity.name}`}
-              className="aspect-[5/3] w-full border-b"
-              iconClassName="text-5xl"
-            />
-            {roleMeta ? (
-              <span
-                className={cn(
-                  "absolute left-2.5 top-2.5 rounded-full border px-2 py-0.5 text-[10px] font-medium backdrop-blur-sm",
-                  character.roleCategory === "main" && "border-primary/50 bg-primary/20 text-primary",
-                  character.roleCategory === "secondary" && "border-border bg-background/80 text-muted-foreground",
-                  character.roleCategory === "antagonist" && "border-destructive/50 bg-destructive/15 text-destructive",
-                )}
-              >
-                {roleMeta.single}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-        <div className="p-4 pb-3">
-          <div className="flex items-center gap-2">
-            <span
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-primary/10 text-primary"
-              aria-hidden="true"
-            >
-              <KindIcon className="size-4" />
-            </span>
-            <span className="truncate text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              {meta.label}
-            </span>
-            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground/70">
-              {agoLabel(entity.updatedAgo)}
-            </span>
-          </div>
-          <h4
-            className={cn(
-              "mt-2.5 text-base font-semibold leading-tight",
-              isNarrative && "font-serif",
-            )}
-          >
-            {entity.name}
-          </h4>
-          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-            {entity.short}
-          </p>
-          <div className="mt-2.5 flex flex-wrap gap-1">
-            {entity.tags.slice(0, 3).map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground"
-              >
-                #{tag}
-              </span>
-            ))}
-          </div>
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground/80">
-              {isNarrative ? "упомянута в:" : "разделы:"}
-            </span>
-            {entity.refs.items.map((ref) => (
-              <span
-                key={ref}
-                className="rounded-full bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary"
-              >
-                {isNarrative ? `гл. ${ref}` : ref}
-              </span>
-            ))}
-            {hasGenerated ? (
-              <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                +ИИ
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </button>
-
-      {entity.related.length > 0 ? (
-        <div className="mt-auto border-t px-4 py-2.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-muted-foreground/80">связи:</span>
-            {entity.related.map((relatedId) => {
-              const related = getEntity(set.id, relatedId);
-              if (!related) return null;
-              return (
-                <MiniChip
-                  key={relatedId}
-                  onClick={() => onOpenRelated(relatedId)}
-                  title={`Открыть «${related.name}»`}
-                  className="max-w-36"
-                >
-                  <span className="truncate">{related.name}</span>
-                </MiniChip>
-              );
-            })}
-            <button
-              type="button"
-              onClick={onOpen}
-              className={cn(
-                "ml-auto text-[11px] font-medium text-primary opacity-70 transition-opacity",
-                "hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              )}
-            >
-              Открыть →
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </article>
   );
 }

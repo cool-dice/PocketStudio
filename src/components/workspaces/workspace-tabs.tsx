@@ -41,7 +41,9 @@ export interface WorkspaceTabContentProps {
   onOpenMobileNav: () => void;
 }
 
-/** Встраиваемые экраны студии: вкладка → компонент (пропы совпадают). */
+/** Встраиваемые экраны студии: вкладка → компонент (пропы совпадают).
+ *  Фаза A: модули получают workspaceId воркспейса, чтобы грузить
+ *  свой контент из БД (глобальный вызов — без id). */
 const EMBEDDED_MODULE_SCREENS = {
   documents: DocumentsScreen,
   images: ImagesScreen,
@@ -52,7 +54,10 @@ const EMBEDDED_MODULE_SCREENS = {
   monetize: MonetizeScreen,
 } satisfies Record<
   string,
-  ComponentType<{ onOpenMobileNav: () => void }>
+  ComponentType<{
+    onOpenMobileNav: () => void;
+    workspaceId?: string;
+  }>
 >;
 
 export function WorkspaceTabContent({
@@ -64,7 +69,10 @@ export function WorkspaceTabContent({
   if (ModuleScreen) {
     return (
       <WorkspaceModuleFrame>
-        <ModuleScreen onOpenMobileNav={onOpenMobileNav} />
+        <ModuleScreen
+          onOpenMobileNav={onOpenMobileNav}
+          workspaceId={workspace.id}
+        />
       </WorkspaceModuleFrame>
     );
   }

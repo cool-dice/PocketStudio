@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * LibraryScreen — «Библиотека» (PS-3-c): единый браузер контента
- * всех воркспейсов с каталогизацией: поиск, чипы типов со счётчиками,
- * фильтр по воркспейсу, сортировка, вид сетка/список, группировка по
- * воркспейсам, детальный диалог артефакта с переходом в воркспейс.
- * Визуальная волна: локальный стейт, мок-данные, без бэкенда.
+ * LibraryScreen (A2-c) — «Библиотека» на живых данных: весь контент
+ * всех воркспейсов пользователя из api.listAllArtifacts(). Секции по
+ * типам (Изображения / Портреты / Треки / Сцены / Документы / Заметки /
+ * Файлы…), фильтр по воркспейсу чипами (api.listWorkspaces), поиск,
+ * избранное (api.updateArtifact), сортировка и вид сетка/список.
  */
 
 import {
@@ -15,12 +15,15 @@ import {
   LayoutGrid,
   Library as LibraryIcon,
   List as ListIcon,
+  RefreshCw,
   RotateCcw,
   SearchX,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
+import { ModuleHeader } from "@/components/studio/shared/module-header";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -29,16 +32,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ModuleHeader } from "@/components/studio/shared/module-header";
-import { ArtifactCard } from "@/components/workspaces/shared/artifact-card";
-import {
-  MOCK_ARTIFACTS,
-} from "@/components/workspaces/shared/artifacts-data";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api, ApiError } from "@/lib/api";
+import type { ArtifactDto, WorkspaceDto } from "@/lib/workspace-types";
+import { cn } from "@/lib/utils";
 import { LibraryArtifactDialog } from "@/components/workspaces/library-artifact-dialog";
 import {
-  LIBRARY_KIND_CHIPS,
   LIBRARY_SORT_OPTIONS,
-  libraryGridClassName,
+  LIBRARY_TYPE_ORDER,
   matchesQuery,
   sortArtifacts,
   type LibraryKindFilter,
@@ -47,121 +48,170 @@ import {
 } from "@/components/workspaces/library-data";
 import { LibraryFilterBar } from "@/components/workspaces/library-filters";
 import { LibrarySection } from "@/components/workspaces/library-section";
-import { MOCK_WORKSPACES } from "@/lib/workspace-data";
-import { cn } from "@/lib/utils";
-
-/** Плитки статистики (считаются по мок-данным один раз). */
-const LIBRARY_STATS: { label: string; value: number; icon: LucideIcon }[] = [
-  {
-    label: "Всего артефактов",
-    value: MOCK_ARTIFACTS.length,
-    icon: LibraryIcon,
-  },
-  {
-    label: "Воркспейсов",
-    value: MOCK_WORKSPACES.length,
-    icon: Boxes,
-  },
-  {
-    label: "Сцен и треков",
-    value: MOCK_ARTIFACTS.filter(
-      (a) => a.kind === "scene" || a.kind === "track",
-    ).length,
-    icon: Clapperboard,
-  },
-  {
-    label: "Документов",
-    value: MOCK_ARTIFACTS.filter(
-      (a) => a.kind === "document" || a.kind === "portrait",
-    ).length,
-    icon: BookOpenText,
-  },
-];
 
 export function LibraryScreen({
   onOpenMobileNav,
 }: {
   onOpenMobileNav: () => void;
 }) {
+  /* Живые данные. */
+  const [artifacts, setArtifacts] = useState<ArtifactDto[] | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  /* Каталогизация. */
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<LibraryKindFilter>("all");
   const [workspaceId, setWorkspaceId] = useState("all");
   const [sort, setSort] = useState<LibrarySort>("date");
   const [view, setView] = useState<LibraryView>("grid");
-  const [grouped, setGrouped] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
 
-  // Фасетная база: поиск не влияет на счётчики собственных измерений.
+  /* Диалог артефакта. */
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [all, ws] = await Promise.all([
+        api.listAllArtifacts(),
+        api.listWorkspaces(),
+      ]);
+      setArtifacts(all);
+      setWorkspaces(ws);
+    } catch (err) {
+      setArtifacts([]);
+      setLoadError(
+        err instanceof ApiError ? err.message : "Не удалось загрузить библиотеку",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const workspaceById = useMemo(
+    () => Object.fromEntries(workspaces.map((ws) => [ws.id, ws])),
+    [workspaces],
+  );
+
+  /* Избранное — оптимистично, с откатом при ошибке. */
+  const toggleFavorite = useCallback(
+    async (artifact: ArtifactDto) => {
+      const next = !artifact.favorite;
+      setArtifacts((prev) =>
+        prev
+          ? prev.map((a) => (a.id === artifact.id ? { ...a, favorite: next } : a))
+          : prev,
+      );
+      try {
+        await api.updateArtifact(artifact.id, { favorite: next });
+      } catch {
+        setArtifacts((prev) =>
+          prev
+            ? prev.map((a) => (a.id === artifact.id ? { ...a, favorite: !next } : a))
+            : prev,
+        );
+        toast.error("Не удалось обновить избранное");
+      }
+    },
+    [],
+  );
+
+  /* Фасетная база: поиск не влияет на счётчики остальных измерений. */
   const searchBase = useMemo(
-    () => MOCK_ARTIFACTS.filter((a) => matchesQuery(a, query)),
-    [query],
+    () => (artifacts ?? []).filter((a) => matchesQuery(a, query)),
+    [artifacts, query],
   );
 
   const kindCounts = useMemo(() => {
-    const withinWorkspace = searchBase.filter(
-      (a) => workspaceId === "all" || a.workspaceId === workspaceId,
+    const scoped = searchBase.filter(
+      (a) =>
+        (workspaceId === "all" || a.projectId === workspaceId) &&
+        (!favoritesOnly || a.favorite),
     );
-    const counts = {} as Record<LibraryKindFilter, number>;
-    for (const chip of LIBRARY_KIND_CHIPS) {
-      counts[chip.kind] = withinWorkspace.filter((a) => a.kind === chip.kind).length;
+    const counts: Partial<Record<LibraryKindFilter, number>> = {
+      all: scoped.length,
+    };
+    for (const type of LIBRARY_TYPE_ORDER) {
+      counts[type] = scoped.filter((a) => a.type === type).length;
     }
-    counts.all = withinWorkspace.length;
     return counts;
-  }, [searchBase, workspaceId]);
+  }, [searchBase, workspaceId, favoritesOnly]);
 
   const workspaceCounts = useMemo(() => {
-    const withinKind = searchBase.filter((a) => kind === "all" || a.kind === kind);
+    const scoped = searchBase.filter(
+      (a) =>
+        (kind === "all" || a.type === kind) && (!favoritesOnly || a.favorite),
+    );
     const counts: Record<string, number> = {};
-    for (const ws of MOCK_WORKSPACES) {
-      counts[ws.id] = withinKind.filter((a) => a.workspaceId === ws.id).length;
+    for (const ws of workspaces) {
+      counts[ws.id] = scoped.filter((a) => a.projectId === ws.id).length;
     }
     return counts;
-  }, [searchBase, kind]);
+  }, [searchBase, kind, favoritesOnly, workspaces]);
 
   const visible = useMemo(() => {
     const filtered = searchBase.filter(
       (a) =>
-        (kind === "all" || a.kind === kind) &&
-        (workspaceId === "all" || a.workspaceId === workspaceId),
+        (kind === "all" || a.type === kind) &&
+        (workspaceId === "all" || a.projectId === workspaceId) &&
+        (!favoritesOnly || a.favorite),
     );
     return sortArtifacts(filtered, sort);
-  }, [searchBase, kind, workspaceId, sort]);
+  }, [searchBase, kind, workspaceId, favoritesOnly, sort]);
 
   const sections = useMemo(
     () =>
-      MOCK_WORKSPACES.map((ws) => ({
-        workspace: ws,
-        items: visible.filter((a) => a.workspaceId === ws.id),
+      LIBRARY_TYPE_ORDER.map((type) => ({
+        type,
+        items: visible.filter((a) => a.type === type),
       })).filter((section) => section.items.length > 0),
     [visible],
   );
 
   const openArtifact = useMemo(
-    () => MOCK_ARTIFACTS.find((a) => a.id === openId) ?? null,
-    [openId],
+    () => (artifacts ?? []).find((a) => a.id === openId) ?? null,
+    [artifacts, openId],
   );
 
   const hasActiveFilters =
-    query.trim() !== "" || kind !== "all" || workspaceId !== "all";
+    query.trim() !== "" ||
+    kind !== "all" ||
+    workspaceId !== "all" ||
+    favoritesOnly;
 
   function resetFilters() {
     setQuery("");
     setKind("all");
     setWorkspaceId("all");
+    setFavoritesOnly(false);
   }
 
-  function toggleFavorite(id: string) {
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }
+  const total = artifacts?.length ?? 0;
+  const stats = useMemo(() => {
+    const list = artifacts ?? [];
+    return [
+      { label: "Всего артефактов", value: list.length, icon: LibraryIcon },
+      { label: "Воркспейсов", value: workspaces.length, icon: Boxes },
+      {
+        label: "Изображений и портретов",
+        value: list.filter((a) => a.type === "image" || a.type === "portrait")
+          .length,
+        icon: BookOpenText,
+      },
+      {
+        label: "Треков и сцен",
+        value: list.filter((a) => a.type === "track" || a.type === "scene").length,
+        icon: Clapperboard,
+      },
+    ];
+  }, [artifacts, workspaces]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -169,10 +219,14 @@ export function LibraryScreen({
         icon={LibraryIcon}
         title="Библиотека"
         description="Весь контент всех воркспейсов"
-        stage="wip"
+        stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       >
-        <Select value={sort} onValueChange={(v) => setSort(v as LibrarySort)}>
+        <Select
+          value={sort}
+          onValueChange={(v) => setSort(v as LibrarySort)}
+          disabled={loading}
+        >
           <SelectTrigger
             className="h-8 w-[148px] text-xs"
             aria-label="Сортировка артефактов"
@@ -190,7 +244,7 @@ export function LibraryScreen({
         <ViewToggle view={view} onChange={setView} />
       </ModuleHeader>
 
-      <LibraryStatsRow />
+      <LibraryStatsRow stats={stats} loading={loading} />
 
       <LibraryFilterBar
         query={query}
@@ -198,26 +252,33 @@ export function LibraryScreen({
         kind={kind}
         onKindChange={setKind}
         kindCounts={kindCounts}
+        workspaces={workspaces}
         workspaceId={workspaceId}
         onWorkspaceChange={setWorkspaceId}
         workspaceCounts={workspaceCounts}
-        grouped={grouped}
-        onGroupedChange={setGrouped}
+        favoritesOnly={favoritesOnly}
+        onFavoritesChange={setFavoritesOnly}
       />
 
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <p className="text-xs text-muted-foreground">
-            Показано{" "}
-            <span className="font-medium tabular-nums text-foreground">
-              {visible.length}
-            </span>{" "}
-            из {MOCK_ARTIFACTS.length} артефактов
-            {workspaceId !== "all"
-              ? ` · ${MOCK_WORKSPACES.find((ws) => ws.id === workspaceId)?.title ?? ""}`
-              : ""}
+            {loading ? (
+              "Загружаем библиотеку…"
+            ) : (
+              <>
+                Показано{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {visible.length}
+                </span>{" "}
+                из {total} артефактов
+                {workspaceId !== "all"
+                  ? ` · ${workspaceById[workspaceId]?.name ?? ""}`
+                  : ""}
+              </>
+            )}
           </p>
-          {hasActiveFilters ? (
+          {hasActiveFilters && !loading ? (
             <Button
               type="button"
               variant="ghost"
@@ -231,58 +292,79 @@ export function LibraryScreen({
           ) : null}
         </div>
 
-        {visible.length === 0 ? (
-          <LibraryEmptyState onReset={resetFilters} />
-        ) : grouped ? (
+        {loading ? (
+          <div className="space-y-7">
+            {Array.from({ length: 2 }, (_, sectionIdx) => (
+              <div key={sectionIdx}>
+                <Skeleton className="mb-3 h-9 w-48 rounded-xl" />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {Array.from({ length: 4 }, (_, i) => (
+                    <Skeleton
+                      key={i}
+                      className="h-[74px] w-full rounded-xl"
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
+            <p className="text-sm text-muted-foreground">{loadError}</p>
+            <Button size="sm" variant="outline" onClick={() => void load()}>
+              <RefreshCw className="size-4" aria-hidden="true" />
+              Повторить
+            </Button>
+          </div>
+        ) : visible.length === 0 ? (
+          <LibraryEmptyState onReset={resetFilters} total={total} />
+        ) : (
           <div className="space-y-7">
             {sections.map((section) => (
               <LibrarySection
-                key={section.workspace.id}
-                workspace={section.workspace}
+                key={section.type}
+                type={section.type}
                 items={section.items}
                 view={view}
+                workspaceById={workspaceById}
                 onOpenArtifact={(a) => setOpenId(a.id)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className={libraryGridClassName(view)}>
-            {visible.map((artifact) => (
-              <ArtifactCard
-                key={artifact.id}
-                artifact={artifact}
-                showWorkspace
-                onOpen={(a) => setOpenId(a.id)}
+                onToggleFavorite={(a) => void toggleFavorite(a)}
               />
             ))}
           </div>
         )}
 
         <p className="mt-6 pb-1 text-center text-[10px] text-muted-foreground">
-          Каталогизация поверх воркспейсов · данные подключаются в фазе A
+          Каталогизация поверх воркспейсов · живые артефакты из базы студии
         </p>
       </div>
 
       <LibraryArtifactDialog
         artifact={openArtifact}
-        favorite={openArtifact !== null && favorites.has(openArtifact.id)}
-        onToggleFavorite={toggleFavorite}
+        workspaceById={workspaceById}
         onOpenChange={(open) => {
           if (!open) setOpenId(null);
         }}
+        onToggleFavorite={(a) => void toggleFavorite(a)}
       />
     </div>
   );
 }
 
-function LibraryStatsRow() {
+function LibraryStatsRow({
+  stats,
+  loading,
+}: {
+  stats: { label: string; value: number; icon: LucideIcon }[];
+  loading: boolean;
+}) {
   return (
     <div
       role="group"
       aria-label="Статистика библиотеки"
       className="grid shrink-0 grid-cols-2 gap-2 border-b px-4 py-4 sm:grid-cols-4 sm:px-6"
     >
-      {LIBRARY_STATS.map((stat) => (
+      {stats.map((stat) => (
         <div
           key={stat.label}
           className="flex items-center gap-3 rounded-xl border bg-card px-3.5 py-3 transition-colors hover:border-primary/30"
@@ -294,9 +376,13 @@ function LibraryStatsRow() {
             <stat.icon className="size-4" />
           </span>
           <div className="min-w-0">
-            <p className="text-xl font-semibold leading-none tabular-nums">
-              {stat.value}
-            </p>
+            {loading ? (
+              <Skeleton className="h-5 w-10 rounded" />
+            ) : (
+              <p className="text-xl font-semibold leading-none tabular-nums">
+                {stat.value}
+              </p>
+            )}
             <p
               className="mt-1 truncate text-[11px] text-muted-foreground"
               title={stat.label}
@@ -353,7 +439,13 @@ function ViewToggle({
   );
 }
 
-function LibraryEmptyState({ onReset }: { onReset: () => void }) {
+function LibraryEmptyState({
+  onReset,
+  total,
+}: {
+  onReset: () => void;
+  total: number;
+}) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
       <span
@@ -365,7 +457,7 @@ function LibraryEmptyState({ onReset }: { onReset: () => void }) {
       <div>
         <p className="text-sm font-medium">Ничего не найдено</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Под текущие фильтры не попал ни один артефакт из {MOCK_ARTIFACTS.length}.
+          Под текущие фильтры не попал ни один артефакт из {total}.
         </p>
       </div>
       <Button type="button" variant="outline" size="sm" onClick={onReset}>

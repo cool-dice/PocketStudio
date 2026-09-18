@@ -1,35 +1,44 @@
 "use client";
 
 /**
- * Элемент списка библиотеки: основная кнопка с типом, статусом,
- * прогрессом и тегами + отдельная звезда избранного (вне кнопки,
- * чтобы не вкладывать кнопки друг в друга). Плюс заголовок
- * группы-коллекции («Циклы» / «Статьи» / …).
+ * Элемент библиотеки документов: тип, название, живые слова и секции
+ * из DocumentDto, «N мин назад» по ISO-дате. В глобальном режиме
+ * используется ShelfHeader — заголовок «полки» воркспейса. Меню (…)
+ * удаляет документ (с подтверждением в диалоге библиотеки).
  */
 
-import { Library, Star } from "lucide-react";
+import { Library, MoreHorizontal, Trash2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { KIND_META, STATUS_META, formatNumber, pluralRu, type StudioDoc } from "./types";
+import type { DocumentDto } from "@/lib/workspace-types";
+import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import { agoFromISO, docKindMeta, formatNumber, pluralRu } from "./types";
 
-export function DocCollectionHeader({
+/** Заголовок «полки» — воркспейса в глобальном режиме. */
+export function ShelfHeader({
+  type,
   label,
-  hint,
   count,
 }: {
+  type: string;
   label: string;
-  hint: string;
   count: number;
 }) {
+  const meta = WORKSPACE_TYPE_META[type as keyof typeof WORKSPACE_TYPE_META];
+  const Icon = meta?.icon ?? Library;
   return (
     <li
       className="flex items-center gap-1.5 px-2 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
     >
-      <Library className="size-3 shrink-0 text-primary/70" aria-hidden="true" />
+      <Icon className="size-3 shrink-0 text-primary/70" aria-hidden="true" />
       <span className="truncate">{label}</span>
-      <span className="shrink-0 font-mono text-[10px] normal-case tracking-normal text-muted-foreground/60">
-        {hint}
-      </span>
       <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">{count}</span>
     </li>
   );
@@ -38,20 +47,17 @@ export function DocCollectionHeader({
 export function DocListItem({
   doc,
   active,
-  favorite,
   onSelect,
-  onToggleFavorite,
+  onRemove,
 }: {
-  doc: StudioDoc;
+  doc: DocumentDto;
   active: boolean;
-  favorite: boolean;
   onSelect: (id: string) => void;
-  onToggleFavorite: (id: string) => void;
+  onRemove?: (id: string) => void;
 }) {
-  const kind = KIND_META[doc.kind];
-  const status = STATUS_META[doc.status];
+  const kind = docKindMeta(doc.kind);
   const Icon = kind.icon;
-  const chapters = doc.chapters?.length ?? 0;
+  const sections = doc.sections?.length ?? doc.sectionsCount ?? 0;
 
   return (
     <li>
@@ -83,66 +89,46 @@ export function DocListItem({
               </span>
               <span className="mt-1 flex flex-wrap items-center gap-1.5">
                 <span className="text-[11px] tabular-nums text-muted-foreground">
-                  {formatNumber(doc.words)} {pluralRu(doc.words, "слово", "слова", "слов")}
+                  {formatNumber(doc.wordsCount)}{" "}
+                  {pluralRu(doc.wordsCount, "слово", "слова", "слов")}
                 </span>
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full border px-1.5 py-px text-[10px] font-medium",
-                    status.className,
-                  )}
-                >
-                  {status.label}
+                <span className="inline-flex items-center rounded-full border border-border bg-background px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                  {kind.label}
                 </span>
               </span>
-              {doc.tags.length > 0 ? (
-                <span className="mt-1.5 flex flex-wrap gap-1">
-                  {doc.tags.slice(0, 3).map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-border bg-background px-1.5 py-px text-[10px] text-muted-foreground"
-                    >
-                      #{tag}
-                    </span>
-                  ))}
-                </span>
-              ) : null}
-              <span
-                className="mt-2 block h-1 overflow-hidden rounded-full bg-muted"
-                role="progressbar"
-                aria-valuenow={doc.progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={`Готовность «${doc.title}» — ${doc.progress}%`}
-              >
-                <span
-                  className="block h-full rounded-full bg-primary transition-[width]"
-                  style={{ width: `${doc.progress}%` }}
-                />
-              </span>
-              <span className="mt-1 block text-[10px] tabular-nums text-muted-foreground">
-                {chapters > 0
-                  ? `${chapters} ${pluralRu(chapters, "глава", "главы", "глав")} · `
+              <span className="mt-1.5 block text-[10px] tabular-nums text-muted-foreground">
+                {sections > 0
+                  ? `${formatNumber(sections)} ${pluralRu(sections, "секция", "секции", "секций")} · `
                   : ""}
-                {doc.progress}%
+                {agoFromISO(doc.updatedAt)}
               </span>
             </span>
           </span>
         </button>
-        <button
-          type="button"
-          onClick={() => onToggleFavorite(doc.id)}
-          aria-pressed={favorite}
-          aria-label={favorite ? `Убрать «${doc.title}» из избранного` : `Добавить «${doc.title}» в избранное`}
-          className={cn(
-            "mt-2 mr-1 flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            favorite ? "text-primary" : "text-muted-foreground/50 hover:text-foreground",
-          )}
-        >
-          <Star
-            className={cn("size-3.5", favorite && "fill-primary")}
-            aria-hidden="true"
-          />
-        </button>
+        {onRemove ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Действия с документом «${doc.title}»`}
+                className="mt-1.5 mr-0.5 size-7 shrink-0 text-muted-foreground/60 hover:text-foreground"
+              >
+                <MoreHorizontal className="size-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem
+                onClick={() => onRemove(doc.id)}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="size-3.5" aria-hidden="true" />
+                Удалить документ
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
     </li>
   );

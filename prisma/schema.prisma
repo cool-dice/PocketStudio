@@ -120,10 +120,17 @@ model Project {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   description String?
-  // workspace/<id> on disk
-  rootPath    String
-  // 'template' | 'github' | 'zip'
+  // workspace/<id> on disk (null для контентных воркспейсов без кода)
+  rootPath    String?
+  // 'template' | 'github' | 'zip' | 'workspace' (контентный воркспейс)
   origin      String   @default("template")
+  // 'film' | 'book' | 'music' | 'app' | 'universal' (Фаза A: тип воркспейса)
+  type        String   @default("app")
+  // Человекочитаемая стадия пайплайна («Монтаж») + её индекс (1-based).
+  stage       String?
+  stageIndex  Int?
+  // 0–100, для прогресс-бара.
+  progress    Int      @default(0)
   remoteUrl   String?
   templateVersion String?
   lastBranch  String?
@@ -131,10 +138,159 @@ model Project {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  threads Thread[]
+  threads   Thread[]
   noteLinks NoteLink[]
+  documents Document[]
+  entities  Entity[]
+  artifacts Artifact[]
+  findings  Finding[]
 
   @@index([userId])
+}
+
+// ─────────────────────────── Documents (Фаза A) ───────────────────────────
+
+/// Документ воркспейса: рукопись / спека / статья / сценарий.
+model Document {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  // 'manuscript' | 'spec' | 'article' | 'script'
+  kind        String   @default("manuscript")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sections DocumentSection[]
+  findings Finding[]
+
+  @@index([projectId])
+}
+
+/// Глава / раздел документа с редактируемым текстом.
+model DocumentSection {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  title      String
+  order      Int      @default(0)
+  content    String   @default("")
+  // 'draft' | 'done'
+  status     String   @default("draft")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([documentId, order])
+}
+
+// ─────────────────── Entities — универсальная картотека (PS-3.2) ───────────────────
+
+/// Сущность воркспейса: персонажи/лор книги ИЛИ пользователи/требования спеки.
+model Entity {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Идентификатор набора внутри воркспейса (напр. 'main').
+  setId       String   @default("main")
+  /// Название набора для UI («Хроники Долгой Зимы»).
+  setName     String   @default("Сущности")
+  // 'narrative' | 'product'
+  domain      String   @default("narrative")
+  // 'character' | 'location' | 'event' | 'item' | 'faction' | 'rule'
+  // | 'user' | 'role' | 'requirement' | 'module' | 'integration'
+  kind        String
+  name        String
+  short       String?
+  description String
+  /// JSON: [{label, value}]
+  attributes  String   @default("[]")
+  /// JSON: [string]
+  tags        String   @default("[]")
+  /// JSON: {kind: 'chapter'|'section', items: [string]}
+  refs        String   @default("{\"kind\":\"chapter\",\"items\":[]}")
+  /// JSON: {gradient, initials} — портрет-заглушка персонажа.
+  portrait    String?
+  favorite    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  linksFrom EntityLink[] @relation("linksFrom")
+  linksTo   EntityLink[] @relation("linksTo")
+  artifacts Artifact[]
+
+  @@index([projectId, setId])
+}
+
+/// Связь между сущностями (родство/союз/конфликт/…).
+model EntityLink {
+  id     String @id @default(cuid())
+  fromId String
+  from   Entity @relation("linksFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId   String
+  to     Entity @relation("linksTo", fields: [toId], references: [id], onDelete: Cascade)
+  // 'related' | 'family' | 'ally' | 'conflict'
+  kind   String @default("related")
+
+  @@index([fromId])
+  @@index([toId])
+}
+
+// ─────────────────────────── Artifacts (Фаза A/B) ───────────────────────────
+
+/// Артефакт воркспейса: сгенерированная картинка, аудио, видео, файл.
+model Artifact {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // 'image' | 'audio' | 'video' | 'document' | 'file'
+  type        String
+  title       String
+  description String?
+  /// URL файла (напр. /gen/<id>.png) или data-url.
+  url         String?
+  /// Промпт генерации (для AI-артефактов).
+  prompt      String?
+  /// Привязка к сущности (портрет персонажа и т.п.).
+  entityId    String?
+  entity      Entity?  @relation(fields: [entityId], references: [id], onDelete: SetNull)
+  /// Стадия пайплайна, к которой прицеплен артефакт в Обзоре.
+  stage       String?
+  /// JSON-мета (тонкость: длительность для аудио, размер и т.п.).
+  meta        String?
+  favorite    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId, type])
+}
+
+// ─────────────────── Findings — Аналитик (PS-3.2) ───────────────────
+
+/// Находка Аналитика: противоречие / недосказанность / расхождение.
+model Finding {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  /// Область анализа: 'manuscript' | 'spec' | …
+  scope      String   @default("manuscript")
+  // 'contradiction' | 'omission' | 'inconsistency'
+  type       String
+  // 'info' | 'warning' | 'critical'
+  severity   String   @default("warning")
+  title      String
+  quote      String?
+  advice     String?
+  /// Источник: «гл. 2» / «SRS-4.2 · FR-12».
+  sourceRef  String?
+  // 'open' | 'fixed' | 'dismissed'
+  status     String   @default("open")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId, status])
 }
 
 /// Link between a note and a project (reference / context / proposal).

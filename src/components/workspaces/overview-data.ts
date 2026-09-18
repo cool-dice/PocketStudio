@@ -1,10 +1,10 @@
 /**
- * Обзор воркспейса — мок-данные и хелперы оболочки (PS-3-b).
+ * Обзор воркспейса — хелперы оболочки (Фаза A: работают и с WorkspaceDto,
+ * и с легаси WorkspaceSummary вкладок-швов).
  *
  * Здесь живут «живые» подсказки пайплайна: что делать дальше на текущей
  * стадии, к какой вкладке ведёт работа стадии, быстрые действия по типу
- * воркспейса и мелкие утилиты (русское множественное число, статус стадии).
- * Всё локально; в Фазе A подменится генерацией оркестратора.
+ * воркспейса и мелкие утилиты (множественное число, статус стадии).
  */
 
 import {
@@ -24,10 +24,19 @@ import {
 import {
   WORKSPACE_STAGES,
   WORKSPACE_TABS_BY_TYPE,
-  type WorkspaceSummary,
   type WorkspaceTab,
   type WorkspaceType,
 } from "@/lib/workspace-data";
+
+/**
+ * Минимальная форма воркспейса для стадийных хелперов: ей удовлетворяют
+ * и WorkspaceDto (Фаза A), и легаси WorkspaceSummary вкладок-швов.
+ */
+export interface StageSource {
+  type: WorkspaceType;
+  stage?: string | null;
+  stageIndex?: number | null;
+}
 
 // ─────────────────────── малые утилиты ───────────────────────
 
@@ -50,16 +59,17 @@ export function pluralNotes(n: number): string {
   return `${n} ${pluralRu(n, "заметка", "заметки", "заметок")}`;
 }
 
-/** 0-based индекс текущей стадии (stageIndex — 1-based), зажатый в границы пайплайна. */
-export function currentStageIndex(ws: WorkspaceSummary): number {
+/** 0-based индекс текущей стадии, зажатый в границы пайплайна типа. */
+export function currentStageIndex(ws: StageSource): number {
   const pipelineLength = WORKSPACE_STAGES[ws.type].length;
-  return Math.min(Math.max(ws.stageIndex, 1), pipelineLength) - 1;
+  const stageIndex = ws.stageIndex ?? 1;
+  return Math.min(Math.max(stageIndex, 1), pipelineLength) - 1;
 }
 
 export type StageStatus = "done" | "current" | "todo";
 
 /** Статус стадии по её 0-based индексу относительно текущей. */
-export function stageStatusOf(index: number, ws: WorkspaceSummary): StageStatus {
+export function stageStatusOf(index: number, ws: StageSource): StageStatus {
   const current = currentStageIndex(ws);
   if (index < current) return "done";
   if (index === current) return "current";
@@ -78,7 +88,7 @@ export const STAGE_STATUS_LABEL: Record<StageStatus, string> = {
  * вкладки (напр. «аудио» у фильма) — ведём в чат к оркестратору.
  */
 export function resolveWorkspaceTab(
-  ws: WorkspaceSummary,
+  ws: Pick<StageSource, "type">,
   tab: WorkspaceTab,
 ): WorkspaceTab {
   return WORKSPACE_TABS_BY_TYPE[ws.type].includes(tab) ? tab : "chat";
@@ -216,9 +226,14 @@ export const NEXT_STEP_PROMPTS: Record<WorkspaceType, Record<string, NextStepPro
 };
 
 /** Подсказка для текущей стадии (fallback — по типу, из hint-структуры). */
-export function nextStepOf(ws: WorkspaceSummary): NextStepPrompt {
+export function nextStepOf(ws: StageSource): NextStepPrompt {
   const byStage = NEXT_STEP_PROMPTS[ws.type];
-  return byStage[ws.stage] ?? { title: "Продолжить работу над стадией", hint: "Оркестратор подскажет следующий шаг." };
+  return (
+    (ws.stage ? byStage[ws.stage] : undefined) ?? {
+      title: "Продолжить работу над стадией",
+      hint: "Оркестратор подскажет следующий шаг.",
+    }
+  );
 }
 
 /** Вкладка, где живёт работа стадии (всегда в пределах типа воркспейса). */
@@ -300,18 +315,3 @@ export const QUICK_ACTIONS: Record<WorkspaceType, QuickAction[]> = {
   ],
 };
 
-// ─────────────────────── мок-детали «О воркспейсе» ───────────────────────
-
-/** Когда создан воркспейс (мок; Фаза A даст createdAt из БД). */
-export const WORKSPACE_CREATED_AGO: Record<string, string> = {
-  "ws-film-dwinter": "3 недели назад",
-  "ws-book-fjord": "2 месяца назад",
-  "ws-music-moon": "10 дней назад",
-  "ws-app-landing": "6 дней назад",
-  "ws-uni-podcast": "5 дней назад",
-  "ws-film-anna": "3 дня назад",
-};
-
-export function createdAgoOf(ws: WorkspaceSummary): string {
-  return WORKSPACE_CREATED_AGO[ws.id] ?? "на этой неделе";
-}

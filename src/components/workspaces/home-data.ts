@@ -1,9 +1,7 @@
 /**
- * Главная — локальный набор данных дашборда (PS-3-a).
- *
- * Статистика студии (воркспейсы и артефакты считаются по мок-данным,
- * неделя — демо-цифра до Фазы A), лента активности по всем модулям
- * с тип-окрашенными иконками и мелкие утилиты приветствия.
+ * Главная — данные дашборда (Фаза A): живая статистика из /api/dashboard,
+ * иконки ленты активности по типу артефакта, tone-палитра событий и
+ * утилиты приветствия (дата, имя, человекочитаемая разница timeAgo).
  */
 
 import {
@@ -13,17 +11,21 @@ import {
   Boxes,
   Clapperboard,
   FileCode2,
+  FolderKanban,
   ImagePlus,
   Layers,
-  Mic,
+  Lightbulb,
+  Music4,
   NotebookPen,
+  Palette,
   Rocket,
+  Sparkles,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
 
-import { MOCK_ARTIFACTS } from "@/components/workspaces/shared/artifacts-data";
-import { MOCK_WORKSPACES } from "@/lib/workspace-data";
+import { pluralRu } from "@/components/workspaces/overview-data";
+import type { DashboardDto } from "@/lib/workspace-types";
 
 // ─────────────────────── приветствие ───────────────────────
 
@@ -42,6 +44,32 @@ export function firstNameOf(name: string | null | undefined): string {
   return (name ?? "").trim().split(/\s+/)[0] ?? "";
 }
 
+// ─────────────────────── timeAgo ───────────────────────
+
+/**
+ * Человекочитаемая разница от ISO-даты: «только что», «12 мин назад»,
+ * «3 ч назад», «вчера», «2 дня назад», дальше — «14 сентября».
+ */
+export function timeAgo(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const diffMs = Math.max(0, now.getTime() - date.getTime());
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) return "только что";
+  if (minutes < 60) return `${minutes} мин назад`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ч назад`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "вчера";
+  if (days < 7) {
+    return `${days} ${pluralRu(days, "день", "дня", "дней")} назад`;
+  }
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+  }).format(date);
+}
+
 // ─────────────────────── статистика ───────────────────────
 
 export interface HomeStat {
@@ -50,13 +78,15 @@ export interface HomeStat {
   icon: LucideIcon;
 }
 
-/** Плитки статистики: воркспейсы/артефакты из мок-данных, неделя — демо. */
-export const HOME_STATS: HomeStat[] = [
-  { label: "Воркспейсов", value: MOCK_WORKSPACES.length, icon: Boxes },
-  { label: "Артефактов", value: MOCK_ARTIFACTS.length, icon: Layers },
-  { label: "Заметок за неделю", value: 12, icon: NotebookPen },
-  { label: "Активных стадий", value: 4, icon: Activity },
-];
+/** Плитки «Студия в цифрах» из живых счётчиков /api/dashboard. */
+export function homeStats(stats: DashboardDto["stats"]): HomeStat[] {
+  return [
+    { label: "Воркспейсов", value: stats.workspaces, icon: Boxes },
+    { label: "Артефактов", value: stats.artifacts, icon: Layers },
+    { label: "Заметок за неделю", value: stats.notesWeek, icon: NotebookPen },
+    { label: "Активных стадий", value: stats.activeStages, icon: Activity },
+  ];
+}
 
 // ─────────────────────── лента активности ───────────────────────
 
@@ -78,80 +108,25 @@ export const ACTIVITY_TONE_CLASS: Record<ActivityTone, string> = {
   neutral: "bg-primary/10 text-primary",
 };
 
-export interface HomeActivityItem {
-  id: string;
-  /** Воркспейс, в котором произошло событие (клик открывает его). */
-  workspaceId: string;
-  text: string;
-  time: string;
-  icon: LucideIcon;
-  tone: ActivityTone;
-}
+/** Иконка события по типу артефакта (в БД встречаются и album-виды). */
+const ACTIVITY_TYPE_ICONS: Record<string, LucideIcon> = {
+  note: NotebookPen,
+  document: BookOpenText,
+  portrait: UserRound,
+  image: ImagePlus,
+  track: Music4,
+  audio: AudioWaveform,
+  scene: Clapperboard,
+  video: Clapperboard,
+  app: FileCode2,
+  deploy: Rocket,
+  file: FolderKanban,
+  concept: Lightbulb,
+  illustration: Palette,
+  workspace: Boxes,
+};
 
-/** Мок-журнал событий всех модулей (Фаза A — реальная лента из БД). */
-export const HOME_ACTIVITY: HomeActivityItem[] = [
-  {
-    id: "act-1",
-    workspaceId: "ws-film-dwinter",
-    text: "Сцена 07 — Вьюга смонтирована",
-    time: "12 мин назад",
-    icon: Clapperboard,
-    tone: "film",
-  },
-  {
-    id: "act-2",
-    workspaceId: "ws-book-fjord",
-    text: "Глава 9. Шторм — 1 240 слов",
-    time: "1 ч назад",
-    icon: BookOpenText,
-    tone: "book",
-  },
-  {
-    id: "act-3",
-    workspaceId: "ws-music-moon",
-    text: "Вокал — дубль 2 транспонирован на +2",
-    time: "3 ч назад",
-    icon: AudioWaveform,
-    tone: "music",
-  },
-  {
-    id: "act-4",
-    workspaceId: "ws-app-landing",
-    text: "Сборка v0.3.1 прошла тесты",
-    time: "вчера",
-    icon: Rocket,
-    tone: "app",
-  },
-  {
-    id: "act-5",
-    workspaceId: "ws-book-fjord",
-    text: "Портрет Эйнара добавлен в альбом",
-    time: "вчера",
-    icon: UserRound,
-    tone: "book",
-  },
-  {
-    id: "act-6",
-    workspaceId: "ws-uni-podcast",
-    text: "Озвучка интро выпуска №12 готова",
-    time: "вчера",
-    icon: Mic,
-    tone: "universal",
-  },
-  {
-    id: "act-7",
-    workspaceId: "ws-music-moon",
-    text: "Обложка EP — вариант 3 утверждён",
-    time: "2 дня назад",
-    icon: ImagePlus,
-    tone: "music",
-  },
-  {
-    id: "act-8",
-    workspaceId: "ws-app-landing",
-    text: "Оркестратор дописал hero-секцию лендинга",
-    time: "2 дня назад",
-    icon: FileCode2,
-    tone: "app",
-  },
-];
+/** Иконка события: известный тип артефакта или дежурная «искра». */
+export function activityIconOf(type: string): LucideIcon {
+  return ACTIVITY_TYPE_ICONS[type] ?? Sparkles;
+}

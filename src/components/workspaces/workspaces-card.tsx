@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * WorkspaceCard — карточка воркспейса в списке (PS-3-a): большая
+ * WorkspaceCard — карточка воркспейса в списке (Фаза A): большая
  * градиентная обложка с типом и стадией, звезда избранного, прогресс
- * с процентом, состав (заметки/документы/медиа/файлы) и обновление.
- * Клик по карточке открывает оболочку воркспейса (PS-3-b).
+ * с процентом, живые счётчики counts из БД и человекочитаемое обновление.
+ * Клик по карточке открывает оболочку воркспейса.
  */
 
 import {
@@ -19,10 +19,13 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { timeAgo } from "@/components/workspaces/home-data";
 import {
-  WORKSPACE_TYPE_META,
-  type WorkspaceSummary,
-} from "@/lib/workspace-data";
+  stageLabelOf,
+  workspaceSubtitle,
+} from "@/components/workspaces/workspaces-data";
+import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import type { WorkspaceDto } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 
 const COUNT_ITEMS = [
@@ -35,10 +38,10 @@ const COUNT_ITEMS = [
 ] as const;
 
 interface WorkspaceCardProps {
-  workspace: WorkspaceSummary;
+  workspace: WorkspaceDto;
   favorite: boolean;
   onToggleFavorite: (id: string) => void;
-  onOpen: (ws: WorkspaceSummary) => void;
+  onOpen: (id: string) => void;
 }
 
 export function WorkspacesCard({
@@ -49,18 +52,19 @@ export function WorkspacesCard({
 }: WorkspaceCardProps) {
   const meta = WORKSPACE_TYPE_META[workspace.type];
   const Icon = meta.icon;
+  const stage = stageLabelOf(workspace);
 
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg">
       {/* ── Градиентная обложка ── */}
       <button
         type="button"
-        onClick={() => onOpen(workspace)}
-        title={`Открыть воркспейс «${workspace.title}»`}
-        aria-label={`Открыть воркспейс «${workspace.title}»`}
+        onClick={() => onOpen(workspace.id)}
+        title={`Открыть воркспейс «${workspace.name}»`}
+        aria-label={`Открыть воркспейс «${workspace.name}»`}
         className={cn(
           "relative block h-28 w-full overflow-hidden bg-gradient-to-br text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:h-32",
-          workspace.gradient,
+          meta.gradient,
         )}
       >
         <span
@@ -79,9 +83,9 @@ export function WorkspacesCard({
         />
         <Badge
           className="absolute bottom-3 left-3 border-transparent bg-background/85 text-foreground backdrop-blur-sm hover:bg-background/85"
-          title={`Стадия: ${workspace.stage}`}
+          title={`Стадия: ${stage}`}
         >
-          {workspace.stage}
+          {stage}
         </Badge>
       </button>
 
@@ -111,14 +115,14 @@ export function WorkspacesCard({
       {/* ── Тело карточки ── */}
       <button
         type="button"
-        onClick={() => onOpen(workspace)}
+        onClick={() => onOpen(workspace.id)}
         className="flex flex-1 flex-col p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       >
-        <h3 className="truncate text-sm font-semibold" title={workspace.title}>
-          {workspace.title}
+        <h3 className="truncate text-sm font-semibold" title={workspace.name}>
+          {workspace.name}
         </h3>
         <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-          {workspace.subtitle}
+          {workspaceSubtitle(workspace)}
         </p>
 
         {/* Прогресс */}
@@ -135,7 +139,7 @@ export function WorkspacesCard({
             aria-valuenow={workspace.progress}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={`Прогресс воркспейса «${workspace.title}»`}
+            aria-label={`Прогресс воркспейса «${workspace.name}»`}
           >
             <div
               className="h-full rounded-full bg-primary transition-all"
@@ -170,7 +174,7 @@ export function WorkspacesCard({
         {/* Футер */}
         <div className="mt-3 flex items-center justify-between gap-2 text-[11px]">
           <span className="truncate text-muted-foreground">
-            обновлён {workspace.updatedAgo}
+            обновлён {timeAgo(workspace.updatedAt)}
           </span>
           <span className="inline-flex shrink-0 items-center gap-1 font-medium text-primary">
             Открыть

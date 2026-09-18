@@ -2,8 +2,9 @@
 
 /**
  * WorkspacesFilterBar — панель каталогизации списка воркспейсов
- * (PS-3-a): поиск, сортировка (обновление/прогресс/название) и чипы
- * типов со счётчиками (фасетно — по базе, отфильтрованной поиском).
+ * (Фаза A): поиск, фильтр стадии, сортировка (обновление/прогресс/
+ * название) и чипы типов со счётчиками (фасетно — по базе,
+ * отфильтрованной поиском). Стадии — живые значения из БД.
  */
 
 import { LayoutGrid, Search, X } from "lucide-react";
@@ -26,12 +27,19 @@ import {
   type WorkspacesTypeFilter,
 } from "@/components/workspaces/workspaces-data";
 
+export type WorkspacesStageFilter = string;
+
 interface WorkspacesFilterBarProps {
   query: string;
   onQueryChange: (value: string) => void;
   type: WorkspacesTypeFilter;
   onTypeChange: (value: WorkspacesTypeFilter) => void;
   typeCounts: Record<WorkspacesTypeFilter, number>;
+  /** Активная стадия («all» — все). */
+  stage: WorkspacesStageFilter;
+  onStageChange: (value: WorkspacesStageFilter) => void;
+  /** Живые стадии видимых воркспейсов (для фильтра). */
+  stageOptions: string[];
   sort: WorkspacesSort;
   onSortChange: (value: WorkspacesSort) => void;
 }
@@ -42,6 +50,9 @@ export function WorkspacesFilterBar({
   type,
   onTypeChange,
   typeCounts,
+  stage,
+  onStageChange,
+  stageOptions,
   sort,
   onSortChange,
 }: WorkspacesFilterBarProps) {
@@ -73,11 +84,33 @@ export function WorkspacesFilterBar({
           ) : null}
         </div>
 
-        {/* Сортировка */}
-        <div className="sm:ml-auto">
+        {/* Стадия + сортировка */}
+        <div className="flex items-center gap-2 sm:ml-auto">
+          <Select
+            value={stage}
+            onValueChange={(v) => onStageChange(v)}
+            disabled={stageOptions.length === 0}
+          >
+            <SelectTrigger
+              className="h-8 w-full min-w-0 text-xs sm:w-40"
+              aria-label="Фильтр по стадии воркспейса"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">
+                Все стадии
+              </SelectItem>
+              {stageOptions.map((option) => (
+                <SelectItem key={option} value={option} className="text-xs">
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={sort} onValueChange={(v) => onSortChange(v as WorkspacesSort)}>
             <SelectTrigger
-              className="h-8 w-full text-xs sm:w-44"
+              className="h-8 w-full min-w-0 text-xs sm:w-44"
               aria-label="Сортировка воркспейсов"
             >
               <SelectValue />

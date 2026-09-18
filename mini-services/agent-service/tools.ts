@@ -771,6 +771,10 @@ const completeTask: ToolDef = {
 
 // ─────────────────────────── registry ───────────────────────────
 
+// Инструменты контента воркспейсов (Фаза A: сущности, Аналитик, генерация)
+// — определены в workspace-tools.ts, регистрируются здесь же, 1:1 с паттерном.
+import { WORKSPACE_TOOLS } from "./workspace-tools";
+
 export const TOOLS: ToolDef[] = [
   createNote,
   searchNotes,
@@ -784,6 +788,7 @@ export const TOOLS: ToolDef[] = [
   deleteFile,
   checkpointTool,
   completeTask,
+  ...WORKSPACE_TOOLS,
 ];
 
 export function getTool(name: string): ToolDef | undefined {

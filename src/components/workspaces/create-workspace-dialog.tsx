@@ -1,14 +1,15 @@
 "use client";
 
 /**
- * CreateWorkspaceDialog — мастер создания воркспейса (PS-3-a):
- * тип → название → превью с пайплайном. Созданный воркспейс открывается
- * в оболочке (PS-3-b) как override-объект — без похода в БД (Фаза A).
+ * CreateWorkspaceDialog — мастер создания воркспейса (Фаза A):
+ * тип → название → превью с пайплайном → api.createWorkspace(БД).
+ * Успех: тост + тихое обновление списка + открытие Обзора нового
+ * воркспейса. Ошибка — тост с сообщением сервера.
  * Содержимое шагов — в create-workspace-steps.tsx.
  */
 
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Plus, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Loader2, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -20,13 +21,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { api, ApiError } from "@/lib/api";
+import { invalidateWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
-import {
-  WORKSPACE_STAGES,
-  WORKSPACE_TYPE_META,
-  type WorkspaceSummary,
-  type WorkspaceType,
-} from "@/lib/workspace-data";
+import type { WorkspaceType } from "@/lib/workspace-data";
 import { cn } from "@/lib/utils";
 import {
   StepName,
@@ -51,6 +49,7 @@ export function CreateWorkspaceDialog({
   const [type, setType] = useState<WorkspaceType | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [creating, setCreating] = useState(false);
 
   /**
    * Любое закрытие (крестик, Escape, «Создать») возвращает мастер
@@ -79,28 +78,30 @@ export function CreateWorkspaceDialog({
     setStep((s) => Math.min(3, s + 1));
   }
 
-  function handleCreate() {
-    if (!type || trimmedName.length === 0) return;
-    const meta = WORKSPACE_TYPE_META[type];
-    const stages = WORKSPACE_STAGES[type];
-    const ws: WorkspaceSummary = {
-      id: `ws-local-${Date.now()}`,
-      type,
-      title: trimmedName,
-      subtitle: trimmedDescription || meta.hint,
-      description: trimmedDescription || meta.hint,
-      stage: stages[0],
-      stageIndex: 1,
-      progress: 0,
-      updatedAgo: "только что",
-      gradient: meta.gradient,
-      counts: { notes: 0, documents: 0, images: 0, audio: 0, video: 0, files: 0 },
-    };
-    onOpenChange(false);
-    useAppUi.getState().openWorkspaceData(ws, "overview");
-    toast.success("Воркспейс создан", {
-      description: "Оркестратор предложит план конвейера на вкладке «Обзор».",
-    });
+  /** Создание в БД: тост → тихое обновление списка → Обзор нового id. */
+  async function handleCreate() {
+    if (!type || trimmedName.length === 0 || creating) return;
+    setCreating(true);
+    try {
+      const created = await api.createWorkspace({
+        type,
+        name: trimmedName,
+        description: trimmedDescription || undefined,
+      });
+      invalidateWorkspaces();
+      handleOpenChange(false);
+      useAppUi.getState().openWorkspace(created.id, "overview");
+      toast.success("Воркспейс создан", {
+        description: `«${created.name}» уже в списке — оркестратор предложит план на вкладке «Обзор».`,
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось создать воркспейс",
+        { description: "Проверьте соединение и попробуйте ещё раз." },
+      );
+    } finally {
+      setCreating(false);
+    }
   }
 
   return (
@@ -210,9 +211,13 @@ export function CreateWorkspaceDialog({
               <ArrowRight aria-hidden="true" />
             </Button>
           ) : (
-            <Button type="button" onClick={handleCreate}>
-              <Sparkles aria-hidden="true" />
-              Создать воркспейс
+            <Button type="button" onClick={handleCreate} disabled={creating}>
+              {creating ? (
+                <Loader2 className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Sparkles aria-hidden="true" />
+              )}
+              {creating ? "Создаём…" : "Создать воркспейс"}
             </Button>
           )}
         </DialogFooter>

@@ -1,14 +1,44 @@
 "use client";
 
+/**
+ * Экран «Аудио» — карманная звуковая студия (Фаза A: вкладка
+ * «Озвучка» становится живой).
+ *
+ * Пять вкладок:
+ *  - «Озвучка» — НАСТОЯЩИЙ TTS: текст → api.aiTts (голоса студии,
+ *    скорость) → WAV-артефакт в БД + живая библиотека озвучек с
+ *    <audio controls>-плеерами. Встроена в воркспейс (workspaceId)
+ *    либо предлагает выбрать воркспейс чипами (глобальный вызов).
+ *  - «Музыка» / «Подкаст» / «Шумы» — визуальные макеты (как было).
+ *  - «Студия» — DAW-макет (дорожки/сэмплы/микшер, как было).
+ */
+
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AudioWaveform, Layers, Loader2, Mic, Music, Plus, Podcast, SlidersHorizontal, Waves } from "lucide-react";
+import {
+  AudioWaveform,
+  FolderOpen,
+  Layers,
+  Loader2,
+  Mic,
+  Music,
+  Plus,
+  Podcast,
+  SlidersHorizontal,
+  Waves,
+} from "lucide-react";
 
 import { ModuleHeader, WipBanner, type ModuleScreenProps } from "@/components/studio/shared/module-header";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { api } from "@/lib/api";
+import type { WorkspaceDto } from "@/lib/workspace-types";
 import { DawTab, type StemSource } from "./daw-tab";
-import { MusicTab, NoiseTab, PodcastTab, VoiceTab } from "./generation-panel";
+import { MusicTab, NoiseTab, PodcastTab } from "./generation-panel";
+import { NarrationLibrary } from "./narration-library";
+import { NarrationPanel } from "./narration-panel";
 import { PlayerBar } from "./player-bar";
+import { SelectableChip } from "./chip";
 import { TrackLibrary } from "./track-library";
 import { TRACKS, type AudioTrack } from "./tracks-data";
 
@@ -24,12 +54,11 @@ const AUDIO_TABS = [
 
 type AudioTabValue = (typeof AUDIO_TABS)[number]["value"];
 
-/**
- * Экран «Аудио» — карманная звуковая студия.
- * Пять вкладок: озвучка, музыка, подкаст, шумы и DAW-студия.
- * Чистый визуальный макет: локальный state, без запросов к API.
- */
-export function AudioScreen({ onOpenMobileNav }: ModuleScreenProps) {
+export function AudioScreen({
+  onOpenMobileNav,
+  workspaceId,
+}: ModuleScreenProps & { workspaceId?: string }) {
+  /* ── Макет DAW (как раньше) ── */
   const [tracks] = useState<AudioTrack[]>(TRACKS);
   const [currentId, setCurrentId] = useState(TRACKS[1]!.id);
   const [playing, setPlaying] = useState(false);
@@ -45,6 +74,31 @@ export function AudioScreen({ onOpenMobileNav }: ModuleScreenProps) {
   useEffect(() => () => {
     if (stemTimerRef.current) clearTimeout(stemTimerRef.current);
   }, []);
+
+  /* ── Живая озвучка (Фаза A) ── */
+  // Глобальный вызов (без workspaceId) — воркспейс выбирается чипами.
+  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const [pickedWorkspaceId, setPickedWorkspaceId] = useState<string | null>(null);
+  const [libraryKey, setLibraryKey] = useState(0);
+
+  const embeddedWorkspaceId = workspaceId ?? null;
+  const activeWorkspaceId = embeddedWorkspaceId ?? pickedWorkspaceId;
+
+  useEffect(() => {
+    if (embeddedWorkspaceId) return;
+    let cancelled = false;
+    api
+      .listWorkspaces()
+      .then((list) => {
+        if (!cancelled) setWorkspaces(list);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [embeddedWorkspaceId]);
 
   const current = useMemo(
     () => tracks.find((t) => t.id === currentId) ?? tracks[0]!,
@@ -110,6 +164,9 @@ export function AudioScreen({ onOpenMobileNav }: ModuleScreenProps) {
   };
 
   const isStudio = tab === "studio";
+  const isVoice = tab === "voice";
+  // Плеер и мок-библиотека — только у макетных вкладок (не «Озвучка», не «Студия»).
+  const isMockTab = !isStudio && !isVoice;
 
   return (
     <section
@@ -144,12 +201,76 @@ export function AudioScreen({ onOpenMobileNav }: ModuleScreenProps) {
             ))}
           </TabsList>
 
-          {/* ── Режимы генерации ── */}
-          <TabsContent value="voice" className="mt-0 shrink-0">
-            <section aria-label="Панель генерации аудио" className="rounded-xl border bg-card p-4 shadow-sm">
-              <VoiceTab />
-            </section>
+          {/* ── Живая озвучка ── */}
+          <TabsContent
+            value="voice"
+            className="mt-0 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto vf-scroll pr-0.5"
+          >
+            {!embeddedWorkspaceId ? (
+              <section
+                aria-label="Выбор воркспейса"
+                className="shrink-0 rounded-xl border bg-card p-4 shadow-sm"
+              >
+                <p className="text-sm font-medium">Воркспейс озвучки</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Озвучки хранятся в библиотеке конкретного воркспейса — выберите, куда читать.
+                </p>
+                <div className="mt-2.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto vf-scroll">
+                  {workspaces === null ? (
+                    <>
+                      <Skeleton className="h-7 w-36 rounded-full" />
+                      <Skeleton className="h-7 w-28 rounded-full" />
+                      <Skeleton className="h-7 w-32 rounded-full" />
+                    </>
+                  ) : workspaces.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Воркспейсов пока нет — создайте первый в разделе «Воркспейсы».
+                    </p>
+                  ) : (
+                    workspaces.map((ws) => (
+                      <SelectableChip
+                        key={ws.id}
+                        label={ws.name}
+                        selected={pickedWorkspaceId === ws.id}
+                        onClick={() => setPickedWorkspaceId(ws.id)}
+                      />
+                    ))
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {activeWorkspaceId ? (
+              <>
+                <NarrationPanel
+                  workspaceId={activeWorkspaceId}
+                  onCreated={() => setLibraryKey((k) => k + 1)}
+                />
+                <NarrationLibrary
+                  workspaceId={activeWorkspaceId}
+                  refreshKey={libraryKey}
+                />
+              </>
+            ) : (
+              <div className="flex min-h-40 flex-1 items-center justify-center rounded-xl border border-dashed p-6">
+                <div className="flex max-w-sm flex-col items-center text-center">
+                  <span
+                    aria-hidden="true"
+                    className="flex size-11 items-center justify-center rounded-xl bg-muted"
+                  >
+                    <FolderOpen className="size-5 text-muted-foreground" />
+                  </span>
+                  <p className="mt-3 text-sm font-medium">Выберите воркспейс</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Озвучка живёт в воркспейсе: текст прочитается вслух, а готовый трек
+                    с плеером появится в библиотеке ниже.
+                  </p>
+                </div>
+              </div>
+            )}
           </TabsContent>
+
+          {/* ── Режимы генерации (макеты) ── */}
           <TabsContent value="music" className="mt-0 shrink-0">
             <section aria-label="Генерация музыки" className="rounded-xl border bg-card p-4 shadow-sm">
               <MusicTab />
@@ -172,12 +293,12 @@ export function AudioScreen({ onOpenMobileNav }: ModuleScreenProps) {
           </TabsContent>
         </Tabs>
 
-        {!isStudio ? (
+        {isMockTab ? (
           <>
             <WipBanner
               title="Визуальный макет"
-              description="Реальное синтезирование речи, музыки и шумов подключается на следующем этапе."
-              features={["Голоса студии", "Генеративная музыка", "Экспорт в MP3"]}
+              description="Реальное синтезирование музыки и шумов подключается на следующем этапе. Озвучка уже живая — вкладка «Озвучка»."
+              features={["Живая озвучка", "Генеративная музыка", "Экспорт в MP3"]}
             />
             <TrackLibrary
               tracks={tracks}
@@ -192,7 +313,7 @@ export function AudioScreen({ onOpenMobileNav }: ModuleScreenProps) {
         ) : null}
       </main>
 
-      {!isStudio ? (
+      {isMockTab ? (
         <PlayerBar
           track={current}
           playing={playing}

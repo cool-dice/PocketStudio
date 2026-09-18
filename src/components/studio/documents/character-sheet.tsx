@@ -1,15 +1,17 @@
 "use client";
 
 /**
- * Панель персонажа: портрет-градиент, биография, черты,
- * связи (родство/союз/конфликт) и вертикальный таймлайн
- * «Состояния по главам». Мок-кнопка «Сгенерировать портрет
- * по описанию» меняет портрет и добавляет работу в Альбом.
+ * Панель персонажа (Фаза A, EntityDto из API): портрет-градиент
+ * (или реальная картинка после генерации), редактируемая биография
+ * и имя, черты-теги, связи-чипы, упоминания в главах. «Сгенерировать
+ * портрет» — живой aiGenerateImage (~40 с): тайл появляется в Альбоме,
+ * а картинка — и здесь. «Сгенерировать описание» — LLM (~15–20 с).
  */
 
-import { Check, Loader2, Sparkles, Users } from "lucide-react";
+import { Check, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -18,65 +20,112 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import type { EntityDto } from "@/lib/workspace-types";
 import { GradientArt } from "./art-placeholder";
-import { WipBadge } from "./entity-sheet";
 import { MiniChip } from "./narrative-chip";
-import { ageLabel, agoLabel } from "./narrative-data";
-import {
-  CHARACTER_ROLE_META,
-  RELATION_META,
-  getCharacter,
-  type CharacterRelation,
-  type StoryCharacter,
-} from "./character-data";
+import { useEntityDraft, type EntityDraftPatch } from "./entity-sheet";
+import { ENTITY_KIND_META, ROLE_CATEGORY_META, roleCategoryOf } from "./entities-data";
+import { agoFromISO } from "./types";
 
 export function CharacterSheet({
-  characterId,
-  portraitGradientOverride,
-  isGeneratingPortrait,
+  entity,
+  entities,
   onClose,
-  onOpenCharacter,
+  onOpenEntity,
+  onSave,
+  onDescribe,
+  describing,
   onGeneratePortrait,
+  portraitGenerating,
+  portraitUrl,
 }: {
-  characterId: string | null;
-  portraitGradientOverride?: string;
-  isGeneratingPortrait: boolean;
+  entity: EntityDto | null;
+  entities: EntityDto[];
   onClose: () => void;
-  onOpenCharacter: (id: string) => void;
-  onGeneratePortrait: (character: StoryCharacter) => void;
+  onOpenEntity: (id: string) => void;
+  onSave: (id: string, patch: EntityDraftPatch) => void;
+  onDescribe: (entity: EntityDto) => void;
+  describing: boolean;
+  onGeneratePortrait: (entity: EntityDto) => void;
+  portraitGenerating: boolean;
+  /** URL свежесгенерированного портрета — показать вместо градиента. */
+  portraitUrl: string | null;
 }) {
-  const character = characterId ? getCharacter(characterId) : undefined;
+  const { draft, update, isDirty } = useEntityDraft(entity);
+  const roleMeta = entity ? ROLE_CATEGORY_META[roleCategoryOf(entity)] : null;
+
+  function handleClose() {
+    if (entity && isDirty) {
+      onSave(entity.id, {
+        name: draft.name.trim() || entity.name,
+        short: draft.short.trim() || null,
+        description: draft.description,
+      });
+    }
+    onClose();
+  }
 
   return (
-    <Sheet open={Boolean(character)} onOpenChange={(open) => !open && onClose()}>
+    <Sheet open={Boolean(entity)} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-md">
-        {character ? (
+        {entity ? (
           <>
-            <SheetHeader className="shrink-0 border-b px-5 pb-4">
-              <SheetTitle className="text-left font-serif text-xl leading-tight">
-                {character.name}
+            <SheetHeader className="shrink-0 space-y-2 border-b px-5 pb-4">
+              <SheetTitle asChild>
+                <input
+                  value={draft.name}
+                  onChange={(event) => update({ name: event.target.value })}
+                  aria-label="Имя персонажа"
+                  maxLength={120}
+                  className="w-full rounded-lg bg-transparent text-left font-serif text-xl leading-tight outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
+                />
               </SheetTitle>
-              <SheetDescription className="text-left">
-                {character.role} · {ageLabel(character.age)} ·{" "}
-                {CHARACTER_ROLE_META[character.roleCategory].single}
+              <SheetDescription asChild>
+                <div className="space-y-1.5">
+                  <Input
+                    value={draft.short}
+                    onChange={(event) => update({ short: event.target.value })}
+                    placeholder="Кто он в истории? (подпись для карточек)"
+                    aria-label="Короткая подпись персонажа"
+                    maxLength={200}
+                    className="h-8 border-none bg-transparent px-0 text-sm focus-visible:ring-0"
+                  />
+                  <p className="text-[11px] text-muted-foreground/70">
+                    {roleMeta?.single ?? "Персонаж"} · набор «{entity.setName}»
+                  </p>
+                </div>
               </SheetDescription>
             </SheetHeader>
 
             <div className="vf-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
               {/* Портрет */}
               <div className="relative">
-                <GradientArt
-                  gradient={portraitGradientOverride ?? character.portraitGradient}
-                  initials={character.initials}
-                  ariaLabel={`Портрет-заглушка: ${character.name}`}
-                  className="aspect-[4/5] w-full rounded-xl border"
-                  iconClassName="text-6xl"
-                />
-                {isGeneratingPortrait ? (
+                {portraitUrl ? (
+                  <img
+                    src={portraitUrl}
+                    alt={`Сгенерированный портрет: ${entity.name}`}
+                    className="aspect-[4/5] w-full rounded-xl border object-cover"
+                  />
+                ) : entity.portrait ? (
+                  <GradientArt
+                    gradient={entity.portrait.gradient}
+                    initials={entity.portrait.initials}
+                    ariaLabel={`Портрет-заглушка: ${entity.name}`}
+                    className="aspect-[4/5] w-full rounded-xl border"
+                    iconClassName="text-6xl"
+                  />
+                ) : (
+                  <div className="flex aspect-[4/5] w-full items-center justify-center rounded-xl border bg-muted text-xs text-muted-foreground">
+                    Портрета пока нет
+                  </div>
+                )}
+                {portraitGenerating ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl bg-background/70 backdrop-blur-sm">
                     <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
                     <p className="text-xs font-medium">Рисуем портрет по описанию…</p>
-                    <p className="text-[11px] text-muted-foreground">обычно занимает пару секунд</p>
+                    <p className="text-[11px] text-muted-foreground">обычно до минуты</p>
                   </div>
                 ) : null}
               </div>
@@ -86,9 +135,20 @@ export function CharacterSheet({
                 <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Биография
                 </h4>
-                <p className="mt-2 font-serif text-[15px] leading-[1.75] text-foreground/90">
-                  {character.biography}
-                </p>
+                <Textarea
+                  value={draft.description}
+                  onChange={(event) => update({ description: event.target.value })}
+                  placeholder="Опишите героя — или доверьте студии…"
+                  aria-label="Биография персонажа"
+                  rows={8}
+                  className="mt-2 resize-y rounded-xl border bg-background font-serif text-[15px] leading-[1.75] text-foreground/90"
+                />
+                {describing ? (
+                  <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2 text-xs text-primary">
+                    <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                    Студия пишет биографию — обычно 15–20 секунд…
+                  </div>
+                ) : null}
               </section>
 
               <Separator />
@@ -99,138 +159,158 @@ export function CharacterSheet({
                   Черты
                 </h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {character.traits.map((trait) => (
-                    <MiniChip key={trait}>#{trait}</MiniChip>
-                  ))}
+                  {entity.tags.length > 0 ? (
+                    entity.tags.map((tag) => <MiniChip key={tag}>#{tag}</MiniChip>)
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Черт пока нет.</p>
+                  )}
                 </div>
               </section>
+
+              {/* Атрибуты */}
+              {entity.attributes.length > 0 ? (
+                <>
+                  <Separator />
+                  <section aria-label="Атрибуты персонажа">
+                    <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Атрибуты
+                    </h4>
+                    <dl className="mt-2 grid grid-cols-1 gap-1.5">
+                      {entity.attributes.map((attribute) => (
+                        <div
+                          key={attribute.label}
+                          className="flex items-baseline justify-between gap-3 rounded-lg border bg-background px-3 py-2"
+                        >
+                          <dt className="shrink-0 text-xs text-muted-foreground">{attribute.label}</dt>
+                          <dd className="min-w-0 truncate text-right text-xs font-medium">
+                            {attribute.value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                </>
+              ) : null}
 
               <Separator />
 
               {/* Связи */}
               <section aria-label="Связи персонажа">
                 <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <Users className="size-3.5" aria-hidden="true" />
+                  <Link2 className="size-3.5" aria-hidden="true" />
                   Связи
                 </h4>
-                <ul className="mt-2 space-y-1.5">
-                  {character.relations.map((relation) => (
-                    <RelationRow
-                      key={`${relation.kind}-${relation.targetId}`}
-                      relation={relation}
-                      onOpen={() => onOpenCharacter(relation.targetId)}
-                    />
-                  ))}
-                </ul>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {entity.related && entity.related.length > 0 ? (
+                    entity.related.map((relatedId) => {
+                      const related = entities.find((candidate) => candidate.id === relatedId);
+                      if (!related) return null;
+                      const RelatedIcon = ENTITY_KIND_META[related.kind].icon;
+                      return (
+                        <MiniChip
+                          key={relatedId}
+                          onClick={() => onOpenEntity(relatedId)}
+                          title={`Открыть «${related.name}»`}
+                        >
+                          <RelatedIcon className="size-3" aria-hidden="true" />
+                          {related.name}
+                        </MiniChip>
+                      );
+                    })
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Связей пока нет.</p>
+                  )}
+                </div>
               </section>
 
               <Separator />
 
-              {/* Состояния по главам */}
-              <section aria-label="Состояния по главам">
-                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Состояния по главам
+              {/* Упоминания */}
+              <section aria-label="Упоминания в главах">
+                <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <MapPin className="size-3.5" aria-hidden="true" />
+                  Упомянута в главах
                 </h4>
-                <ol className="relative mt-3 space-y-4 before:absolute before:bottom-2 before:left-[13px] before:top-2 before:w-px before:bg-border">
-                  {character.states.map((state) => (
-                    <li key={state.chapter} className="relative flex gap-3.5 pl-0">
-                      <span
-                        className="z-[1] flex size-7 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-card font-mono text-[11px] font-semibold text-primary"
-                        aria-label={`Глава ${state.chapter}`}
-                      >
-                        {state.chapter}
-                      </span>
-                      <div className="min-w-0 flex-1 rounded-lg border bg-background px-3 py-2">
-                        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                          <span className="text-xs font-semibold">{state.status}</span>
-                          <span className="text-[11px] text-muted-foreground">{ageLabel(state.age)}</span>
-                        </div>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">
-                          Локация: <span className="text-foreground/80">{state.location}</span>
-                        </p>
-                        <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground/80">
-                          {state.note}
-                        </p>
-                      </div>
-                    </li>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {entity.refs.items.map((ref) => (
+                    <MiniChip key={ref} className="font-mono">
+                      гл. {ref}
+                    </MiniChip>
                   ))}
-                </ol>
-                <p className="mt-3 text-[11px] text-muted-foreground">
-                  Появляется в главах: {character.chapters.join(", ")} · обновлена {agoLabel(character.updatedAgo)}
+                </div>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  обновлена {agoFromISO(entity.updatedAt)}
                 </p>
               </section>
             </div>
 
-            {/* Действие генерации портрета */}
-            <div className="shrink-0 border-t px-5 py-3">
-              <Button
-                type="button"
-                className="w-full"
-                disabled={isGeneratingPortrait || Boolean(portraitGradientOverride)}
-                onClick={() => onGeneratePortrait(character)}
-              >
-                {isGeneratingPortrait ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                    Генерация портрета…
-                  </>
-                ) : portraitGradientOverride ? (
-                  <>
-                    <Check className="size-4" aria-hidden="true" />
-                    Портрет обновлён — см. Альбом
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="size-4" aria-hidden="true" />
-                    Сгенерировать портрет по описанию
-                  </>
-                )}
-                <WipBadge className="ml-1.5" />
-              </Button>
+            {/* Действия */}
+            <div className="shrink-0 space-y-2 border-t px-5 py-3">
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  disabled={describing}
+                  onClick={() => onDescribe(entity)}
+                  className="w-full"
+                >
+                  {describing ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      Пишем…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="size-4" aria-hidden="true" />
+                      Описание
+                    </>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={portraitGenerating}
+                  onClick={() => onGeneratePortrait(entity)}
+                  className="w-full"
+                >
+                  {portraitGenerating ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      Рисуем…
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="size-4" aria-hidden="true" />
+                      Портрет
+                    </>
+                  )}
+                </Button>
+              </div>
+              {isDirty ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className={cn("w-full text-xs")}
+                  onClick={() =>
+                    onSave(entity.id, {
+                      name: draft.name.trim() || entity.name,
+                      short: draft.short.trim() || null,
+                      description: draft.description,
+                    })
+                  }
+                >
+                  <Save className="size-3.5" aria-hidden="true" />
+                  Сохранить правки
+                </Button>
+              ) : (
+                <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Check className="size-3.5 shrink-0" aria-hidden="true" />
+                  Все изменения сохранены
+                </p>
+              )}
             </div>
           </>
         ) : null}
       </SheetContent>
     </Sheet>
-  );
-}
-
-function RelationRow({
-  relation,
-  onOpen,
-}: {
-  relation: CharacterRelation;
-  onOpen: () => void;
-}) {
-  const meta = RELATION_META[relation.kind];
-  const target = getCharacter(relation.targetId);
-  const Icon = meta.icon;
-
-  return (
-    <li className="flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2">
-      <span
-        className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground"
-        aria-hidden="true"
-      >
-        <Icon className="size-3.5" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-baseline gap-x-2">
-          <button
-            type="button"
-            onClick={onOpen}
-            className="truncate text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {target?.name ?? relation.targetId}
-          </button>
-          <span className="shrink-0 rounded-full border border-border bg-muted px-1.5 py-px text-[10px] text-muted-foreground">
-            {meta.label}
-          </span>
-        </span>
-        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-          {relation.note}
-        </span>
-      </span>
-    </li>
   );
 }

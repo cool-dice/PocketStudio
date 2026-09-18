@@ -1,9 +1,11 @@
 /**
- * Артефакты воркспейсов — единая единица контента (PS-3).
+ * Артефакты воркспейсов — единая единица контента (Фаза A).
  *
  * Артефакт = любой творческий объект: заметка, глава, картинка, трек,
  * сцена, файл кода, деплой. Одна карточка (ArtifactCard) показывает его
- * в Обзоре воркспейса, в Библиотеке и в результатах чата.
+ * в Обзоре воркспейса, в Библиотеке и в результатах чата. Моки
+ * (MOCK_ARTIFACTS/artifactsOfWorkspace) остаются для вкладок-швов
+ * (notes-tab); мои экраны работают через artifactItemFromDto из БД.
  */
 
 import {
@@ -20,7 +22,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { timeAgo } from "@/components/workspaces/home-data";
 import type { WorkspaceTab } from "@/lib/workspace-data";
+import type { ArtifactDto } from "@/lib/workspace-types";
 
 // ─────────────────────────── types ───────────────────────────
 
@@ -45,6 +49,8 @@ export interface ArtifactItem {
   stage: string;
   createdAgo: string;
   gradient: string;
+  /** Ссылка на готовый файл (сгенерированные изображения) — если есть. */
+  url?: string | null;
 }
 
 // ─────────────────────────── meta ───────────────────────────
@@ -251,4 +257,68 @@ export const MOCK_ARTIFACTS: ArtifactItem[] = [
 /** Найти артефакты воркспейса. */
 export function artifactsOfWorkspace(workspaceId: string): ArtifactItem[] {
   return MOCK_ARTIFACTS.filter((a) => a.workspaceId === workspaceId);
+}
+
+// ─────────────────────── БД → карточка (Фаза A) ───────────────────────
+
+/** Дефолтные градиенты по типу артефакта (когда в meta нет tailwind-строки). */
+const KIND_GRADIENTS: Record<ArtifactKind, string> = {
+  note: "from-stone-500/60 to-stone-400/40",
+  document: "from-emerald-600/60 to-teal-500/40",
+  portrait: "from-teal-600/60 to-emerald-500/40",
+  image: "from-cyan-600/60 to-sky-500/40",
+  track: "from-amber-500/60 to-orange-500/40",
+  scene: "from-sky-600/60 to-indigo-500/40",
+  app: "from-violet-600/60 to-purple-500/40",
+  deploy: "from-fuchsia-600/60 to-violet-500/40",
+};
+
+/** Служебные типы БД → один из 8 видов карточек. */
+const KIND_BY_TYPE: Record<string, ArtifactKind> = {
+  note: "note",
+  document: "document",
+  portrait: "portrait",
+  image: "image",
+  track: "track",
+  scene: "scene",
+  app: "app",
+  deploy: "deploy",
+  audio: "track",
+  video: "scene",
+  file: "app",
+};
+
+/** Принимает только tailwind-градиенты («from-… to-…»), CSS — в дефолт. */
+function normalizeGradient(raw: string | undefined, kind: ArtifactKind): string {
+  const trimmed = (raw ?? "").trim();
+  return /^from-/.test(trimmed) ? trimmed : KIND_GRADIENTS[kind];
+}
+
+/** Артефакт из REST /api/workspaces/[id]/artifacts → карточка Обзора. */
+export function artifactItemFromDto(dto: ArtifactDto): ArtifactItem {
+  const meta = (dto.meta ?? {}) as Record<string, unknown>;
+  const albumKind =
+    typeof meta.albumKind === "string" ? meta.albumKind : null;
+
+  let kind: ArtifactKind;
+  if (albumKind === "portrait") kind = "portrait";
+  else if (albumKind === "concept" || albumKind === "illustration") kind = "image";
+  else kind = KIND_BY_TYPE[dto.type] ?? "app";
+
+  return {
+    id: dto.id,
+    workspaceId: dto.projectId,
+    kind,
+    title: dto.title,
+    meta:
+      dto.description?.trim() ||
+      ARTIFACT_KIND_META[kind].label.toLowerCase(),
+    stage: dto.stage ?? "",
+    createdAgo: timeAgo(dto.createdAt),
+    gradient: normalizeGradient(
+      typeof meta.gradient === "string" ? meta.gradient : undefined,
+      kind,
+    ),
+    url: dto.url,
+  };
 }

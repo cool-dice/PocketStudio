@@ -1,14 +1,14 @@
 "use client";
 
-import { ArrowUpDown, Check, ChevronDown, Heart, LayoutGrid, Palette, Search } from "lucide-react";
+/**
+ * FilterBar (A2-c) — панель каталогизации галереи на живых данных:
+ * поиск (по названию и промпту), быстрые фильтры (Все / Избранное /
+ * Изображения / Портреты с фасетными счётчиками), сортировка
+ * (новые / старые / по названию) и счётчик видимых работ.
+ */
 
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { ArrowUpDown, Heart, Image as ImageIcon, LayoutGrid, Search, UserRound } from "lucide-react";
+
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -17,41 +17,33 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
 import { SelectableChip } from "./chip";
-import { IMAGE_STYLES } from "./gallery-data";
+import { pluralImages } from "./gallery-data";
 
-export type GalleryFilter = string; // "all" | "favorites" | название стиля
-export type GallerySort = "new" | "old" | "popular";
+export type GalleryFilter = "all" | "favorites" | "image" | "portrait";
+export type GallerySort = "new" | "old" | "title";
 
-function pluralImages(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} изображение`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} изображения`;
-  return `${n} изображений`;
-}
-
-/** Панель фильтров галереи: поиск, быстрые вкладки, стили и сортировка. */
 export function FilterBar({
   query,
   onQueryChange,
   filter,
   onFilterChange,
+  counts,
   sort,
   onSortChange,
   count,
+  disabled,
 }: {
   query: string;
   onQueryChange: (v: string) => void;
   filter: GalleryFilter;
   onFilterChange: (v: GalleryFilter) => void;
+  counts: { all: number; favorites: number; image: number; portrait: number };
   sort: GallerySort;
   onSortChange: (v: GallerySort) => void;
   count: number;
+  disabled?: boolean;
 }) {
-  const styleFilterActive = filter !== "all" && filter !== "favorites";
-
   return (
     <nav
       aria-label="Фильтры галереи"
@@ -66,54 +58,59 @@ export function FilterBar({
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder="Поиск по промпту…"
-          aria-label="Поиск по промпту"
+          aria-label="Поиск по промпту и названию"
           className="pl-8"
         />
       </div>
 
-      <SelectableChip
-        label="Все"
-        icon={LayoutGrid}
-        selected={filter === "all"}
-        onClick={() => onFilterChange("all")}
-      />
-      <SelectableChip
-        label="Избранное"
-        icon={Heart}
-        selected={filter === "favorites"}
-        onClick={() => onFilterChange("favorites")}
-      />
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            className={cn(
-              "h-8 rounded-full px-3 text-xs font-medium",
-              styleFilterActive && "border-primary/60 bg-primary/10 text-primary hover:bg-primary/15",
-            )}
-          >
-            <Palette className="size-3.5" aria-hidden="true" />
-            {styleFilterActive ? filter : "По стилям"}
-            <ChevronDown className="size-3.5 opacity-60" aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {IMAGE_STYLES.map((s) => (
-            <DropdownMenuItem key={s} onSelect={() => onFilterChange(s)} className="text-xs">
-              <Check
-                className={cn("size-3.5", filter !== s && "invisible")}
-                aria-hidden="true"
-              />
-              {s}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div
+        className="vf-scroll-x flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible sm:pb-0"
+        role="group"
+        aria-label="Быстрые фильтры"
+      >
+        <SelectableChip
+          label="Все"
+          icon={LayoutGrid}
+          selected={filter === "all"}
+          onClick={() => onFilterChange("all")}
+          count={counts.all}
+          disabled={disabled}
+        />
+        <SelectableChip
+          label="Избранное"
+          icon={Heart}
+          selected={filter === "favorites"}
+          onClick={() => onFilterChange("favorites")}
+          count={counts.favorites}
+          disabled={disabled}
+        />
+        <SelectableChip
+          label="Изображения"
+          icon={ImageIcon}
+          selected={filter === "image"}
+          onClick={() => onFilterChange("image")}
+          count={counts.image}
+          disabled={disabled}
+        />
+        <SelectableChip
+          label="Портреты"
+          icon={UserRound}
+          selected={filter === "portrait"}
+          onClick={() => onFilterChange("portrait")}
+          count={counts.portrait}
+          disabled={disabled}
+        />
+      </div>
 
       <div className="ml-auto flex items-center gap-3">
-        <p className="hidden text-xs text-muted-foreground md:block">{pluralImages(count)}</p>
-        <Select value={sort} onValueChange={(v) => onSortChange(v as GallerySort)}>
+        <p className="hidden text-xs text-muted-foreground md:block">
+          {pluralImages(count)}
+        </p>
+        <Select
+          value={sort}
+          onValueChange={(v) => onSortChange(v as GallerySort)}
+          disabled={disabled}
+        >
           <SelectTrigger size="sm" className="h-8 rounded-full text-xs" aria-label="Сортировка">
             <ArrowUpDown className="size-3.5" aria-hidden="true" />
             <SelectValue />
@@ -121,7 +118,7 @@ export function FilterBar({
           <SelectContent>
             <SelectItem value="new">Новые</SelectItem>
             <SelectItem value="old">Старые</SelectItem>
-            <SelectItem value="popular">Популярные</SelectItem>
+            <SelectItem value="title">По названию</SelectItem>
           </SelectContent>
         </Select>
       </div>

@@ -1,0 +1,792 @@
+     1→     1→// PocketStudio agent tools — notebook + project/file tools.
+     2→     2→//
+     3→     3→// The z-ai SDK has no native function calling, so tools are described in the
+     4→     4→// system prompt (JSON protocol) and the model's JSON reply is parsed by
+     5→     5→// agent.ts:parseToolCall. Every tool is userId-scoped and validates its args
+     6→     6→// manually — invalid args return {error: "..."} instead of throwing, so the
+     7→     7→// tool-calling loop in server.ts never crashes.
+     8→     8→//
+     9→     9→// Project/file tools (Stage 3, worklog Task 3-ctr) wrap the pure-node
+    10→    10→// workspace lib (../../src/lib/workspace — real files + git on disk) and are
+    11→    11→// turn-context aware: server.ts passes ToolContext {threadId, mode,
+    12→    12→// projectId} from the thread row. Write tools self-check the "act" mode.
+    13→    13→// WS events (project:created / project:updated) are emitted by server.ts,
+    14→    14→// NOT here — tools stay io-free.
+    15→    15→//
+    16→    16→// Allowlists MUST stay in sync with the main app's notes REST contract
+    17→    17→// (worklog Task 4, Task 1-a).
+    18→    18→
+    19→    19→import { db } from "./db-client";
+    20→    20→import {
+    21→    21→  projectRoot,
+    22→    22→  createFromTemplate,
+    23→    23→  initProjectGit,
+    24→    24→  listWorkspaceTree,
+    25→    25→  readWorkspaceFile,
+    26→    26→  writeWorkspaceFile,
+    27→    27→  deleteWorkspacePath,
+    28→    28→  checkpointProject,
+    29→    29→  removeProjectDir,
+    30→    30→} from "../../src/lib/workspace";
+    31→    31→
+    32→    32→// ─────────────────────────── registry types ───────────────────────────
+    33→    33→
+    34→    34→/** Turn context (contract 3-ctr §3): filled by server.ts from the thread row.
+    35→    35→ *  Notebook tools ignore it; project/file tools use it for the active
+    36→    36→ *  project + the mode write-guard. */
+    37→    37→export interface ToolContext {
+    38→    38→  threadId: string;
+    39→    39→  mode: string;
+    40→    40→  projectId: string | null;
+    41→    41→}
+    42→    42→
+    43→    43→export interface ToolDef {
+    44→    44→  name: string;
+    45→    45→  description: string;
+    46→    46→  /** Human-readable arg descriptions (shown in logs / debugging). */
+    47→    47→  argsSchema: Record<string, string>;
+    48→    48→  execute(args: any, userId: string, ctx: ToolContext): Promise<any>;
+    49→    49→}
+    50→    50→
+    51→    51→export const CATEGORY_COLORS = [
+    52→    52→  "emerald",
+    53→    53→  "amber",
+    54→    54→  "rose",
+    55→    55→  "sky",
+    56→    56→  "violet",
+    57→    57→  "stone",
+    58→    58→  "teal",
+    59→    59→  "orange",
+    60→    60→  "pink",
+    61→    61→  "cyan",
+    62→    62→] as const;
+    63→    63→
+    64→    64→export const CATEGORY_ICONS = [
+    65→    65→  "lightbulb",
+    66→    66→  "briefcase",
+    67→    67→  "shopping-cart",
+    68→    68→  "heart",
+    69→    69→  "brain",
+    70→    70→  "zap",
+    71→    71→  "star",
+    72→    72→  "book",
+    73→    73→  "code",
+    74→    74→  "rocket",
+    75→    75→  "wallet",
+    76→    76→  "coffee",
+    77→    77→] as const;
+    78→    78→
+    79→    79→const DEFAULT_COLOR = "stone";
+    80→    80→const DEFAULT_ICON = "lightbulb";
+    81→    81→
+    82→    82→// ─────────────────────────── shared helpers ───────────────────────────
+    83→    83→
+    84→    84→interface CategoryShape {
+    85→    85→  id: string;
+    86→    86→  name: string;
+    87→    87→  color: string;
+    88→    88→  icon: string;
+    89→    89→}
+    90→    90→
+    91→    91→function categoryShape(c: {
+    92→    92→  id: string;
+    93→    93→  name: string;
+    94→    94→  color: string;
+    95→    95→  icon: string;
+    96→    96→}): CategoryShape {
+    97→    97→  return { id: c.id, name: c.name, color: c.color, icon: c.icon };
+    98→    98→}
+    99→    99→
+   100→   100→/** First 140 chars of a note text as a single line. */
+   101→   101→function makePreview(text: string | null): string {
+   102→   102→  const single = (text ?? "").replace(/\s+/g, " ").trim();
+   103→   103→  return single.length <= 140 ? single : single.slice(0, 140);
+   104→   104→}
+   105→   105→
+   106→   106→/**
+   107→   107→ * limit arg: absent/invalid → default 10; out-of-range → clamped to 1..20.
+   108→   108→ * (Lenient on purpose: an odd limit from the LLM should not fail the turn.)
+   109→   109→ */
+   110→   110→function parseLimit(value: unknown, fallback = 10): number {
+   111→   111→  const n =
+   112→   112→    typeof value === "number"
+   113→   113→      ? value
+   114→   114→      : typeof value === "string" && value.trim() !== "" && !isNaN(Number(value))
+   115→   115→        ? Number(value)
+   116→   116→        : NaN;
+   117→   117→  if (!Number.isFinite(n)) return fallback;
+   118→   118→  return Math.min(20, Math.max(1, Math.floor(n)));
+   119→   119→}
+   120→   120→
+   121→   121→/** Find the user's category by exact name, case-insensitive (SQLite-aware). */
+   122→   122→async function findCategoryByName(
+   123→   123→  userId: string,
+   124→   124→  name: string,
+   125→   125→): Promise<{ id: string; name: string; color: string; icon: string } | null> {
+   126→   126→  const lower = name.toLowerCase();
+   127→   127→  const categories = await db.category.findMany({ where: { userId } });
+   128→   128→  return categories.find((c) => c.name.toLowerCase() === lower) ?? null;
+   129→   129→}
+   130→   130→
+   131→   131→interface NoteWithCategory {
+   132→   132→  id: string;
+   133→   133→  rawText: string | null;
+   134→   134→  status: string;
+   135→   135→  favorite: boolean;
+   136→   136→  createdAt: Date;
+   137→   137→  category: { id: string; name: string; color: string; icon: string } | null;
+   138→   138→}
+   139→   139→
+   140→   140→/** Newest-first note feed row: {id, preview, category, createdAt}. */
+   141→   141→function feedShape(n: NoteWithCategory) {
+   142→   142→  return {
+   143→   143→    id: n.id,
+   144→   144→    preview: makePreview(n.rawText),
+   145→   145→    category: n.category ? categoryShape(n.category) : null,
+   146→   146→    createdAt: n.createdAt.toISOString(),
+   147→   147→  };
+   148→   148→}
+   149→   149→
+   150→   150→// ─────────────────────────── tool: create_note ───────────────────────────
+   151→   151→
+   152→   152→const createNote: ToolDef = {
+   153→   153→  name: "create_note",
+   154→   154→  description:
+   155→   155→    "Записать заметку пользователя в блокнот. Возвращает созданную заметку и её категорию.",
+   156→   156→  argsSchema: {
+   157→   157→    text: "полный текст заметки (обязательно, 1–5000 символов)",
+   158→   158→    category_name: "название категории (необязательно, 1–40 символов)",
+   159→   159→    category_color:
+   160→   160→      "цвет категории: emerald|amber|rose|sky|violet|stone|teal|orange|pink|cyan (по умолчанию stone)",
+   161→   161→    category_icon:
+   162→   162→      "иконка категории: lightbulb|briefcase|shopping-cart|heart|brain|zap|star|book|code|rocket|wallet|coffee (по умолчанию lightbulb)",
+   163→   163→  },
+   164→   164→  async execute(args: any, userId: string) {
+   165→   165→    if (typeof args !== "object" || args === null) {
+   166→   166→      return { error: "Некорректные аргументы инструмента" };
+   167→   167→    }
+   168→   168→
+   169→   169→    // text (required, 1..5000 after trim)
+   170→   170→    if (typeof args.text !== "string") {
+   171→   171→      return { error: "Аргумент text обязателен и должен быть строкой" };
+   172→   172→    }
+   173→   173→    const text = args.text.trim();
+   174→   174→    if (!text) return { error: "Текст заметки не может быть пустым" };
+   175→   175→    if (text.length > 5000) {
+   176→   176→      return { error: "Текст заметки слишком длинный (максимум 5000 символов)" };
+   177→   177→    }
+   178→   178→
+   179→   179→    // category_name (optional, 1..40 after trim; empty → treated as absent)
+   180→   180→    let categoryName: string | null = null;
+   181→   181→    if (args.category_name !== undefined && args.category_name !== null) {
+   182→   182→      if (typeof args.category_name !== "string") {
+   183→   183→        return { error: "Аргумент category_name должен быть строкой" };
+   184→   184→      }
+   185→   185→      const trimmed = args.category_name.trim();
+   186→   186→      if (trimmed.length > 40) {
+   187→   187→        return { error: "Название категории слишком длинное (максимум 40 символов)" };
+   188→   188→      }
+   189→   189→      categoryName = trimmed || null;
+   190→   190→    }
+   191→   191→
+   192→   192→    // category_color / category_icon — allowlist with default fallback
+   193→   193→    // (invalid value from the LLM degrades to the default, not an error)
+   194→   194→    const color =
+   195→   195→      typeof args.category_color === "string" &&
+   196→   196→      (CATEGORY_COLORS as readonly string[]).includes(args.category_color)
+   197→   197→        ? args.category_color
+   198→   198→        : DEFAULT_COLOR;
+   199→   199→    const icon =
+   200→   200→      typeof args.category_icon === "string" &&
+   201→   201→      (CATEGORY_ICONS as readonly string[]).includes(args.category_icon)
+   202→   202→        ? args.category_icon
+   203→   203→        : DEFAULT_ICON;
+   204→   204→
+   205→   205→    // Category: reuse the user's existing one (case-insensitive name match),
+   206→   206→    // create a new one only when a name was given and nothing matched.
+   207→   207→    let category = categoryName ? await findCategoryByName(userId, categoryName) : null;
+   208→   208→    let createdNewCategory = false;
+   209→   209→
+   210→   210→    if (categoryName && !category) {
+   211→   211→      try {
+   212→   212→        category = await db.category.create({
+   213→   213→          data: { userId, name: categoryName, color, icon },
+   214→   214→        });
+   215→   215→        createdNewCategory = true;
+   216→   216→      } catch (err) {
+   217→   217→        // Race on the unique [userId, name] constraint → re-fetch the winner.
+   218→   218→        const existing = await findCategoryByName(userId, categoryName);
+   219→   219→        if (existing) {
+   220→   220→          category = existing;
+   221→   221→        } else {
+   222→   222→          return {
+   223→   223→            error: "Не удалось создать категорию: " + (err instanceof Error ? err.message : String(err)),
+   224→   224→          };
+   225→   225→        }
+   226→   226→      }
+   227→   227→    }
+   228→   228→
+   229→   229→    const note = await db.note.create({
+   230→   230→      data: {
+   231→   231→        userId,
+   232→   232→        rawText: text,
+   233→   233→        status: "pending",
+   234→   234→        categoryId: category?.id ?? null,
+   235→   235→      },
+   236→   236→    });
+   237→   237→
+   238→   238→    return {
+   239→   239→      note: {
+   240→   240→        id: note.id,
+   241→   241→        rawText: note.rawText,
+   242→   242→        status: note.status,
+   243→   243→        createdAt: note.createdAt.toISOString(),
+   244→   244→      },
+   245→   245→      category: category ? categoryShape(category) : null,
+   246→   246→      createdNewCategory,
+   247→   247→    };
+   248→   248→  },
+   249→   249→};
+   250→   250→
+   251→   251→// ─────────────────────────── tool: search_notes ───────────────────────────
+   252→   252→
+   253→   253→const searchNotes: ToolDef = {
+   254→   254→  name: "search_notes",
+   255→   255→  description: "Найти заметки пользователя по подстроке (без учёта регистра), новые сверху.",
+   256→   256→  argsSchema: {
+   257→   257→    query: "поисковый запрос (обязательно, 1–200 символов)",
+   258→   258→    limit: "максимум результатов, 1–20 (по умолчанию 10)",
+   259→   259→  },
+   260→   260→  async execute(args: any, userId: string) {
+   261→   261→    if (typeof args !== "object" || args === null) {
+   262→   262→      return { error: "Некорректные аргументы инструмента" };
+   263→   263→    }
+   264→   264→
+   265→   265→    if (typeof args.query !== "string") {
+   266→   266→      return { error: "Аргумент query обязателен и должен быть строкой" };
+   267→   267→    }
+   268→   268→    const query = args.query.trim();
+   269→   269→    if (!query) return { error: "Поисковый запрос не может быть пустым" };
+   270→   270→    if (query.length > 200) {
+   271→   271→      return { error: "Поисковый запрос слишком длинный (максимум 200 символов)" };
+   272→   272→    }
+   273→   273→
+   274→   274→    const limit = parseLimit(args.limit);
+   275→   275→
+   276→   276→    // SQLite has no case-insensitive LIKE for non-ASCII (Russian) via Prisma
+   277→   277→    // `contains`, so fetch the newest 500 notes and filter in JS.
+   278→   278→    const needle = query.toLowerCase();
+   279→   279→    const recent = await db.note.findMany({
+   280→   280→      where: { userId },
+   281→   281→      orderBy: { createdAt: "desc" },
+   282→   282→      take: 500,
+   283→   283→      include: { category: { select: { id: true, name: true, color: true, icon: true } } },
+   284→   284→    });
+   285→   285→
+   286→   286→    const notes = recent
+   287→   287→      .filter((n) => (n.rawText ?? "").toLowerCase().includes(needle))
+   288→   288→      .slice(0, limit)
+   289→   289→      .map(feedShape);
+   290→   290→
+   291→   291→    return { notes };
+   292→   292→  },
+   293→   293→};
+   294→   294→
+   295→   295→// ─────────────────────────── tool: list_notes ───────────────────────────
+   296→   296→
+   297→   297→const listNotes: ToolDef = {
+   298→   298→  name: "list_notes",
+   299→   299→  description: "Последние заметки пользователя (новые сверху).",
+   300→   300→  argsSchema: {
+   301→   301→    limit: "максимум результатов, 1–20 (по умолчанию 10)",
+   302→   302→  },
+   303→   303→  async execute(args: any, userId: string) {
+   304→   304→    const limit =
+   305→   305→      typeof args === "object" && args !== null ? parseLimit(args.limit) : 10;
+   306→   306→
+   307→   307→    const notes = await db.note.findMany({
+   308→   308→      where: { userId },
+   309→   309→      orderBy: { createdAt: "desc" },
+   310→   310→      take: limit,
+   311→   311→      include: { category: { select: { id: true, name: true, color: true, icon: true } } },
+   312→   312→    });
+   313→   313→
+   314→   314→    return { notes: notes.map(feedShape) };
+   315→   315→  },
+   316→   316→};
+   317→   317→
+   318→   318→// ─────────────────────────── tool: open_note ───────────────────────────
+   319→   319→
+   320→   320→const openNote: ToolDef = {
+   321→   321→  name: "open_note",
+   322→   322→  description: "Открыть заметку целиком по её идентификатору.",
+   323→   323→  argsSchema: {
+   324→   324→    noteId: "идентификатор заметки (обязательно)",
+   325→   325→  },
+   326→   326→  async execute(args: any, userId: string) {
+   327→   327→    if (typeof args !== "object" || args === null) {
+   328→   328→      return { error: "Некорректные аргументы инструмента" };
+   329→   329→    }
+   330→   330→
+   331→   331→    if (typeof args.noteId !== "string" || !args.noteId.trim()) {
+   332→   332→      return { error: "Аргумент noteId обязателен и должен быть строкой" };
+   333→   333→    }
+   334→   334→
+   335→   335→    const note = await db.note.findFirst({
+   336→   336→      where: { id: args.noteId.trim(), userId },
+   337→   337→      include: { category: { select: { id: true, name: true, color: true, icon: true } } },
+   338→   338→    });
+   339→   339→    if (!note) return { error: "Заметка не найдена" };
+   340→   340→
+   341→   341→    return {
+   342→   342→      id: note.id,
+   343→   343→      rawText: note.rawText,
+   344→   344→      status: note.status,
+   345→   345→      favorite: note.favorite,
+   346→   346→      createdAt: note.createdAt.toISOString(),
+   347→   347→      category: note.category ? categoryShape(note.category) : null,
+   348→   348→    };
+   349→   349→  },
+   350→   350→};
+   351→   351→
+   352→   352→// ─────────────────────────── shared helpers (project tools) ───────────────────────────
+   353→   353→
+   354→   354→/** ctx.projectId missing → the model must create/select a project first. */
+   355→   355→const NEED_PROJECT_ERROR = "Сначала создайте или выберите проект";
+   356→   356→
+   357→   357→/** Mode guard message for write tools (contract 3-ctr §3/§4). */
+   358→   358→const ACT_MODE_ERROR =
+   359→   359→  "Это действие доступно только в режиме «Действовать» — переключите режим диалога";
+   360→   360→const CHECKPOINT_MODE_ERROR =
+   361→   361→  "Чекпоинты доступны только в режиме «Действовать» — переключите режим диалога";
+   362→   362→
+   363→   363→/** Agent-side file caps (tighter than the REST 256KB cap). */
+   364→   364→const MAX_AGENT_FILE_BYTES = 200 * 1024;
+   365→   365→/** Max entries returned to the LLM by list_files. */
+   366→   366→const MAX_LIST_FILES_ENTRIES = 400;
+   367→   367→
+   368→   368→interface ProjectRow {
+   369→   369→  id: string;
+   370→   370→  name: string;
+   371→   371→  origin: string;
+   372→   372→}
+   373→   373→
+   374→   374→/** Load the ctx project with an owner check — shared by all file tools. */
+   375→   375→async function loadProject(
+   376→   376→  userId: string,
+   377→   377→  ctx: ToolContext,
+   378→   378→): Promise<{ project: ProjectRow } | { error: string }> {
+   379→   379→  if (!ctx.projectId) return { error: NEED_PROJECT_ERROR };
+   380→   380→  const project = await db.project.findFirst({
+   381→   381→    where: { id: ctx.projectId, userId },
+   382→   382→    select: { id: true, name: true, origin: true },
+   383→   383→  });
+   384→   384→  if (!project) return { error: "Проект не найден" };
+   385→   385→  return { project };
+   386→   386→}
+   387→   387→
+   388→   388→/** Normalize a subdir arg: strip "./" prefixes and slashes, keep hidden
+   389→   389→ *  names (".env") intact; rejects ".." segments. Returns "" for root. */
+   390→   390→function normalizeSubdir(raw: string): string {
+   391→   391→  let dir = raw.replace(/\\/g, "/").trim();
+   392→   392→  dir = dir.replace(/^(\.\/)+/, "").replace(/^\/+/, "").replace(/\/+$/, "");
+   393→   393→  if (dir === ".") return "";
+   394→   394→  return dir;
+   395→   395→}
+   396→   396→
+   397→   397→// ─────────────────────────── tool: create_project ───────────────────────────
+   398→   398→
+   399→   399→const createProject: ToolDef = {
+   400→   400→  name: "create_project",
+   401→   401→  description:
+   402→   402→    "Создать проект из шаблона Next.js (реальные файлы и git-репозиторий) и привязать его к текущему диалогу. Возвращает проект, число файлов и корневые файлы. Доступен только в режиме «Действовать».",
+   403→   403→  argsSchema: {
+   404→   404→    name: "название проекта (обязательно, 1–80 символов)",
+   405→   405→    description: "короткое описание проекта (необязательно, до 500 символов)",
+   406→   406→    note_id: "идентификатор заметки, которую связать с проектом (необязательно)",
+   407→   407→  },
+   408→   408→  async execute(args: any, userId: string, ctx: ToolContext) {
+   409→   409→    if (typeof args !== "object" || args === null) {
+   410→   410→      return { error: "Некорректные аргументы инструмента" };
+   411→   411→    }
+   412→   412→
+   413→   413→    // Mutation guard: creating projects materializes real files — only
+   414→   414→    // the «act» mode may do that (ask/plan/review must stay read-only).
+   415→   415→    if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+   416→   416→
+   417→   417→    // name (required, 1..80 after trim)
+   418→   418→    if (typeof args.name !== "string") {
+   419→   419→      return { error: "Аргумент name обязателен и должен быть строкой" };
+   420→   420→    }
+   421→   421→    const name = args.name.trim();
+   422→   422→    if (!name) return { error: "Название проекта не может быть пустым" };
+   423→   423→    if (name.length > 80) {
+   424→   424→      return { error: "Название проекта слишком длинное (максимум 80 символов) }" };
+   425→   425→    }
+   426→   426→
+   427→   427→    // description (optional, ≤500 after trim)
+   428→   428→    let description: string | null = null;
+   429→   429→    if (args.description !== undefined && args.description !== null) {
+   430→   430→      if (typeof args.description !== "string") {
+   431→   431→        return { error: "Аргумент description должен быть строкой" };
+   432→   432→      }
+   433→   433→      const trimmed = args.description.trim();
+   434→   434→      if (trimmed.length > 500) {
+   435→   435→        return { error: "Описание слишком длинное (максимум 500 символов)" };
+   436→   436→      }
+   437→   437→      description = trimmed || null;
+   438→   438→    }
+   439→   439→
+   440→   440→    // note_id (optional string)
+   441→   441→    let noteId: string | null = null;
+   442→   442→    if (args.note_id !== undefined && args.note_id !== null) {
+   443→   443→      if (typeof args.note_id !== "string") {
+   444→   444→        return { error: "Аргумент note_id должен быть строкой" };
+   445→   445→      }
+   446→   446→      noteId = args.note_id.trim() || null;
+   447→   447→    }
+   448→   448→
+   449→   449→    // 1. DB row first (rootPath is filled once the workspace exists).
+   450→   450→    const project = await db.project.create({
+   451→   451→      data: { userId, name, description, origin: "template", rootPath: "" },
+   452→   452→    });
+   453→   453→
+   454→   454→    // 2. Materialize the workspace dir from the template + git init.
+   455→   455→    const root = projectRoot(project.id);
+   456→   456→    let tree: Awaited<ReturnType<typeof listWorkspaceTree>>;
+   457→   457→    try {
+   458→   458→      await createFromTemplate(root);
+   459→   459→      await initProjectGit(root);
+   460→   460→      tree = await listWorkspaceTree(root);
+   461→   461→    } catch (err) {
+   462→   462→      // Roll the row AND the directory back — no orphan state survives.
+   463→   463→      await removeProjectDir(project.id).catch(() => {});
+   464→   464→      await db.project.delete({ where: { id: project.id } }).catch(() => {});
+   465→   465→      return {
+   466→   466→        error:
+   467→   467→          "Не удалось создать проект: " +
+   468→   468→          (err instanceof Error ? err.message : String(err)),
+   469→   469→      };
+   470→   470→    }
+   471→   471→
+   472→   472→    // 3. Fill rootPath now that the workspace exists.
+   473→   473→    await db.project.update({ where: { id: project.id }, data: { rootPath: root } });
+   474→   474→
+   475→   475→    // 4. Bind the current thread — only when it has no project yet.
+   476→   476→    const thread = await db.thread.findUnique({ where: { id: ctx.threadId } });
+   477→   477→    if (thread && thread.userId === userId && thread.projectId === null) {
+   478→   478→      await db.thread.update({
+   479→   479→        where: { id: thread.id },
+   480→   480→        data: { projectId: project.id },
+   481→   481→      });
+   482→   482→    }
+   483→   483→
+   484→   484→    // 5. Optional originating note link (kind "proposal": the agent turned
+   485→   485→    //    the user's thought into a project). Unique race → already linked.
+   486→   486→    if (noteId) {
+   487→   487→      const note = await db.note.findFirst({ where: { id: noteId, userId } });
+   488→   488→      if (note) {
+   489→   489→        await db.noteLink
+   490→   490→          .create({ data: { noteId: note.id, projectId: project.id, kind: "proposal" } })
+   491→   491→          .catch(() => {});
+   492→   492→      }
+   493→   493→    }
+   494→   494→
+   495→   495→    return {
+   496→   496→      project: { id: project.id, name, origin: project.origin },
+   497→   497→      filesCount: tree.entries.filter((e) => e.type === "file").length,
+   498→   498→      rootFiles: tree.entries.filter((e) => !e.path.includes("/")).map((e) => e.path),
+   499→   499→    };
+   500→   500→  },
+   501→   501→};
+   502→   502→
+   503→   503→// ─────────────────────────── tool: list_projects ───────────────────────────
+   504→   504→
+   505→   505→const listProjects: ToolDef = {
+   506→   506→  name: "list_projects",
+   507→   507→  description: "Проекты пользователя (новые сверху): идентификатор, название, источник.",
+   508→   508→  argsSchema: {},
+   509→   509→  async execute(_args: any, userId: string, _ctx: ToolContext) {
+   510→   510→    const projects = await db.project.findMany({
+   511→   511→      where: { userId },
+   512→   512→      orderBy: { createdAt: "desc" },
+   513→   513→      take: 50,
+   514→   514→      select: { id: true, name: true, origin: true, createdAt: true },
+   515→   515→    });
+   516→   516→    return {
+   517→   517→      projects: projects.map((p) => ({
+   518→   518→        id: p.id,
+   519→   519→        name: p.name,
+   520→   520→        origin: p.origin,
+   521→   521→        createdAt: p.createdAt.toISOString(),
+   522→   522→      })),
+   523→   523→    };
+   524→   524→  },
+   525→   525→};
+   526→   526→
+   527→   527→// ─────────────────────────── tool: list_files ───────────────────────────
+   528→   528→
+   529→   529→const listFiles: ToolDef = {
+   530→   530→  name: "list_files",
+   531→   531→  description:
+   532→   532→    "Файлы активного проекта (или его подкаталога): путь, тип, размер. Требуется активный проект в диалоге.",
+   533→   533→  argsSchema: {
+   534→   534→    path: "подкаталог внутри проекта (необязательно, по умолчанию — корень проекта)",
+   535→   535→  },
+   536→   536→  async execute(args: any, userId: string, ctx: ToolContext) {
+   537→   537→    if (typeof args !== "object" || args === null) {
+   538→   538→      return { error: "Некорректные аргументы инструмента" };
+   539→   539→    }
+   540→   540→
+   541→   541→    // path (optional subdir; prefix matching keeps it inside the project)
+   542→   542→    let subdir = "";
+   543→   543→    if (args.path !== undefined && args.path !== null) {
+   544→   544→      if (typeof args.path !== "string") {
+   545→   545→        return { error: "Аргумент path должен быть строкой" };
+   546→   546→      }
+   547→   547→      subdir = normalizeSubdir(args.path);
+   548→   548→    }
+   549→   549→    if (subdir.split("/").some((s) => s === "..")) {
+   550→   550→      return { error: "Путь вне проекта запрещён" };
+   551→   551→    }
+   552→   552→
+   553→   553→    const loaded = await loadProject(userId, ctx);
+   554→   554→    if ("error" in loaded) return { error: loaded.error };
+   555→   555→
+   556→   556→    try {
+   557→   557→      const root = projectRoot(loaded.project.id);
+   558→   558→      const tree = await listWorkspaceTree(root);
+   559→   559→
+   560→   560→      // Scope to the subdir and re-base the paths relative to it.
+   561→   561→      const prefix = subdir ? subdir + "/" : "";
+   562→   562→      const scoped = tree.entries
+   563→   563→        .filter((e) => (subdir ? e.path.startsWith(prefix) : true))
+   564→   564→        .map((e) => ({
+   565→   565→          path: subdir ? e.path.slice(prefix.length) : e.path,
+   566→   566→          type: e.type,
+   567→   567→          size: e.size,
+   568→   568→        }))
+   569→   569→        .filter((e) => e.path !== "");
+   570→   570→
+   571→   571→      return {
+   572→   572→        files: scoped.slice(0, MAX_LIST_FILES_ENTRIES),
+   573→   573→        truncated: tree.truncated || scoped.length > MAX_LIST_FILES_ENTRIES,
+   574→   574→      };
+   575→   575→    } catch (err) {
+   576→   576→      return { error: err instanceof Error ? err.message : String(err) };
+   577→   577→    }
+   578→   578→  },
+   579→   579→};
+   580→   580→
+   581→   581→// ─────────────────────────── tool: read_file ───────────────────────────
+   582→   582→
+   583→   583→const readFile: ToolDef = {
+   584→   584→  name: "read_file",
+   585→   585→  description: "Прочитать текстовый файл активного проекта (до 200 КБ).",
+   586→   586→  argsSchema: {
+   587→   587→    path: "путь к файлу внутри проекта (обязательно)",
+   588→   588→  },
+   589→   589→  async execute(args: any, userId: string, ctx: ToolContext) {
+   590→   590→    if (typeof args !== "object" || args === null) {
+   591→   591→      return { error: "Некорректные аргументы инструмента" };
+   592→   592→    }
+   593→   593→    if (typeof args.path !== "string" || !args.path.trim()) {
+   594→   594→      return { error: "Аргумент path обязателен и должен быть строкой" };
+   595→   595→    }
+   596→   596→
+   597→   597→    const loaded = await loadProject(userId, ctx);
+   598→   598→    if ("error" in loaded) return { error: loaded.error };
+   599→   599→
+   600→   600→    try {
+   601→   601→      const root = projectRoot(loaded.project.id);
+   602→   602→      return await readWorkspaceFile(root, args.path.trim(), MAX_AGENT_FILE_BYTES);
+   603→   603→    } catch (err) {
+   604→   604→      // WorkspaceError messages are already Russian (файл не найден и т.п.).
+   605→   605→      return { error: err instanceof Error ? err.message : String(err) };
+   606→   606→    }
+   607→   607→  },
+   608→   608→};
+   609→   609→
+   610→   610→// ─────────────────────────── tool: write_file ───────────────────────────
+   611→   611→
+   612→   612→const writeFile: ToolDef = {
+   613→   613→  name: "write_file",
+   614→   614→  description:
+   615→   615→    "Записать текстовый файл в активный проект (создание или перезапись, до 200 КБ). Доступен только в режиме «Действовать».",
+   616→   616→  argsSchema: {
+   617→   617→    path: "путь к файлу внутри проекта (обязательно)",
+   618→   618→    content: "полное содержимое файла (обязательно, текст)",
+   619→   619→  },
+   620→   620→  async execute(args: any, userId: string, ctx: ToolContext) {
+   621→   621→    if (typeof args !== "object" || args === null) {
+   622→   622→      return { error: "Некорректные аргументы инструмента" };
+   623→   623→    }
+   624→   624→    if (typeof args.path !== "string" || !args.path.trim()) {
+   625→   625→      return { error: "Аргумент path обязателен и должен быть строкой" };
+   626→   626→    }
+   627→   627→    if (typeof args.content !== "string") {
+   628→   628→      return { error: "Аргумент content обязателен и должен быть строкой" };
+   629→   629→    }
+   630→   630→
+   631→   631→    // Write guard: only the «act» mode may mutate files.
+   632→   632→    if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+   633→   633→
+   634→   634→    const loaded = await loadProject(userId, ctx);
+   635→   635→    if ("error" in loaded) return { error: loaded.error };
+   636→   636→
+   637→   637→    try {
+   638→   638→      const root = projectRoot(loaded.project.id);
+   639→   639→      return await writeWorkspaceFile(root, args.path.trim(), args.content, MAX_AGENT_FILE_BYTES);
+   640→   640→    } catch (err) {
+   641→   641→      return { error: err instanceof Error ? err.message : String(err) };
+   642→   642→    }
+   643→   643→  },
+   644→   644→};
+   645→   645→
+   646→   646→// ─────────────────────────── tool: delete_file ───────────────────────────
+   647→   647→
+   648→   648→const deleteFile: ToolDef = {
+   649→   649→  name: "delete_file",
+   650→   650→  description:
+   651→   651→    "Удалить файл или папку в активном проекте. Доступен только в режиме «Действовать».",
+   652→   652→  argsSchema: {
+   653→   653→    path: "путь к файлу или папке внутри проекта (обязательно)",
+   654→   654→  },
+   655→   655→  async execute(args: any, userId: string, ctx: ToolContext) {
+   656→   656→    if (typeof args !== "object" || args === null) {
+   657→   657→      return { error: "Некорректные аргументы инструмента" };
+   658→   658→    }
+   659→   659→    if (typeof args.path !== "string" || !args.path.trim()) {
+   660→   660→      return { error: "Аргумент path обязателен и должен быть строкой" };
+   661→   661→    }
+   662→   662→
+   663→   663→    // Write guard: only the «act» mode may mutate files.
+   664→   664→    if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+   665→   665→
+   666→   666→    const loaded = await loadProject(userId, ctx);
+   667→   667→    if ("error" in loaded) return { error: loaded.error };
+   668→   668→
+   669→   669→    try {
+   670→   670→      const root = projectRoot(loaded.project.id);
+   671→   671→      return await deleteWorkspacePath(root, args.path.trim());
+   672→   672→    } catch (err) {
+   673→   673→      return { error: err instanceof Error ? err.message : String(err) };
+   674→   674→    }
+   675→   675→  },
+   676→   676→};
+   677→   677→
+   678→   678→// ─────────────────────────── tool: checkpoint ───────────────────────────
+   679→   679→
+   680→   680→const checkpointTool: ToolDef = {
+   681→   681→  name: "checkpoint",
+   682→   682→  description:
+   683→   683→    "Сохранить контрольную точку активного проекта (git-коммит всех изменений). Доступен только в режиме «Действовать».",
+   684→   684→  argsSchema: {
+   685→   685→    message:
+   686→   686→      "сообщение коммита (необязательно, до 200 символов, по умолчанию «Агент: контрольная точка»)",
+   687→   687→  },
+   688→   688→  async execute(args: any, userId: string, ctx: ToolContext) {
+   689→   689→    if (typeof args !== "object" || args === null) {
+   690→   690→      return { error: "Некорректные аргументы инструмента" };
+   691→   691→    }
+   692→   692→
+   693→   693→    // message (optional; empty/absent → default — lenient like parseLimit)
+   694→   694→    let message = "Агент: контрольная точка";
+   695→   695→    if (args.message !== undefined && args.message !== null) {
+   696→   696→      if (typeof args.message !== "string") {
+   697→   697→        return { error: "Аргумент message должен быть строкой" };
+   698→   698→      }
+   699→   699→      const trimmed = args.message.trim();
+   700→   700→      if (trimmed.length > 200) {
+   701→   701→        return { error: "Сообщение чекпоинта слишком длинное (максимум 200 символов)" };
+   702→   702→      }
+   703→   703→      if (trimmed) message = trimmed;
+   704→   704→    }
+   705→   705→
+   706→   706→    // Write guard: only the «act» mode may commit.
+   707→   707→    if (ctx.mode !== "act") return { error: CHECKPOINT_MODE_ERROR };
+   708→   708→
+   709→   709→    const loaded = await loadProject(userId, ctx);
+   710→   710→    if ("error" in loaded) return { error: loaded.error };
+   711→   711→
+   712→   712→    try {
+   713→   713→      const root = projectRoot(loaded.project.id);
+   714→   714→      const cp = await checkpointProject(root, message);
+   715→   715→      return { noop: cp.noop, commit: cp.commit, filesChanged: cp.filesChanged };
+   716→   716→    } catch (err) {
+   717→   717→      return { error: err instanceof Error ? err.message : String(err) };
+   718→   718→    }
+   719→   719→  },
+   720→   720→};
+   721→   721→
+   722→   722→// ─────────────────────────── tool: complete_task ───────────────────────────
+   723→   723→
+   724→   724→const completeTask: ToolDef = {
+   725→   725→  name: "complete_task",
+   726→   726→  description:
+   727→   727→    "Отметить шаг плана диалога выполненным. Вызывай сразу после того, как закончил работу по шагу (номер — позиция в плане, начиная с 1).",
+   728→   728→  argsSchema: {
+   729→   729→    task: "номер шага плана (целое число, 1-based)",
+   730→   730→  },
+   731→   731→  async execute(args: any, _userId: string, ctx: ToolContext) {
+   732→   732→    if (typeof args !== "object" || args === null) {
+   733→   733→      return { error: "Некорректные аргументы инструмента" };
+   734→   734→    }
+   735→   735→
+   736→   736→    // task number: 1-based position in the plan (lenient parse like parseLimit).
+   737→   737→    const n =
+   738→   738→      typeof args.task === "number"
+   739→   739→        ? args.task
+   740→   740→        : typeof args.task === "string" && args.task.trim() !== "" && !isNaN(Number(args.task))
+   741→   741→          ? Number(args.task)
+   742→   742→          : NaN;
+   743→   743→    if (!Number.isInteger(n) || n < 1 || n > 50) {
+   744→   744→      return { error: "Аргумент task должен быть целым номером шага (от 1)" };
+   745→   745→    }
+   746→   746→
+   747→   747→    const tasks = await db.task.findMany({
+   748→   748→      where: { threadId: ctx.threadId },
+   749→   749→      orderBy: { order: "asc" },
+   750→   750→    });
+   751→   751→    if (tasks.length === 0) {
+   752→   752→      return { error: "У диалога пока нет плана — сначала составьте план в режиме «План»" };
+   753→   753→    }
+   754→   754→    const target = tasks[n - 1] ?? null;
+   755→   755→    if (!target) {
+   756→   756→      return { error: `В плане ${tasks.length} шаг(ов) — шага №${n} нет` };
+   757→   757→    }
+   758→   758→    if (target.done) {
+   759→   759→      return { task: { id: target.id, order: target.order, text: target.text, done: true }, noop: true };
+   760→   760→    }
+   761→   761→
+   762→   762→    const updated = await db.task.update({
+   763→   763→      where: { id: target.id },
+   764→   764→      data: { done: true },
+   765→   765→    });
+   766→   766→    return {
+   767→   767→      task: { id: updated.id, order: updated.order, text: updated.text, done: updated.done },
+   768→   768→    };
+   769→   769→  },
+   770→   770→};
+   771→   771→
+   772→   772→// ─────────────────────────── registry ───────────────────────────
+   773→   773→
+   774→   774→export const TOOLS: ToolDef[] = [
+   775→   775→  createNote,
+   776→   776→  searchNotes,
+   777→   777→  listNotes,
+   778→   778→  openNote,
+   779→   779→  createProject,
+   780→   780→  listProjects,
+   781→   781→  listFiles,
+   782→   782→  readFile,
+   783→   783→  writeFile,
+   784→   784→  deleteFile,
+   785→   785→  checkpointTool,
+   786→   786→  completeTask,
+   787→   787→];
+   788→   788→
+   789→   789→export function getTool(name: string): ToolDef | undefined {
+   790→   790→  return TOOLS.find((t) => t.name === name);
+   791→   791→}
+   792→   792→

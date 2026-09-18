@@ -1,14 +1,16 @@
 "use client";
 
 /**
- * Вкладка «Альбом»: галерея сгенерированных портретов и иллюстраций,
- * привязанных к сущностям романа. Фильтры по типу и сущности,
- * поиск, сортировка; лайтбокс-диалог с мок-генерацией вариации
- * и переходом к персонажу.
+ * Вкладка «Альбом» (Фаза A): артефакты-картинки воркспейса из REST API.
+ * Тайлы с реальными изображениями (artifact.url — живой aiGenerateImage)
+ * или градиент-заглушками из meta. «Сгенерировать иллюстрацию» —
+ * промпт из textarea (~40 с); «Сгенерировать вариацию» — из лайтбокса.
+ * Избранное — updateArtifact({favorite}).
  */
 
-import { ArrowUpDown, Check, ImageIcon, Search, Sparkles, User, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowUpDown, Check, ImageIcon, Loader2, Search, Sparkles, Star, User, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -25,89 +27,222 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import type { ArtifactDto, EntityDto } from "@/lib/workspace-types";
 import { GradientArt } from "./art-placeholder";
-import { WipBadge } from "./entity-sheet";
 import { SelectableChip } from "./narrative-chip";
-import { agoLabel } from "./narrative-data";
 import {
   ALBUM_KIND_META,
+  albumItemOf,
+  isAlbumArtifact,
   type AlbumItem,
   type AlbumItemKind,
+  type EntityNameHint,
 } from "./album-data";
+import { agoFromISO, pluralRu } from "./types";
 
 type AlbumSort = "date" | "title";
+type AlbumFilter = AlbumItemKind | "all" | "favorite";
 
 const SORT_ITEMS: { id: AlbumSort; label: string }[] = [
   { id: "date", label: "по дате" },
   { id: "title", label: "по названию" },
 ];
 
-const TYPE_FILTERS: { id: AlbumItemKind | "all"; label: string }[] = [
+const TYPE_FILTERS: { id: AlbumFilter; label: string }[] = [
   { id: "all", label: "Все" },
   { id: "portrait", label: "Портреты" },
   { id: "illustration", label: "Иллюстрации" },
   { id: "concept", label: "Концепты" },
+  { id: "favorite", label: "Избранные" },
 ];
 
 export function AlbumTab({
-  items,
-  generatingVariationId,
-  onGenerateVariation,
+  workspaceId,
   onOpenEntity,
+  onCountChange,
 }: {
-  items: AlbumItem[];
-  generatingVariationId: string | null;
-  onGenerateVariation: (item: AlbumItem) => void;
+  workspaceId: string | null;
   onOpenEntity: (entityId: string) => void;
+  onCountChange?: (count: number) => void;
 }) {
+  const [artifacts, setArtifacts] = useState<ArtifactDto[]>([]);
+  const [entityHints, setEntityHints] = useState<Map<string, EntityNameHint>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [query, setQuery] = useState("");
-  const [type, setType] = useState<AlbumItemKind | "all">("all");
-  const [entity, setEntity] = useState<string | null>(null);
+  const [type, setType] = useState<AlbumFilter>("all");
   const [sort, setSort] = useState<AlbumSort>("date");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [variationId, setVariationId] = useState<string | null>(null);
+  const promptRef = useRef<HTMLDivElement | null>(null);
 
-  const entities = useMemo(() => {
-    const counts = new Map<string, number>();
-    items.forEach((item) => counts.set(item.entityId, (counts.get(item.entityId) ?? 0) + 1));
-    return Array.from(counts.entries()).map(([id, count]) => ({
-      id,
-      name: items.find((item) => item.entityId === id)?.entityName ?? id,
-      count,
-    }));
-  }, [items]);
+  /* ── Загрузка: артефакты + имена сущностей ── */
+  useEffect(() => {
+    if (!workspaceId) {
+      setArtifacts([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      api.listArtifacts(workspaceId).catch(() => null),
+      api.listEntities(workspaceId).catch(() => null),
+    ])
+      .then(([arts, ents]) => {
+        if (cancelled) return;
+        if (arts) setArtifacts(arts.filter(isAlbumArtifact));
+        if (ents) {
+          setEntityHints(
+            new Map(
+              ents.map((entity: EntityDto) => [
+                entity.id,
+                { name: entity.name, isCharacter: entity.kind === "character" },
+              ]),
+            ),
+          );
+        }
+        setLoadError(!arts);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  const items = useMemo(
+    () => artifacts.map((artifact) => albumItemOf(artifact, entityHints)),
+    [artifacts, entityHints],
+  );
+
+  useEffect(() => {
+    onCountChange?.(items.length);
+  }, [items, onCountChange]);
 
   const visible = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalized = query.trim().toLowerCase();
     const filtered = items.filter((item) => {
-      if (type !== "all" && item.kind !== type) return false;
-      if (entity && item.entityId !== entity) return false;
+      if (type !== "all" && (type === "favorite" ? !item.favorite : item.kind !== type)) {
+        return false;
+      }
       if (
-        normalizedQuery &&
-        !item.title.toLowerCase().includes(normalizedQuery) &&
-        !item.entityName.toLowerCase().includes(normalizedQuery)
+        normalized &&
+        !item.title.toLowerCase().includes(normalized) &&
+        !(item.entityName ?? "").toLowerCase().includes(normalized)
       ) {
         return false;
       }
       return true;
     });
     return [...filtered].sort((a, b) =>
-      sort === "title" ? a.title.localeCompare(b.title, "ru") : a.createdAtAgo - b.createdAtAgo,
+      sort === "title"
+        ? a.title.localeCompare(b.title, "ru")
+        : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-  }, [items, query, type, entity, sort]);
+  }, [items, query, type, sort]);
 
   const openItem = items.find((item) => item.id === openId) ?? null;
-  const isGeneratingVariation = openItem ? generatingVariationId === openItem.id : false;
+
+  /* ── Действия ── */
+
+  async function handleGenerate() {
+    const trimmed = prompt.trim();
+    if (!workspaceId || !trimmed || generating) return;
+    setGenerating(true);
+    try {
+      const artifact = await api.aiGenerateImage({
+        projectId: workspaceId,
+        prompt: trimmed,
+        title: trimmed.slice(0, 60),
+      });
+      if (isAlbumArtifact(artifact)) {
+        setArtifacts((prev) => [artifact, ...prev]);
+      }
+      setPrompt("");
+      toast.success("Иллюстрация готова", {
+        description: "Тайл добавлен в начало альбома.",
+      });
+      promptRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch {
+      toast.error("Не удалось сгенерировать иллюстрацию", {
+        description: "Попробуйте ещё раз — генерация занимает до минуты.",
+      });
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function handleVariation(item: AlbumItem) {
+    if (!workspaceId || variationId) return;
+    setVariationId(item.id);
+    try {
+      const artifact = await api.aiGenerateImage({
+        projectId: workspaceId,
+        prompt: item.prompt ?? `${item.title} — вариация: изменены ракурс, свет и палитра`,
+        title: `${item.title} · вариация`,
+        entityId: item.entityId ?? undefined,
+      });
+      if (isAlbumArtifact(artifact)) {
+        setArtifacts((prev) => [artifact, ...prev]);
+      }
+      toast.success("Вариация готова", { description: "Новый тайл добавлен в начало альбома." });
+    } catch {
+      toast.error("Не удалось сгенерировать вариацию");
+    } finally {
+      setVariationId(null);
+    }
+  }
+
+  async function toggleFavorite(item: AlbumItem) {
+    try {
+      const updated = await api.updateArtifact(item.id, { favorite: !item.favorite });
+      setArtifacts((prev) =>
+        prev.map((artifact) => (artifact.id === updated.id ? updated : artifact)),
+      );
+    } catch {
+      toast.error("Не удалось обновить избранное");
+    }
+  }
+
+  /* ── Рендер ── */
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-2 gap-3 px-4 py-4 sm:grid-cols-3 sm:px-6 lg:grid-cols-4 xl:grid-cols-5">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <Skeleton key={index} className="aspect-square rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
+        <p className="text-sm font-medium">Альбом не загрузился</p>
+        <p className="text-xs text-muted-foreground">Проверьте соединение и обновите вкладку.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Каталогизация */}
+      {/* Каталогизация + генерация */}
       <div className="shrink-0 space-y-3 border-b bg-muted/30 px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
           <div>
             <h3 className="text-sm font-semibold">Альбом</h3>
             <p className="text-xs text-muted-foreground">
-              {items.length} работ · привязаны к сущностям романа
+              {items.length} {pluralRu(items.length, "работа", "работы", "работ")} · картинки
+              сгенерированы студией
             </p>
           </div>
           <div className="ml-auto">
@@ -132,6 +267,45 @@ export function AlbumTab({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+
+        {/* Генерация иллюстрации */}
+        <div ref={promptRef} className="rounded-xl border bg-card p-3">
+          <label htmlFor="album-prompt" className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Сгенерировать иллюстрацию
+          </label>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <Textarea
+              id="album-prompt"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Например: Тихая Пристань ночью, маяк сквозь метель, кинематографично…"
+              aria-label="Промпт для генерации иллюстрации"
+              rows={2}
+              className="min-h-0 flex-1 resize-none rounded-lg text-sm"
+            />
+            <Button
+              type="button"
+              className="shrink-0"
+              disabled={generating || prompt.trim().length < 3}
+              onClick={handleGenerate}
+            >
+              {generating ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  Рисуем…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="size-4" aria-hidden="true" />
+                  Сгенерировать
+                </>
+              )}
+            </Button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            Живая генерация — обычно до минуты. Тайл появится первым.
+          </p>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -172,33 +346,13 @@ export function AlbumTab({
                 count={
                   filter.id === "all"
                     ? items.length
-                    : items.filter((item) => item.kind === filter.id).length
+                    : filter.id === "favorite"
+                      ? items.filter((item) => item.favorite).length
+                      : items.filter((item) => item.kind === filter.id).length
                 }
               />
             ))}
           </div>
-        </div>
-
-        <div
-          className="vf-scroll-x flex items-center gap-1.5 overflow-x-auto pb-0.5"
-          role="group"
-          aria-label="Фильтр по сущности"
-        >
-          <span className="shrink-0 text-[11px] text-muted-foreground/70">сущности:</span>
-          <SelectableChip
-            label="все"
-            selected={entity === null}
-            onClick={() => setEntity(null)}
-          />
-          {entities.map((entityItem) => (
-            <SelectableChip
-              key={entityItem.id}
-              label={entityItem.name}
-              selected={entity === entityItem.id}
-              onClick={() => setEntity(entityItem.id)}
-              count={entityItem.count}
-            />
-          ))}
         </div>
       </div>
 
@@ -207,14 +361,20 @@ export function AlbumTab({
         {visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
             <p className="text-sm font-medium">В альбоме ничего не нашлось</p>
-            <p className="text-xs text-muted-foreground">
-              Сгенерируйте портрет из карточки персонажа — он появится здесь.
+            <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
+              Сгенерируйте иллюстрацию по промпту выше — или портрет из карточки персонажа во
+              вкладке «Сущности».
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {visible.map((item) => (
-              <AlbumTile key={item.id} item={item} onOpen={() => setOpenId(item.id)} />
+              <AlbumTile
+                key={item.id}
+                item={item}
+                onOpen={() => setOpenId(item.id)}
+                onToggleFavorite={() => toggleFavorite(item)}
+              />
             ))}
           </div>
         )}
@@ -225,12 +385,20 @@ export function AlbumTab({
         <DialogContent className="max-w-2xl gap-0 p-0 sm:rounded-xl">
           {openItem ? (
             <>
-              <GradientArt
-                gradient={openItem.gradient}
-                ariaLabel={`Заглушка работы: ${openItem.title}`}
-                className="aspect-[16/9] w-full rounded-t-xl border-b sm:rounded-t-xl"
-                iconClassName="size-16"
-              />
+              {openItem.url ? (
+                <img
+                  src={openItem.url}
+                  alt={openItem.title}
+                  className="aspect-[16/9] w-full rounded-t-xl border-b object-cover"
+                />
+              ) : (
+                <GradientArt
+                  gradient={openItem.gradient}
+                  ariaLabel={`Заглушка работы: ${openItem.title}`}
+                  className="aspect-[16/9] w-full rounded-t-xl border-b"
+                  iconClassName="size-16"
+                />
+              )}
               <div className="space-y-3 p-5">
                 <DialogHeader className="space-y-1.5 text-left">
                   <DialogTitle className="font-serif text-lg leading-tight">
@@ -240,27 +408,31 @@ export function AlbumTab({
                     <span className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
                       {ALBUM_KIND_META[openItem.kind].label}
                     </span>
-                    <span className="text-xs">
-                      Сущность: <span className="font-medium text-foreground/80">{openItem.entityName}</span>
-                    </span>
-                    <span className="text-xs">{agoLabel(openItem.createdAtAgo)}</span>
-                    {openItem.isGenerated ? (
-                      <span className="text-[11px] font-medium text-primary">сгенерировано сейчас</span>
+                    {openItem.entityName ? (
+                      <span className="text-xs">
+                        Сущность:{" "}
+                        <span className="font-medium text-foreground/80">{openItem.entityName}</span>
+                      </span>
                     ) : null}
+                    <span className="text-xs">{agoFromISO(openItem.createdAt)}</span>
                   </DialogDescription>
                 </DialogHeader>
 
-                <p className="text-sm leading-relaxed text-muted-foreground">{openItem.description}</p>
+                {openItem.description || openItem.prompt ? (
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    {openItem.description ?? openItem.prompt}
+                  </p>
+                ) : null}
 
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <Button
                     type="button"
-                    disabled={isGeneratingVariation}
-                    onClick={() => onGenerateVariation(openItem)}
+                    disabled={variationId !== null}
+                    onClick={() => handleVariation(openItem)}
                   >
-                    {isGeneratingVariation ? (
+                    {variationId === openItem.id ? (
                       <>
-                        <Sparkles className="size-4 animate-pulse" aria-hidden="true" />
+                        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
                         Генерация вариации…
                       </>
                     ) : (
@@ -269,15 +441,23 @@ export function AlbumTab({
                         Сгенерировать вариацию
                       </>
                     )}
-                    <WipBadge className="ml-1.5" />
                   </Button>
-                  {openItem.isCharacter ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => toggleFavorite(openItem)}
+                    aria-pressed={openItem.favorite}
+                  >
+                    <Star className={cn("size-4", openItem.favorite && "fill-primary")} aria-hidden="true" />
+                    {openItem.favorite ? "В избранном" : "В избранное"}
+                  </Button>
+                  {openItem.isCharacter && openItem.entityId ? (
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => {
                         setOpenId(null);
-                        onOpenEntity(openItem.entityId);
+                        onOpenEntity(openItem.entityId!);
                       }}
                     >
                       <User className="size-4" aria-hidden="true" />
@@ -294,21 +474,35 @@ export function AlbumTab({
   );
 }
 
-function AlbumTile({ item, onOpen }: { item: AlbumItem; onOpen: () => void }) {
+function AlbumTile({
+  item,
+  onOpen,
+  onToggleFavorite,
+}: {
+  item: AlbumItem;
+  onOpen: () => void;
+  onToggleFavorite: () => void;
+}) {
   const kindMeta = ALBUM_KIND_META[item.kind];
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group overflow-hidden rounded-xl border bg-card text-left transition-all hover:border-primary/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <GradientArt
-        gradient={item.gradient}
-        ariaLabel={`Заглушка работы: ${item.title}`}
-        className="aspect-square w-full"
-        iconClassName="size-10"
-      >
+    <div className="group relative overflow-hidden rounded-xl border bg-card transition-all hover:border-primary/40 hover:shadow-sm">
+      <button type="button" onClick={onOpen} className="block w-full text-left">
+        {item.url ? (
+          <img
+            src={item.url}
+            alt={item.title}
+            className="aspect-square w-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <GradientArt
+            gradient={item.gradient}
+            ariaLabel={`Заглушка работы: ${item.title}`}
+            className="aspect-square w-full"
+            iconClassName="size-10"
+          />
+        )}
         <span
           className={cn(
             "absolute left-2 top-2 rounded-full border border-border/60 bg-background/80 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground backdrop-blur-sm",
@@ -316,22 +510,32 @@ function AlbumTile({ item, onOpen }: { item: AlbumItem; onOpen: () => void }) {
         >
           {kindMeta.label.toLowerCase()}
         </span>
-        {item.isGenerated ? (
-          <span className="absolute right-2 top-2 rounded-full border border-primary/50 bg-primary/20 px-1.5 py-0.5 text-[9px] font-medium text-primary backdrop-blur-sm">
-            новое
-          </span>
-        ) : null}
-        <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-gradient-to-t from-black/70 to-transparent px-2 pb-2 pt-6 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="absolute inset-x-0 bottom-14 flex items-center justify-center gap-1.5 bg-gradient-to-t from-black/70 to-transparent px-2 pb-2 pt-6 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
           <ImageIcon className="size-3" aria-hidden="true" />
           Открыть
         </span>
-      </GradientArt>
-      <span className="block p-2.5">
-        <span className="line-clamp-1 block text-xs font-medium">{item.title}</span>
-        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-          {item.entityName} · {agoLabel(item.createdAtAgo)}
+        <span className="block p-2.5">
+          <span className="line-clamp-1 block text-xs font-medium">{item.title}</span>
+          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+            {item.entityName ? `${item.entityName} · ` : ""}
+            {agoFromISO(item.createdAt)}
+          </span>
         </span>
-      </span>
-    </button>
+      </button>
+      <button
+        type="button"
+        onClick={onToggleFavorite}
+        aria-pressed={item.favorite}
+        aria-label={item.favorite ? `Убрать «${item.title}» из избранного` : `Добавить «${item.title}» в избранное`}
+        className={cn(
+          "absolute right-2 top-2 flex size-6 items-center justify-center rounded-md border backdrop-blur-sm transition-colors",
+          item.favorite
+            ? "border-primary/50 bg-primary/20 text-primary"
+            : "border-border/60 bg-background/80 text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <Star className={cn("size-3.5", item.favorite && "fill-primary")} aria-hidden="true" />
+      </button>
+    </div>
   );
 }

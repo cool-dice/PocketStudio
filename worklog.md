@@ -1208,3 +1208,34 @@ Stage Summary:
 - Файлы: home-chat-widget.tsx (new), home-screen.tsx (rewrite), home-recent.tsx (rewrite, варианты grid/compact), home-activity.tsx (rework), app-shell.tsx (контекст-панель только в чате).
 - Долги без изменений: 4 tsc-ошибки (старые), тестовые юзеры dev-БД (ps2c-audio@vf.io/Studio12345, ps2d-nle-2@vf.io/montage-14-32).
 - NEXT: Фаза A по roadmap (БД воркспейсов/артефактов, единый AI-интерфейс src/lib/ai/, CRUD сущностей/находок аналитика, инструменты create_entity/check_document); возможно — живые счётчики статистики вместо демо-цифр на дашборде.
+
+---
+Task ID: A1 + A2 (Фаза A: функционализация)
+Agent: main (Z.ai Code) + субагенты A2-a/b/c/d (частично, API-таймауты — код записан, верификация/фиксы доделаны main)
+Task: Пользователь: «поехали дальше, максимально в рамках песочницы снимаем все темплейты в рабочие варианты; если что-то типа деплоя не можем — откладываем». Фаза A: воркспейсы/документы/сущности/аналитик/изображения/озвучка — с моков на реальную БД + живые AI-пайплайны.
+
+Work Log:
+- БД (A1): prisma/schema.prisma — Project: +type (film/book/music/app/universal), +stage/stageIndex/progress, rootPath→nullable, origin="workspace" для контентных; НОВЫЕ модели: Document, DocumentSection (текст глав), Entity (+EntityLink, setId/setName/domain/kind/attributes/tags/refs/portrait), Artifact (type/url/prompt/entityId/stage/meta/favorite), Finding (тип/severity/quote/advice/sourceRef/status). bun run db:push.
+- Seed: scripts/seed-workspaces.ts (идемпотент) — 6 воркспейсов из MOCK_WORKSPACES (id сохранены), 16+12 сущностей двух наборов со связями, 3 документа с текстами секций (Хроники 6 сцен-глав, Тишина фьорда 3 главы, SRS 5 разделов), 17 артефактов Обзора/Альбома, 10 находок Аналитика. Запуск: bun scripts/seed-workspaces.ts [email].
+- src/lib/ai/index.ts (НОВЫЙ): единый AI-интерфейс — aiChatJson/aiChatText (LLM), aiGenerateImage (→ public/gen/<uuid>.png, 5 размеров), aiTts (7 голосов, WAV), aiAnalyzeDocument (промпт Аналитика, JSON-выход), saveGeneratedFile. Только для API routes.
+- REST API (НОВЫЕ): /api/workspaces (GET/POST) + /[id] (GET/PATCH/DELETE, stage↔stageIndex согласованы с WORKSPACE_STAGES), /api/workspaces/[id]/documents|entities|artifacts (GET/POST), /api/documents/[id] (+PATCH/DELETE) + /sections (POST), /api/sections/[id] (PATCH автосейв+DELETE, транзакция обновляет document.updatedAt), /api/entities/[id], /api/artifacts (GET все юзера — Библиотека) + /api/artifacts/[id], /api/findings (GET) + /[id] (PATCH статуса), /api/ai/image|tts|analyze|describe (все живые, протестированы), /api/dashboard (живые счётчики + активность из последних артефактов, timeAgo).
+- Инфраструктура: src/lib/workspace-types.ts (DTO), src/lib/workspace-shapes.ts (шейперы+counts по groupBy type), src/lib/workspace-api.ts (ensureWorkspace/ensureOwned guards), ~20 методов api.* в src/lib/api.ts.
+- Шов: workspace-tabs.tsx передаёт workspaceId во все встроенные модули (documents/images/audio/...).
+- Субагенты A2-a/b/c/d (4 параллельных, все упали по API-таймауту в конце, но код успели записать): A2-a — use-workspaces.ts + воркспейсы/главная/мастер/overview на БД; A2-b — use-documents.ts + документы (редактор с автосейвом, сущности, аналитик, альбом, генерация описаний/портретов); A2-c — images (генерация-панель, галерея) + library (все артефакты); A2-d — audio narration-panel (TTS) + mini-services/agent-service/workspace-tools.ts (4 инструмента) + prompts.ts.
+- Доделано main после падения субагентов: 11 tsc-фиксов в documents (useRef-импорт, wrapSelection 3-арг, null-сужения, конфликт setName→setLabel, filter Boolean→type guard), lint-фиксы (setState-in-effect → reset при рендере, refs-in-render, лишний eslint-disable), рестарт mini-service с prisma generate (bun --hot держал старый клиент — поле type; решено полным kill+restart, supervisor поднял).
+- БРАУЗЕРНАЯ ВЕРИФИКАЦИЯ (agent-browser, :81, 1280×800 + 390×844, ps2c-audio@vf.io):
+  - Главная: живые статы 6 воркспейсов / 27 артефактов / 0 заметок / 6 стадий, лента активности из БД.
+  - Воркспейсы: карточки из БД; мастер «Создать воркспейс» → тип Книга → название → «Тестовая книга Фазы A» реально в БД (7-й воркспейс, стадия «Замысел»), переход в оболочку.
+  - Документы ws-film-dwinter: Рукопись «Сценарий: Хроники» — главы с числом слов, редактирование текста → АВТОСОХРАНЕНИЕ в БД (проверено API: «ПРОВЕРКА_АВТОСЕЙВА_ФАЗЫ_A» в контенте Пролога, 51 слово); Сущности 16 из БД (набор «Хроники»), карточка Ари — атрибуты/черты/связи/главы; «Описание» → LLM сгенерировал литературную биографию (~18 сек) и записал в БД; Аналитик — «Проверить документ» → ЖИВОЙ LLM-анализ нашёл 7 реальных проблем (возраст Ари гл.2/гл.9, цвет глаз Вейры, недосказанности) + фильтры Все7/Противоречия1/Недосказанности4/Расхождения2; «Отклонить» → status=dismissed в БД (6 open/1 dismissed); Альбом — тайлы, генерация портрета.
+  - Изображения: генерация из UI «Постер Хроник…» → 73 сек → реальная картинка в галерее (POST /api/ai/image 201).
+  - Аудио ws-music-moon: «Озвучка» — текст + голос Джэм → api.aiTts → <audio controls> с готовым WAV (readyState=4).
+  - Оркестратор: чат «Создай персонажа Луна…» → инструмент create_entity → СУЩНОСТЬ РЕАЛЬНО В БД (Луна, character, «таинственная слушательница льда»); чат ответил с ID.
+  - Библиотека: 29 артефактов из БД, реальные картинки /gen/*.png отображаются.
+  - Мобайл 390: Главная/Воркспейсы/Документы — overflowX=false.
+  - lint 0; tsc — только 4 старых долга; dev.log без ошибок. Скриншоты tool-results/a-*.png (13 шт).
+
+Stage Summary:
+- ФАЗА A ДОСТАВЛЕНА: воркспейсы/документы/сущности/находки/артефакты — в SQLite через Prisma; живые AI-пайплайны: генерация изображений (в галерею/альбом/библиотеку), TTS-озвучка (в аудиотеку), LLM-анализ Аналитиком, LLM-описания сущностей; оркестратор получил инструменты create_entity/check_document/generate_image/tts_narration (create_entity верифицирован end-to-end).
+- Отложено (осознанно): деплой (юзер разрешил), видеорендер, DAW-генерация сэмплов — фазы C–E по roadmap.
+- Долги: 4 старых tsc-ошибки; тестовый юзер dev-БД; generate_image/tts_narration/check_document из чата не верифицированы по-отдельности (create_entity — да); воркспейс-вкладка «Чат» — демо (настоящий чат глобальный).
+- NEXT: инструменты агента generate_image/tts_narration/check_document верифицировать; живой контекст чата воркспейса (projectId); версии глав; Фаза B (дизайн-редактор в БД), Фаза C (видео/DAW), портреты в EntitySheet.

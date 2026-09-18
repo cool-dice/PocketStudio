@@ -1,17 +1,18 @@
 "use client";
 
 /**
- * Универсальная панель сущности: вид, полное описание, атрибуты,
- * связи, упоминания (главы или разделы документации) и мок-кнопка
- * «Сгенерировать описание» (спиннер ~1,5 с → абзац дописывается
- * в карточку + тост). Персонажи открываются в CharacterSheet — эта
- * панель для всех остальных видов. Здесь же живёт WipBadge, общий
- * для вкладок модуля «Документы».
+ * Универсальная панель сущности (Фаза A, данные из REST API): вид и набор,
+ * правка name/short/description (кнопка «Сохранить» + автосейв при
+ * закрытии), «Сгенерировать описание» — живой LLM (~15–20 с, «Студия
+ * пишет…»), атрибуты, теги, связи-чипы и упоминания. Экспортирует
+ * хелпер useEntityDraft — общий для панелей сущности и персонажа.
  */
 
-import { BookOpenText, Check, FileText, Link2, Loader2, MapPin, Sparkles } from "lucide-react";
+import { BookOpenText, Check, FileText, Link2, Loader2, MapPin, Save, Sparkles } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -20,96 +21,149 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import type { EntityDto } from "@/lib/workspace-types";
 import { MiniChip } from "./narrative-chip";
-import { agoLabel } from "./narrative-data";
-import { ENTITY_KIND_META, getEntity, getEntitySet, type StudioEntity } from "./entities-data";
+import { ENTITY_KIND_META, refsLabel } from "./entities-data";
+import { agoFromISO } from "./types";
 
-export function WipBadge({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-px text-[10px] font-medium leading-none text-amber-700 dark:text-amber-400",
-        className,
-      )}
-    >
-      В разработке
-    </span>
-  );
+export type EntityDraftPatch = {
+  name?: string;
+  short?: string | null;
+  description?: string;
+};
+
+/** Драфт правок сущности: незагрязнённые поля следуют за entity (обновления
+ *  из aiDescribe подхватываются сразу), правки пользователя — приоритет. */
+export function useEntityDraft(entity: EntityDto | null) {
+  const [raw, setRaw] = useState({ name: "", short: "", description: "" });
+  const [dirty, setDirty] = useState({ name: false, short: false, description: false });
+
+  const draft = {
+    name: dirty.name ? raw.name : (entity?.name ?? ""),
+    short: dirty.short ? raw.short : (entity?.short ?? ""),
+    description: dirty.description ? raw.description : (entity?.description ?? ""),
+  };
+
+  function update(patch: Partial<{ name: string; short: string; description: string }>) {
+    setDirty((prev) => ({
+      ...prev,
+      ...Object.fromEntries(Object.keys(patch).map((key) => [key, true])),
+    }));
+    setRaw((prev) => ({ ...prev, ...patch }));
+  }
+
+  const isDirty =
+    Boolean(entity) &&
+    (dirty.name || dirty.short || dirty.description) &&
+    Boolean(
+      entity &&
+        (draft.name !== entity.name ||
+          draft.short !== (entity.short ?? "") ||
+          draft.description !== entity.description),
+    );
+
+  return { draft, update, isDirty };
 }
 
 export function EntitySheet({
-  setId,
-  entityId,
+  entity,
+  entities,
   onClose,
   onOpenEntity,
-  generated,
-  generatingId,
-  onGenerate,
+  onSave,
+  onDescribe,
+  describing,
 }: {
-  setId: string;
-  entityId: string | null;
+  entity: EntityDto | null;
+  /** Сущности набора — для имён связей. */
+  entities: EntityDto[];
   onClose: () => void;
   onOpenEntity: (id: string) => void;
-  generated: Record<string, string>;
-  generatingId: string | null;
-  onGenerate: (entity: StudioEntity) => void;
+  onSave: (id: string, patch: EntityDraftPatch) => void;
+  onDescribe: (entity: EntityDto) => void;
+  describing: boolean;
 }) {
-  const set = getEntitySet(setId);
-  const entity = entityId && set ? getEntity(setId, entityId) : undefined;
+  const { draft, update, isDirty } = useEntityDraft(entity);
   const meta = entity ? ENTITY_KIND_META[entity.kind] : null;
   const KindIcon = meta?.icon;
-  const isNarrative = set?.domain === "narrative";
-  const generatedText = entity ? generated[entity.id] : undefined;
-  const isGenerating = entity ? generatingId === entity.id : false;
+  const isNarrative = entity?.domain === "narrative";
+  const refs = entity ? refsLabel(entity.domain) : null;
+
+  function handleClose() {
+    // Автосейв при закрытии: если были правки — сохраняем до закрытия.
+    if (entity && isDirty) {
+      onSave(entity.id, {
+        name: draft.name.trim() || entity.name,
+        short: draft.short.trim() || null,
+        description: draft.description,
+      });
+    }
+    onClose();
+  }
 
   return (
-    <Sheet open={Boolean(entity)} onOpenChange={(open) => !open && onClose()}>
+    <Sheet open={Boolean(entity)} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-md">
-        {entity && set && meta && KindIcon ? (
+        {entity && meta && KindIcon && refs ? (
           <>
-            <SheetHeader className="shrink-0 space-y-1 border-b px-5 pb-4">
+            <SheetHeader className="shrink-0 space-y-2 border-b px-5 pb-4">
               <div className="flex items-center gap-2">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-primary/10 text-primary">
                   <KindIcon className="size-4" aria-hidden="true" />
                 </span>
                 <p className="truncate text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                  {meta.label} · {set.label}
+                  {meta.label} · {entity.setName}
                 </p>
               </div>
-              <SheetTitle
-                className={cn("text-left text-xl leading-tight", isNarrative && "font-serif")}
-              >
-                {entity.name}
+              <SheetTitle asChild>
+                <input
+                  value={draft.name}
+                  onChange={(event) => update({ name: event.target.value })}
+                  aria-label="Название сущности"
+                  maxLength={120}
+                  className={cn(
+                    "w-full rounded-lg bg-transparent text-left text-xl leading-tight outline-none transition-colors hover:bg-accent focus-visible:bg-accent",
+                    isNarrative && "font-serif",
+                  )}
+                />
               </SheetTitle>
-              <SheetDescription className="text-left">{entity.short}</SheetDescription>
+              <SheetDescription asChild>
+                <div>
+                  <Input
+                    value={draft.short}
+                    onChange={(event) => update({ short: event.target.value })}
+                    placeholder="Короткая подпись (для карточек)…"
+                    aria-label="Короткая подпись"
+                    maxLength={200}
+                    className="h-8 border-none bg-transparent px-0 text-sm focus-visible:ring-0"
+                  />
+                </div>
+              </SheetDescription>
             </SheetHeader>
 
             <div className="vf-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
-              {/* Полное описание */}
               <section aria-label="Описание сущности">
-                <p
+                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Описание
+                </h4>
+                <Textarea
+                  value={draft.description}
+                  onChange={(event) => update({ description: event.target.value })}
+                  placeholder="Опишите сущность — или доверьте студии…"
+                  aria-label="Описание сущности"
+                  rows={7}
                   className={cn(
-                    "text-[15px] leading-[1.75] text-foreground/90",
+                    "mt-2 resize-y rounded-xl border bg-background text-[15px] leading-[1.75] text-foreground/90",
                     isNarrative && "font-serif",
                   )}
-                >
-                  {entity.description}
-                </p>
-                {generatedText ? (
-                  <div className="mt-4 rounded-lg border border-primary/30 bg-primary/[0.06] p-3.5">
-                    <p className="mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-primary">
-                      <Sparkles className="size-3" aria-hidden="true" />
-                      Сгенерировано ИИ
-                    </p>
-                    <p
-                      className={cn(
-                        "text-[15px] leading-[1.75] text-foreground/90",
-                        isNarrative && "font-serif",
-                      )}
-                    >
-                      {generatedText}
-                    </p>
+                />
+                {describing ? (
+                  <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2 text-xs text-primary">
+                    <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                    Студия пишет описание — обычно 15–20 секунд…
                   </div>
                 ) : null}
               </section>
@@ -122,17 +176,21 @@ export function EntitySheet({
                   Атрибуты
                 </h4>
                 <dl className="mt-2 grid grid-cols-1 gap-1.5">
-                  {entity.attributes.map((attribute) => (
-                    <div
-                      key={attribute.label}
-                      className="flex items-baseline justify-between gap-3 rounded-lg border bg-background px-3 py-2"
-                    >
-                      <dt className="shrink-0 text-xs text-muted-foreground">{attribute.label}</dt>
-                      <dd className="min-w-0 truncate text-right text-xs font-medium">
-                        {attribute.value}
-                      </dd>
-                    </div>
-                  ))}
+                  {entity.attributes.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Атрибутов пока нет.</p>
+                  ) : (
+                    entity.attributes.map((attribute) => (
+                      <div
+                        key={attribute.label}
+                        className="flex items-baseline justify-between gap-3 rounded-lg border bg-background px-3 py-2"
+                      >
+                        <dt className="shrink-0 text-xs text-muted-foreground">{attribute.label}</dt>
+                        <dd className="min-w-0 truncate text-right text-xs font-medium">
+                          {attribute.value}
+                        </dd>
+                      </div>
+                    ))
+                  )}
                 </dl>
               </section>
 
@@ -145,30 +203,31 @@ export function EntitySheet({
                   Связи
                 </h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.related.map((relatedId) => {
-                    const related = getEntity(set.id, relatedId);
-                    if (!related) return null;
-                    const RelatedIcon = ENTITY_KIND_META[related.kind].icon;
-                    return (
-                      <MiniChip
-                        key={relatedId}
-                        onClick={() => onOpenEntity(relatedId)}
-                        title={`Открыть «${related.name}»`}
-                      >
-                        <RelatedIcon className="size-3" aria-hidden="true" />
-                        {related.name}
-                      </MiniChip>
-                    );
-                  })}
+                  {entity.related && entity.related.length > 0 ? (
+                    entity.related.map((relatedId) => {
+                      const related = entities.find((candidate) => candidate.id === relatedId);
+                      if (!related) return null;
+                      const RelatedIcon = ENTITY_KIND_META[related.kind].icon;
+                      return (
+                        <MiniChip
+                          key={relatedId}
+                          onClick={() => onOpenEntity(relatedId)}
+                          title={`Открыть «${related.name}»`}
+                        >
+                          <RelatedIcon className="size-3" aria-hidden="true" />
+                          {related.name}
+                        </MiniChip>
+                      );
+                    })
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Связей пока нет.</p>
+                  )}
                 </div>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">
-                  Нажмите на связь, чтобы перейти к сущности.
-                </p>
               </section>
 
               <Separator />
 
-              {/* Упоминания: главы романа или разделы документации */}
+              {/* Упоминания: главы или разделы документации */}
               <section aria-label={isNarrative ? "Упоминания в главах" : "Разделы документации"}>
                 <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   {isNarrative ? (
@@ -179,20 +238,19 @@ export function EntitySheet({
                   {isNarrative ? "Упомянута в главах" : "Разделы документации"}
                 </h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.refs.items.map((ref) => (
-                    <MiniChip
-                      key={ref}
-                      className="font-mono"
-                      title={isNarrative ? `${set.label}, глава ${ref}` : `Раздел ${ref}`}
-                    >
-                      {isNarrative ? `гл. ${ref}` : ref}
-                    </MiniChip>
-                  ))}
+                  {entity.refs.items.length > 0 ? (
+                    entity.refs.items.map((ref) => (
+                      <MiniChip key={ref} className="font-mono">
+                        {refs.format(ref)}
+                      </MiniChip>
+                    ))
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Упоминаний пока нет.</p>
+                  )}
                 </div>
                 <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <BookOpenText className="size-3.5 shrink-0" aria-hidden="true" />
-                  {set.label} — {isNarrative ? "черновик" : "текущая редакция"} · обновлена{" "}
-                  {agoLabel(entity.updatedAgo)}
+                  {entity.setName} · обновлена {agoFromISO(entity.updatedAt)}
                 </p>
               </section>
 
@@ -202,30 +260,27 @@ export function EntitySheet({
                   Теги
                 </h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.tags.map((tag) => (
-                    <MiniChip key={tag}>#{tag}</MiniChip>
-                  ))}
+                  {entity.tags.length > 0 ? (
+                    entity.tags.map((tag) => <MiniChip key={tag}>#{tag}</MiniChip>)
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Тегов пока нет.</p>
+                  )}
                 </div>
               </section>
             </div>
 
-            {/* Действие генерации */}
-            <div className="shrink-0 border-t px-5 py-3">
+            {/* Действия */}
+            <div className="shrink-0 space-y-2 border-t px-5 py-3">
               <Button
                 type="button"
                 className="w-full"
-                disabled={isGenerating || Boolean(generatedText)}
-                onClick={() => onGenerate(entity)}
+                disabled={describing}
+                onClick={() => onDescribe(entity)}
               >
-                {isGenerating ? (
+                {describing ? (
                   <>
                     <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                    Генерация описания…
-                  </>
-                ) : generatedText ? (
-                  <>
-                    <Check className="size-4" aria-hidden="true" />
-                    Описание сгенерировано
+                    Студия пишет…
                   </>
                 ) : (
                   <>
@@ -233,11 +288,41 @@ export function EntitySheet({
                     Сгенерировать описание
                   </>
                 )}
-                <WipBadge className="ml-1.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={!isDirty}
+                onClick={() =>
+                  onSave(entity.id, {
+                    name: draft.name.trim() || entity.name,
+                    short: draft.short.trim() || null,
+                    description: draft.description,
+                  })
+                }
+              >
+                {isDirty ? (
+                  <>
+                    <Save className="size-4" aria-hidden="true" />
+                    Сохранить правки
+                  </>
+                ) : (
+                  <>
+                    <Check className="size-4" aria-hidden="true" />
+                    Все изменения сохранены
+                  </>
+                )}
               </Button>
             </div>
           </>
-        ) : null}
+        ) : entity === null ? null : (
+          <div className="space-y-4 px-5 py-6">
+            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );

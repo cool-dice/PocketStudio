@@ -1,20 +1,24 @@
 "use client";
 
 /**
- * HomeScreen — «Главная» (PS-4): отдельная дашборд-страница.
+ * HomeScreen — «Главная» (Фаза A): дашборд на живых данных.
  *
- * Чат — виджет в сетке дашборда, а не хозяин экрана: приветствие
- * с быстрыми действиями, статистика студии, сетка «чат + активность»,
- * «Продолжить работу» карточками. Страница прокручивается целиком,
- * в отличие от фиксированного чат-лендинга.
+ * api.getDashboard() даёт статистику («Студия в цифрах» — воркспейсы,
+ * артефакты, заметки за неделю, активные стадии) и ленту «Активность».
+ * Чат — виджет в сетке дашборда (PS-4), недавние воркспейсы — HomeRecent
+ * из общего стора useWorkspaces. Скелетоны на время загрузки, ошибка
+ * статистики — с повтором.
  */
 
-import { useState } from "react";
-import { Menu, Mic, Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Menu, Mic, Plus, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppUi } from "@/lib/store";
+import { api } from "@/lib/api";
+import type { DashboardDto } from "@/lib/workspace-types";
 
 import { CreateWorkspaceDialog } from "@/components/workspaces/create-workspace-dialog";
 import { HomeActivity } from "@/components/workspaces/home-activity";
@@ -23,7 +27,7 @@ import { HomeRecent } from "@/components/workspaces/home-recent";
 import {
   firstNameOf,
   homeDateLine,
-  HOME_STATS,
+  homeStats,
 } from "@/components/workspaces/home-data";
 
 export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
@@ -31,8 +35,38 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
   const [createOpen, setCreateOpen] = useState(false);
 
+  const [dashboard, setDashboard] = useState<DashboardDto | null>(null);
+  const [dashLoading, setDashLoading] = useState(true);
+  const [dashError, setDashError] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getDashboard()
+      .then((data) => {
+        if (!cancelled) setDashboard(data);
+      })
+      .catch(() => {
+        if (!cancelled) setDashError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setDashLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadTick]);
+
+  function reloadDashboard() {
+    setDashLoading(true);
+    setDashError(false);
+    setReloadTick((t) => t + 1);
+  }
+
   const firstName = firstNameOf(user?.name);
   const dateLine = homeDateLine();
+  const stats = dashboard ? homeStats(dashboard.stats) : null;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
@@ -89,29 +123,55 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
             </div>
           </header>
 
-          {/* Статистика студии */}
+          {/* Статистика студии (живые счётчики /api/dashboard) */}
           <section aria-label="Статистика студии">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {HOME_STATS.map((stat) => (
-                <div
-                  key={stat.label}
-                  className="group rounded-xl border bg-card p-4 transition-all duration-200 hover:border-primary/40 hover:shadow-sm"
-                >
-                  <span
-                    className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"
-                    aria-hidden="true"
+            {stats ? (
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                {stats.map((stat) => (
+                  <div
+                    key={stat.label}
+                    className="group rounded-xl border bg-card p-4 transition-all duration-200 hover:border-primary/40 hover:shadow-sm"
                   >
-                    <stat.icon className="size-4" />
-                  </span>
-                  <p className="mt-3 text-2xl font-bold leading-none tabular-nums tracking-tight">
-                    {stat.value}
-                  </p>
-                  <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
-                    {stat.label}
-                  </p>
-                </div>
-              ))}
-            </div>
+                    <span
+                      className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                      aria-hidden="true"
+                    >
+                      <stat.icon className="size-4" />
+                    </span>
+                    <p className="mt-3 text-2xl font-bold leading-none tabular-nums tracking-tight">
+                      {stat.value}
+                    </p>
+                    <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
+                      {stat.label}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : dashError ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-5">
+                <p className="text-sm text-muted-foreground">
+                  Не удалось загрузить статистику студии.
+                </p>
+                <Button variant="outline" size="sm" onClick={reloadDashboard}>
+                  <RotateCcw className="size-3.5" aria-hidden="true" />
+                  Повторить
+                </Button>
+              </div>
+            ) : (
+              <div
+                className="grid grid-cols-2 gap-3 md:grid-cols-4"
+                role="status"
+                aria-label="Загрузка статистики студии"
+              >
+                {Array.from({ length: 4 }, (_, i) => (
+                  <div key={i} className="rounded-xl border bg-card p-4">
+                    <Skeleton className="size-9 rounded-lg" />
+                    <Skeleton className="mt-3 h-7 w-14" />
+                    <Skeleton className="mt-2 h-3 w-20" />
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* Сетка: чат-виджет + активность (min-w-0 — треки не раздувает контент) */}
@@ -120,7 +180,10 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
               <HomeChatWidget />
             </div>
             <div className="flex h-[360px] min-h-0 min-w-0 flex-col sm:h-[420px] lg:h-[540px]">
-              <HomeActivity />
+              <HomeActivity
+                items={dashboard?.activity ?? []}
+                loading={dashLoading}
+              />
             </div>
           </div>
 
@@ -128,7 +191,7 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
           <HomeRecent />
 
           <p className="pb-2 text-center text-[11px] text-muted-foreground">
-            Счётчики — демо-цифры: хранение и статистика подключаются в Фазе A.
+            Статистика, активность и воркспейсы — живые данные из БД студии · Фаза A.
           </p>
         </div>
       </div>

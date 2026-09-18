@@ -1,25 +1,31 @@
 "use client";
 
 /**
- * WorkspaceHeader — хедер оболочки воркспейса (PS-3-b).
+ * WorkspaceHeader — хедер оболочки воркспейса (Фаза A).
  *
- * Хлебные крошки (Воркспейсы / название / активная вкладка), крупная
- * градиентная иконка типа, название и подпись, бейджи типа/стадии/артефактов,
- * прогресс с процентом, действия («Настроить» — мок-диалог, «⋯» — меню) и
- * мобильная компоновка с гамбургером.
+ * Живые данные из WorkspaceDto: хлебные крошки, крупная градиентная
+ * иконка типа, название и подпись, бейджи типа/стадии, компактная
+ * лента живых счётчиков counts, прогресс с процентом и временем
+ * обновления + мобильная компоновка с гамбургером.
  */
 
 import { useState } from "react";
 import {
   Archive,
   ArrowLeft,
+  AudioWaveform,
   BellRing,
+  BookOpenText,
   Check,
   ChevronRight,
+  Clapperboard,
   Copy,
+  FolderKanban,
+  ImagePlus,
   Library,
   Menu,
   MoreHorizontal,
+  NotebookPen,
   Pencil,
   Save,
   Settings2,
@@ -27,8 +33,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { artifactsOfWorkspace } from "@/components/workspaces/shared/artifacts-data";
-import { createdAgoOf, pluralArtifacts } from "@/components/workspaces/overview-data";
+import { timeAgo } from "@/components/workspaces/home-data";
+import {
+  stageLabelOf,
+  workspaceSubtitle,
+} from "@/components/workspaces/workspaces-data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,13 +60,23 @@ import {
   WORKSPACE_STAGES,
   WORKSPACE_TAB_META,
   WORKSPACE_TYPE_META,
-  type WorkspaceSummary,
   type WorkspaceTab,
 } from "@/lib/workspace-data";
+import type { WorkspaceDto } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 
+/** Живые счётчики хедера — те же шесть категорий, что в карточке списка. */
+const COUNT_ITEMS = [
+  { key: "notes", label: "Заметки", icon: NotebookPen },
+  { key: "documents", label: "Документы", icon: BookOpenText },
+  { key: "images", label: "Картинки", icon: ImagePlus },
+  { key: "audio", label: "Аудио", icon: AudioWaveform },
+  { key: "video", label: "Видео", icon: Clapperboard },
+  { key: "files", label: "Файлы", icon: FolderKanban },
+] as const;
+
 export interface WorkspaceHeaderProps {
-  workspace: WorkspaceSummary;
+  workspace: WorkspaceDto;
   /** Активная вкладка — последняя крошка. */
   tab: WorkspaceTab;
   onOpenMobileNav: () => void;
@@ -79,7 +98,8 @@ export function WorkspaceHeader({
   onCloseSettings,
 }: WorkspaceHeaderProps) {
   const meta = WORKSPACE_TYPE_META[workspace.type];
-  const artifactCount = artifactsOfWorkspace(workspace.id).length;
+  const stage = stageLabelOf(workspace);
+  const updatedAgo = timeAgo(workspace.updatedAt);
   const tabLabel = WORKSPACE_TAB_META[tab].label;
 
   const [notifyStage, setNotifyStage] = useState(true);
@@ -114,7 +134,7 @@ export function WorkspaceHeader({
             Воркспейсы
           </button>
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/50" aria-hidden="true" />
-          <span className="hidden max-w-56 truncate sm:inline">{workspace.title}</span>
+          <span className="hidden max-w-56 truncate sm:inline">{workspace.name}</span>
           <ChevronRight
             className="hidden size-3.5 shrink-0 text-muted-foreground/50 sm:inline"
             aria-hidden="true"
@@ -138,7 +158,7 @@ export function WorkspaceHeader({
             aria-hidden="true"
             className={cn(
               "flex size-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-sm sm:size-14",
-              workspace.gradient,
+              meta.gradient,
             )}
           >
             <meta.icon className="size-6 sm:size-7" />
@@ -147,7 +167,7 @@ export function WorkspaceHeader({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="truncate text-lg font-semibold leading-tight sm:text-xl">
-                {workspace.title}
+                {workspace.name}
               </h1>
               <Badge variant="secondary" title={meta.hint}>
                 {meta.label}
@@ -156,15 +176,35 @@ export function WorkspaceHeader({
                 variant="outline"
                 className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
               >
-                {workspace.stage}
-              </Badge>
-              <Badge variant="outline" className="gap-1 font-normal text-muted-foreground">
-                {pluralArtifacts(artifactCount)}
+                {stage}
               </Badge>
             </div>
             <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
-              {workspace.subtitle}
+              {workspaceSubtitle(workspace)}
             </p>
+
+            {/* Живые счётчики */}
+            <div
+              className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+              aria-label="Состав воркспейса"
+            >
+              {COUNT_ITEMS.map((item) => {
+                const value = workspace.counts[item.key];
+                return (
+                  <span
+                    key={item.key}
+                    title={`${item.label}: ${value}`}
+                    className={cn(
+                      "inline-flex items-center gap-1",
+                      value === 0 && "opacity-40",
+                    )}
+                  >
+                    <item.icon className="size-3.5" aria-hidden="true" />
+                    <span className="tabular-nums">{value}</span>
+                  </span>
+                );
+              })}
+            </div>
 
             {/* Прогресс: мобильная строка */}
             <div className="mt-2 sm:hidden">
@@ -182,7 +222,7 @@ export function WorkspaceHeader({
                 />
               </div>
               <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">
-                {workspace.progress}% · {workspace.updatedAgo}
+                {workspace.progress}% · {updatedAgo}
               </p>
             </div>
           </div>
@@ -203,7 +243,7 @@ export function WorkspaceHeader({
               />
             </div>
             <p className="mt-1 text-right text-[11px] tabular-nums text-muted-foreground">
-              {workspace.progress}% · {workspace.updatedAgo}
+              {workspace.progress}% · {updatedAgo}
             </p>
           </div>
 
@@ -303,7 +343,7 @@ export function WorkspaceHeader({
 
           <p className="text-xs text-muted-foreground">
             Тип «{meta.label}» · пайплайн из {WORKSPACE_STAGES[workspace.type].length}{" "}
-            стадий · создан {createdAgoOf(workspace)}
+            стадий · создан {timeAgo(workspace.createdAt)}
           </p>
 
           <DialogFooter>

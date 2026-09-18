@@ -30,6 +30,20 @@ import type {
   ThreadMode,
   User,
 } from "@/lib/types";
+import type {
+  ArtifactDto,
+  ArtifactType,
+  DashboardDto,
+  DocumentDto,
+  DocumentKind,
+  DocumentSectionDto,
+  EntityDto,
+  EntityKind,
+  FindingDto,
+  FindingStatus,
+  WorkspaceDto,
+  WorkspaceKind,
+} from "@/lib/workspace-types";
 
 const TOKEN_STORAGE_KEY = "vf_token";
 
@@ -536,5 +550,263 @@ export const api = {
     return request<{ entries: AuditLogEntry[] }>(
       `/api/admin/audit?limit=${limit}`,
     ).then((r) => r.entries);
+  },
+
+  /* ── Workspaces / Documents / Entities / Artifacts / AI (Фаза A) ── */
+
+  listWorkspaces(): Promise<WorkspaceDto[]> {
+    return request<{ workspaces: WorkspaceDto[] }>("/api/workspaces").then(
+      (r) => r.workspaces,
+    );
+  },
+
+  createWorkspace(body: {
+    type: WorkspaceKind;
+    name: string;
+    description?: string;
+  }): Promise<WorkspaceDto> {
+    return request<{ workspace: WorkspaceDto }>("/api/workspaces", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.workspace);
+  },
+
+  getWorkspace(id: string): Promise<WorkspaceDto> {
+    return request<{ workspace: WorkspaceDto }>(
+      `/api/workspaces/${encodeURIComponent(id)}`,
+    ).then((r) => r.workspace);
+  },
+
+  updateWorkspace(
+    id: string,
+    body: Partial<Pick<WorkspaceDto, "name" | "description" | "stage" | "stageIndex" | "progress">>,
+  ): Promise<WorkspaceDto> {
+    return request<{ workspace: WorkspaceDto }>(
+      `/api/workspaces/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.workspace);
+  },
+
+  async deleteWorkspace(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/workspaces/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  listDocuments(projectId: string): Promise<DocumentDto[]> {
+    return request<{ documents: DocumentDto[] }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/documents`,
+    ).then((r) => r.documents);
+  },
+
+  createDocument(
+    projectId: string,
+    body: { title: string; description?: string; kind?: DocumentKind },
+  ): Promise<DocumentDto> {
+    return request<{ document: DocumentDto }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/documents`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.document);
+  },
+
+  getDocument(id: string): Promise<DocumentDto> {
+    return request<{ document: DocumentDto }>(
+      `/api/documents/${encodeURIComponent(id)}`,
+    ).then((r) => r.document);
+  },
+
+  async updateDocument(
+    id: string,
+    body: { title?: string; description?: string | null },
+  ): Promise<DocumentDto> {
+    return request<{ document: DocumentDto }>(
+      `/api/documents/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.document);
+  },
+
+  async deleteDocument(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/documents/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  createSection(documentId: string, title: string): Promise<DocumentSectionDto> {
+    return request<{ section: DocumentSectionDto }>(
+      `/api/documents/${encodeURIComponent(documentId)}/sections`,
+      { method: "POST", body: JSON.stringify({ title }) },
+    ).then((r) => r.section);
+  },
+
+  updateSection(
+    id: string,
+    body: { title?: string; content?: string; status?: "draft" | "done" },
+  ): Promise<DocumentSectionDto> {
+    return request<{ section: DocumentSectionDto }>(
+      `/api/sections/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.section);
+  },
+
+  async deleteSection(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/sections/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  listEntities(projectId: string): Promise<EntityDto[]> {
+    return request<{ entities: EntityDto[] }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/entities`,
+    ).then((r) => r.entities);
+  },
+
+  createEntity(
+    projectId: string,
+    body: Partial<EntityDto> & { kind: EntityKind; name: string },
+  ): Promise<EntityDto> {
+    return request<{ entity: EntityDto }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/entities`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.entity);
+  },
+
+  getEntity(id: string): Promise<EntityDto> {
+    return request<{ entity: EntityDto }>(
+      `/api/entities/${encodeURIComponent(id)}`,
+    ).then((r) => r.entity);
+  },
+
+  updateEntity(
+    id: string,
+    body: Partial<
+      Pick<
+        EntityDto,
+        "name" | "short" | "description" | "attributes" | "tags" | "portrait" | "favorite"
+      >
+    >,
+  ): Promise<EntityDto> {
+    return request<{ entity: EntityDto }>(
+      `/api/entities/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.entity);
+  },
+
+  async deleteEntity(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/entities/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  listArtifacts(projectId: string, type?: string): Promise<ArtifactDto[]> {
+    const qs = type ? `?type=${encodeURIComponent(type)}` : "";
+    return request<{ artifacts: ArtifactDto[] }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/artifacts${qs}`,
+    ).then((r) => r.artifacts);
+  },
+
+  /** Все артефакты пользователя (Библиотека); опц. фильтр типа/воркспейса. */
+  listAllArtifacts(params?: {
+    type?: string;
+    projectId?: string;
+  }): Promise<ArtifactDto[]> {
+    const qs = new URLSearchParams();
+    if (params?.type) qs.set("type", params.type);
+    if (params?.projectId) qs.set("projectId", params.projectId);
+    const query = qs.toString();
+    return request<{ artifacts: ArtifactDto[] }>(
+      `/api/artifacts${query ? `?${query}` : ""}`,
+    ).then((r) => r.artifacts);
+  },
+
+  createArtifact(
+    projectId: string,
+    body: Partial<ArtifactDto> & { type: ArtifactType; title: string },
+  ): Promise<ArtifactDto> {
+    return request<{ artifact: ArtifactDto }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/artifacts`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.artifact);
+  },
+
+  updateArtifact(
+    id: string,
+    body: Partial<Pick<ArtifactDto, "title" | "description" | "stage" | "favorite">>,
+  ): Promise<ArtifactDto> {
+    return request<{ artifact: ArtifactDto }>(
+      `/api/artifacts/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.artifact);
+  },
+
+  async deleteArtifact(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/artifacts/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  listFindings(projectId: string, status?: string): Promise<FindingDto[]> {
+    const qs = new URLSearchParams({ projectId });
+    if (status) qs.set("status", status);
+    return request<{ findings: FindingDto[] }>(`/api/findings?${qs}`).then(
+      (r) => r.findings,
+    );
+  },
+
+  updateFinding(
+    id: string,
+    status: FindingStatus,
+  ): Promise<FindingDto> {
+    return request<{ finding: FindingDto }>(
+      `/api/findings/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify({ status }) },
+    ).then((r) => r.finding);
+  },
+
+  getDashboard(): Promise<DashboardDto> {
+    return request<DashboardDto>("/api/dashboard");
+  },
+
+  aiGenerateImage(body: {
+    projectId: string;
+    prompt: string;
+    title?: string;
+    entityId?: string;
+    stage?: string;
+    size?: string;
+  }): Promise<ArtifactDto> {
+    return request<{ artifact: ArtifactDto }>("/api/ai/image", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.artifact);
+  },
+
+  aiTts(body: {
+    projectId: string;
+    text: string;
+    title?: string;
+    voice?: string;
+    speed?: number;
+  }): Promise<ArtifactDto> {
+    return request<{ artifact: ArtifactDto }>("/api/ai/tts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.artifact);
+  },
+
+  aiAnalyze(body: {
+    documentId: string;
+    scope?: "manuscript" | "spec" | "article";
+  }): Promise<FindingDto[]> {
+    return request<{ findings: FindingDto[] }>("/api/ai/analyze", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.findings);
+  },
+
+  aiDescribe(entityId: string): Promise<{ entityId: string; description: string }> {
+    return request<{ entityId: string; description: string }>("/api/ai/describe", {
+      method: "POST",
+      body: JSON.stringify({ entityId }),
+    });
   },
 };
