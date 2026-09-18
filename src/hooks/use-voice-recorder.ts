@@ -434,7 +434,10 @@ export function useVoiceRecorder(options?: {
 
     // The hook may have been reset or unmounted while the permission prompt
     // was open — never start recording on a dead/aborted session.
-    if (stateRef.current !== "requesting" || !aliveRef.current) {
+    if (
+      (stateRef.current as VoiceRecorderState) !== "requesting" ||
+      !aliveRef.current
+    ) {
       stream.getTracks().forEach((track) => track.stop());
       return;
     }

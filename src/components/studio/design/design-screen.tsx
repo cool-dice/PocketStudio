@@ -1,50 +1,302 @@
 "use client";
 
 /**
- * Дизайн — единый редактор: растр (Photoshop-lite), макеты (Figma-lite)
- * и превью/дизайнер интерфейса (курсор-стиль, IDE).
- * Визуальный макет: режимы переключаются локально, без бэкенда.
+ * DesignScreen v2 (Фаза A) — «Дизайн» на живых данных БД.
+ * Две вкладки: «Мудборд» (все image/portrait воркспейса; stage "design"
+ * = в мудборде, emerald-рамка) и «Стиль» (LLM-палитра стиля —
+ * mood, 5–6 цветов с копией hex, пара шрифтов, совет).
+ * Вкладка воркспейса: workspaceId от шва workspace-tabs.
+ * Глобальный экран: чипы выбора воркспейса (counts.images).
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Frame,
-  Image as ImageIcon,
-  Monitor,
+  Images,
+  Palette as PaletteIcon,
   PenTool,
-  Save,
+  RefreshCw,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   ModuleHeader,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { api, ApiError } from "@/lib/api";
+import { briefFromArtifact, paletteFromArtifact } from "@/lib/palette";
+import { useAppUi } from "@/lib/store";
+import type { ArtifactDto, WorkspaceDto } from "@/lib/workspace-types";
+import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import { SelectableChip } from "../images/chip";
+import { MoodboardTab, type GeneratingInfo } from "./moodboard-tab";
+import { StyleTab, type LoadedPalette } from "./style-tab";
 import {
-  KIND_META,
-  RECENT_FILES,
-  type DesignFile,
-  type DesignMode,
-} from "./design-data";
-import { FilesCatalog } from "./files-catalog";
-import { LayoutTab } from "./layout-tab";
-import { PreviewTab } from "./preview-tab";
-import { RasterTab } from "./raster-tab";
+  boardPresetById,
+  boardTileFromArtifact,
+  type FrameRequest,
+} from "./palette-data";
 
-export function DesignScreen({ onOpenMobileNav }: ModuleScreenProps) {
-  const [mode, setMode] = useState<DesignMode>("raster");
-  const [fileId, setFileId] = useState(RECENT_FILES[0].id);
+type DesignTab = "moodboard" | "style";
 
-  const file = RECENT_FILES.find((f) => f.id === fileId) ?? RECENT_FILES[0];
+export function DesignScreen({
+  onOpenMobileNav,
+  workspaceId,
+}: ModuleScreenProps & { workspaceId?: string }) {
+  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
+  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const effectiveId = workspaceId ?? pickedId;
 
-  /** Открытие файла из каталога: режим следует за типом файла. */
-  const openFile = (next: DesignFile) => {
-    setFileId(next.id);
-    setMode(next.mode);
-  };
+  /* Все артефакты выбранного воркспейса (одним запросом). */
+  const [artifacts, setArtifacts] = useState<ArtifactDto[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const KindIcon = KIND_META[file.kind].icon;
+  /* Вкладки + генерация кадра (30–45 сек) и палитры (~10–20 сек). */
+  const [tab, setTab] = useState<DesignTab>("moodboard");
+  const [generating, setGenerating] = useState<GeneratingInfo | null>(null);
+  const [paletteBusy, setPaletteBusy] = useState(false);
+
+  const setMainArea = useAppUi((s) => s.setMainArea);
+
+  /* Чипы воркспейсов — только на глобальном экране. */
+  useEffect(() => {
+    if (workspaceId) return;
+    let cancelled = false;
+    api
+      .listWorkspaces()
+      .then((ws) => {
+        if (!cancelled) setWorkspaces(ws);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  /* Загрузка артефактов воркспейса. */
+  const loadArtifacts = useCallback(async () => {
+    if (!effectiveId) {
+      setArtifacts([]);
+      setLoadError(null);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const list = await api.listArtifacts(effectiveId);
+      setArtifacts(list);
+    } catch (err) {
+      setArtifacts([]);
+      setLoadError(
+        err instanceof ApiError ? err.message : "Не удалось загрузить дизайн",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [effectiveId]);
+
+  useEffect(() => {
+    void loadArtifacts();
+  }, [loadArtifacts]);
+
+  /* Производные данные: плитки мудборда + палитра стиля. */
+  const boardTiles = useMemo(
+    () =>
+      artifacts
+        .filter((a) => a.type === "image" || a.type === "portrait")
+        .map(boardTileFromArtifact),
+    [artifacts],
+  );
+
+  const loadedPalette = useMemo<LoadedPalette | null>(() => {
+    for (const a of artifacts) {
+      const palette = paletteFromArtifact(a);
+      if (palette) {
+        return {
+          palette,
+          createdAt: a.createdAt,
+          brief: briefFromArtifact(a),
+        };
+      }
+    }
+    return null;
+  }, [artifacts]);
+
+  /* Новые артефакты кладём наверх — но только если воркспейс не сменился. */
+  const prependArtifact = useCallback((artifact: ArtifactDto) => {
+    setArtifacts((prev) =>
+      prev.length === 0 || prev[0].projectId === artifact.projectId
+        ? [artifact, ...prev.filter((a) => a.id !== artifact.id)]
+        : prev,
+    );
+  }, []);
+
+  /* Генерация кадра → api.aiGenerateImage со stage "design". */
+  const runGenerate = useCallback(
+    async (request: FrameRequest) => {
+      if (!effectiveId) return;
+      const preset = boardPresetById(request.size);
+      setGenerating({
+        prompt: request.prompt,
+        sizeLabel: preset.size,
+        aspect: preset.aspect,
+      });
+      try {
+        const artifact = await api.aiGenerateImage({
+          projectId: effectiveId,
+          prompt: request.prompt,
+          size: request.size,
+          stage: "design",
+        });
+        prependArtifact(artifact);
+        toast.success("Кадр готов и уже в мудборде", {
+          description: artifact.title,
+        });
+      } catch (err) {
+        toast.error(
+          err instanceof ApiError ? err.message : "Генерация не удалась",
+          { description: "Попробуйте ещё раз — обычно это помогает." },
+        );
+      } finally {
+        setGenerating(null);
+      }
+    },
+    [effectiveId, prependArtifact],
+  );
+
+  /* Мудборд: stage "design" ⇄ null — оптимистично с откатом. */
+  const toggleBoard = useCallback(
+    async (id: string) => {
+      const current = artifacts.find((a) => a.id === id);
+      if (!current) return;
+      const next = current.stage === "design" ? null : "design";
+      setArtifacts((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, stage: next } : a)),
+      );
+      try {
+        await api.updateArtifact(id, { stage: next });
+      } catch {
+        setArtifacts((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, stage: current.stage } : a)),
+        );
+        toast.error("Не удалось обновить мудборд");
+      }
+    },
+    [artifacts],
+  );
+
+  /* Удаление — оптимистично с откатом. */
+  const removeArtifact = useCallback(
+    async (id: string) => {
+      const snapshot = artifacts;
+      setArtifacts((prev) => prev.filter((a) => a.id !== id));
+      try {
+        await api.deleteArtifact(id);
+        toast.success("Работа удалена");
+      } catch {
+        setArtifacts(snapshot);
+        toast.error("Не удалось удалить работу");
+      }
+    },
+    [artifacts],
+  );
+
+  /* Палитра стиля → POST /api/ai/palette (обновляет карту). */
+  const generatePalette = useCallback(
+    async (brief: string) => {
+      if (!effectiveId || paletteBusy) return;
+      setPaletteBusy(true);
+      try {
+        const { artifact, palette } = await api.aiGeneratePalette({
+          projectId: effectiveId,
+          brief: brief || undefined,
+        });
+        prependArtifact(artifact);
+        setTab("style");
+        toast.success("Палитра собрана", {
+          description: palette.mood || "Карта стиля обновлена",
+        });
+      } catch (err) {
+        toast.error(
+          err instanceof ApiError ? err.message : "Не удалось собрать палитру",
+          { description: "Попробуйте ещё раз или уточните бриф." },
+        );
+      } finally {
+        setPaletteBusy(false);
+      }
+    },
+    [effectiveId, paletteBusy, prependArtifact],
+  );
+
+  /* ── Разметка ── */
+
+  const tabs = (
+    <Tabs
+      value={tab}
+      onValueChange={(v) => setTab(v as DesignTab)}
+      className="flex min-h-0 flex-1 flex-col gap-3"
+    >
+      <TabsList className="shrink-0 self-start">
+        <TabsTrigger value="moodboard">
+          <Images className="size-4" aria-hidden="true" />
+          Мудборд
+        </TabsTrigger>
+        <TabsTrigger value="style">
+          <PaletteIcon className="size-4" aria-hidden="true" />
+          Стиль
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="moodboard" className="flex min-h-0 flex-1 flex-col">
+        <MoodboardTab
+          tiles={boardTiles}
+          loading={loading}
+          generating={generating}
+          onGenerate={(request) => void runGenerate(request)}
+          onToggleBoard={(id) => void toggleBoard(id)}
+          onDelete={(id) => void removeArtifact(id)}
+        />
+      </TabsContent>
+      <TabsContent value="style" className="flex min-h-0 flex-1 flex-col">
+        <StyleTab
+          loaded={loadedPalette}
+          loading={loading}
+          busy={paletteBusy}
+          onGenerate={(brief) => void generatePalette(brief)}
+        />
+      </TabsContent>
+    </Tabs>
+  );
+
+  const content = loadError ? (
+    <div
+      role="alert"
+      className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center"
+    >
+      <p className="text-sm text-muted-foreground">{loadError}</p>
+      <Button size="sm" variant="outline" onClick={() => void loadArtifacts()}>
+        <RefreshCw className="size-4" aria-hidden="true" />
+        Повторить
+      </Button>
+    </div>
+  ) : effectiveId ? (
+    tabs
+  ) : (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center">
+      <PaletteIcon
+        className="size-8 text-muted-foreground/50"
+        aria-hidden="true"
+      />
+      <p className="text-sm text-muted-foreground">
+        Выберите воркспейс — покажем его мудборд и палитру стиля
+      </p>
+    </div>
+  );
 
   return (
     <section
@@ -54,65 +306,73 @@ export function DesignScreen({ onOpenMobileNav }: ModuleScreenProps) {
       <ModuleHeader
         icon={PenTool}
         title="Дизайн"
-        description="Единый редактор: растр, макеты и правки интерфейса"
-        stage="wip"
+        description="Мудборд референсов и палитра стиля"
+        stage="beta"
         onOpenMobileNav={onOpenMobileNav}
+      />
+
+      {/* Глобальный экран скроллится целиком; вкладка воркспейса —
+          внутренние скроллы (сетка/карта). */}
+      <main
+        className={
+          workspaceId
+            ? "flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6"
+            : "vf-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6"
+        }
       >
-        <Button variant="outline" size="sm">
-          <Save className="size-4" aria-hidden="true" />
-          Сохранить
-        </Button>
-      </ModuleHeader>
-
-      {/* Контекст-бар: файл + режимы редактора */}
-      <div className="shrink-0 border-b bg-muted/30 px-3 py-2 sm:px-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <FilesCatalog currentId={fileId} onSelect={openFile} />
-          <span className="flex min-w-0 items-center gap-2 rounded-lg border bg-background px-2.5 py-1.5">
-            <KindIcon
-              className="size-3.5 shrink-0 text-primary"
-              aria-hidden="true"
-            />
-            <span className="min-w-0 truncate text-xs font-medium">
-              {file.name}
-            </span>
-            <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
-              · {file.updated}
-            </span>
-          </span>
-
-          <Tabs
-            value={mode}
-            onValueChange={(v) => setMode(v as DesignMode)}
-            className="ml-auto"
+        {!workspaceId ? (
+          <section
+            aria-label="Выбор воркспейса"
+            className="shrink-0 rounded-xl border bg-card p-4"
           >
-            <TabsList className="grid w-full grid-cols-3 sm:inline-flex sm:w-auto">
-              <TabsTrigger value="raster">
-                <ImageIcon className="size-3.5" aria-hidden="true" />
-                Растр
-              </TabsTrigger>
-              <TabsTrigger value="layout">
-                <Frame className="size-3.5" aria-hidden="true" />
-                Макет
-              </TabsTrigger>
-              <TabsTrigger value="preview">
-                <Monitor className="size-3.5" aria-hidden="true" />
-                Превью (IDE)
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-      </div>
+            <h2 className="text-sm font-medium">Дизайн какого воркспейса?</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Мудборд и палитра живут внутри воркспейса — выберите, где
+              собираем стиль.
+            </p>
+            {workspaces === null ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {Array.from({ length: 4 }, (_, i) => (
+                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
+                ))}
+              </div>
+            ) : workspaces.length === 0 ? (
+              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
+                <p className="text-sm text-muted-foreground">
+                  Пока нет ни одного воркспейса — сначала создайте его.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => setMainArea("workspaces")}
+                >
+                  <Images className="size-4" aria-hidden="true" />
+                  К воркспейсам
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {workspaces.map((ws) => {
+                  const Icon = WORKSPACE_TYPE_META[ws.type].icon;
+                  return (
+                    <SelectableChip
+                      key={ws.id}
+                      label={ws.name}
+                      icon={Icon}
+                      selected={pickedId === ws.id}
+                      count={ws.counts.images}
+                      onClick={() =>
+                        setPickedId(pickedId === ws.id ? null : ws.id)
+                      }
+                      className="max-w-full"
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ) : null}
 
-      {/* Активный режим */}
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {mode === "raster" ? (
-          <RasterTab file={file} />
-        ) : mode === "layout" ? (
-          <LayoutTab file={file} />
-        ) : (
-          <PreviewTab file={file} />
-        )}
+        {content}
       </main>
     </section>
   );

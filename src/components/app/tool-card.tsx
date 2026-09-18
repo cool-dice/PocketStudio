@@ -391,7 +391,7 @@ export const ToolCard = memo(function ToolCard({
                 подробнее
               </summary>
               {projectPreview ??
-                ((): ReactNode => (
+                (() => (
                   <pre className="vf-scroll mt-1.5 max-h-40 overflow-auto rounded-lg bg-background/80 p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
                     {JSON.stringify(
                       { tool: message.toolName, args, result },
@@ -399,7 +399,7 @@ export const ToolCard = memo(function ToolCard({
                       2,
                     )}
                   </pre>
-                ))}
+                ))()}
             </details>
           )}
         </div>

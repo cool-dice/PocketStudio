@@ -30,6 +30,7 @@ import type {
   ThreadMode,
   User,
 } from "@/lib/types";
+import type { StylePalette } from "@/lib/palette";
 import type {
   ArtifactDto,
   ArtifactType,
@@ -593,6 +594,31 @@ export const api = {
     });
   },
 
+  /** ZIP-экспорт воркспейса (артефакты+документы+сущности) как Blob. */
+  async exportWorkspaceZip(projectId: string): Promise<Blob> {
+    let res: Response;
+    try {
+      res = await fetch(
+        `/api/workspaces/${encodeURIComponent(projectId)}/export`,
+        {
+          credentials: "same-origin",
+          headers: authHeaders(),
+        },
+      );
+    } catch {
+      throw new ApiError("Нет соединения с сервером", 0);
+    }
+    if (!res.ok) {
+      if (res.status === 401) clearAuthToken();
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new ApiError(
+        body.error ?? `Ошибка запроса (${res.status})`,
+        res.status,
+      );
+    }
+    return res.blob();
+  },
+
   listDocuments(projectId: string): Promise<DocumentDto[]> {
     return request<{ documents: DocumentDto[] }>(
       `/api/workspaces/${encodeURIComponent(projectId)}/documents`,
@@ -808,5 +834,33 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ entityId }),
     });
+  },
+
+  /** Собрать LLM-палитру стиля → артефакт (type file, stage style). */
+  aiGeneratePalette(body: {
+    projectId: string;
+    brief?: string;
+  }): Promise<{ artifact: ArtifactDto; palette: StylePalette }> {
+    return request<{ artifact: ArtifactDto; palette: StylePalette }>(
+      "/api/ai/palette",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  },
+
+  /** LLM-план монетизации воркспейса → документ kind="spec" с секциями. */
+  aiMonetize(
+    projectId: string,
+    brief?: string,
+  ): Promise<{ document: DocumentDto }> {
+    return request<{ document: DocumentDto; plan: unknown }>(
+      "/api/ai/monetize",
+      {
+        method: "POST",
+        body: JSON.stringify({ projectId, ...(brief ? { brief } : {}) }),
+      },
+    );
   },
 };

@@ -105,6 +105,12 @@ function noteFromToolResult(tool: string, result: unknown): Note | null {
     rawText: typeof n.rawText === "string" ? n.rawText : null,
     status: (typeof n.status === "string" ? n.status : "pending") as NoteStatus,
     favorite: typeof n.favorite === "boolean" ? n.favorite : false,
+    // 4-блочный анализ в превью сайдбара не показывается (поля — null).
+    positive: null,
+    negative: null,
+    final: null,
+    recommendations: null,
+    analyzedAt: null,
     createdAt:
       typeof n.createdAt === "string"
         ? n.createdAt
@@ -178,7 +184,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         updatedAt: message.createdAt,
         lastMessage: {
           content: message.content,
-          role: message.role,
+          // Превью сайдбара показывает только текстовые роли пользователя/студии.
+          role: message.role === "user" ? "user" : "assistant",
           createdAt: message.createdAt,
         },
       };

@@ -47,29 +47,70 @@ export function saveGeneratedFile(
 
 /* ─────────────────────────── LLM (JSON) ─────────────────────────── */
 
-/** Вытащить первый JSON-объект/массив из ответа модели. */
+/** Вытащить первый JSON-объект/массив из ответа модели.
+ *  Сбалансированное сканирование скобок (учитывая строки) надёжнее
+ *  lastIndexOf: переживает текст и скобки после JSON. */
 function extractJson(text: string): unknown {
   const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
   const start = cleaned.search(/[[{]/);
   if (start < 0) throw new Error("Модель не вернула JSON");
   const openChar = cleaned[start];
   const closeChar = openChar === "[" ? "]" : "}";
-  const end = cleaned.lastIndexOf(closeChar);
-  if (end <= start) throw new Error("Некорректный JSON от модели");
+
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let end = -1;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (esc) {
+      esc = false;
+      continue;
+    }
+    if (ch === "\\") {
+      esc = true;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = !inStr;
+      continue;
+    }
+    if (inStr) continue;
+    if (ch === openChar) {
+      depth++;
+    } else if (ch === closeChar) {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end < 0) throw new Error("Некорректный JSON от модели");
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
+/** LLM → JSON с одним автоповтором: LLM иногда выдаёт битый JSON,
+ *  вторая попытка почти всегда валидна. */
 export async function aiChatJson<T>(system: string, user: string): Promise<T> {
   const zai = await getZai();
-  const response = await zai.chat.completions.create({
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-    thinking: { type: "disabled" },
-  });
-  const content = response.choices[0]?.message?.content ?? "";
-  return extractJson(content) as T;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await zai.chat.completions.create({
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      thinking: { type: "disabled" },
+    });
+    const content = response.choices[0]?.message?.content ?? "";
+    try {
+      return extractJson(content) as T;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Модель не вернула JSON");
 }
 
 /** LLM-текст (не JSON) — для генерации описаний. */
@@ -87,7 +128,29 @@ export async function aiChatText(system: string, user: string): Promise<string> 
 
 /* ─────────────────────────── Image generation ─────────────────────────── */
 
-const IMAGE_SIZES = new Set(["1024x1024", "1152x864", "864x1152", "1440x720", "720x1440"]);
+/**
+ * Санитайзер размера картинки: апстрим-требования — стороны 512–2880,
+ * кратные 32, и суммарно ≤ 2^22 пикселей. Пресеты вида «1440x720»
+ * доводятся до ближайших валидных (720 → 736), пропорция сохраняется.
+ */
+function sanitizeImageSize(size: string): string {
+  const m = /^(\d{3,4})x(\d{3,4})$/.exec(size.trim());
+  const round32 = (v: number) =>
+    Math.min(2880, Math.max(512, Math.round(v / 32) * 32));
+  let w = m ? round32(Number(m[1])) : 1024;
+  let h = m ? round32(Number(m[2])) : 1024;
+
+  const MAX_PIXELS = 2 ** 22;
+  if (w * h > MAX_PIXELS) {
+    const scale = Math.sqrt(MAX_PIXELS / (w * h));
+    w = round32(w * scale);
+    h = round32(h * scale);
+    // Округление кратности могло снова превысить бюджет — жмём стороны.
+    while (w * h > MAX_PIXELS && w > 512) w = round32(w - 32);
+    while (w * h > MAX_PIXELS && h > 512) h = round32(h - 32);
+  }
+  return `${w}x${h}`;
+}
 
 /** Сгенерировать изображение и сохранить в public/gen → {url}. */
 export async function aiGenerateImage(
@@ -95,7 +158,7 @@ export async function aiGenerateImage(
   size = "1024x1024",
 ): Promise<{ url: string }> {
   const zai = await getZai();
-  const safeSize = IMAGE_SIZES.has(size) ? size : "1024x1024";
+  const safeSize = sanitizeImageSize(size);
   const response = await zai.images.generations.create({
     prompt,
     size: safeSize as "1024x1024",

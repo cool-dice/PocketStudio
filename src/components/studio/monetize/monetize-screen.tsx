@@ -1,27 +1,141 @@
 "use client";
 
-import { Coins, Landmark } from "lucide-react";
+/**
+ * MonetizeScreen (5-c) — «Монетизация» на живых данных.
+ *
+ * Вкладка воркспейса (workspaceId передаётся швом workspace-tabs):
+ *  1) карточка «План монетизации» — LLM-план (POST /api/ai/monetize),
+ *     сохранённый как Document kind="spec" с секциями; рендер по секциям,
+ *     регенерация через AlertDialog с брифом;
+ *  2) «Прогноз» — CSS bar-chart из маркера ПРОГНОЗ_JSON секции плана;
+ *  3) «Активы к публикации» — реальные артефакты воркспейса из БД.
+ * Глобальный экран (без id): чипы воркспейсов → выбрал → тот же контент.
+ * Выплаты и биллинг не показываем — за пределами песочницы.
+ */
 
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Coins, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+
+import { SelectableChip } from "@/components/studio/images/chip";
 import {
   ModuleHeader,
-  WipBanner,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
 import { Button } from "@/components/ui/button";
-
-import { PayoutsSection } from "./payouts-section";
-import { PricingTiers } from "./pricing-tiers";
-import { PublicationsSection } from "./publications-section";
-import { RevenueChartCard } from "./revenue-chart";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api, ApiError } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
+import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import type {
+  ArtifactDto,
+  DocumentDto,
+  WorkspaceDto,
+} from "@/lib/workspace-types";
+import { AssetsSection } from "./assets-section";
+import { ForecastChart } from "./forecast-chart";
+import { isPlanDocument, planFromDocument } from "./plan-data";
+import { PlanCard } from "./plan-card";
 import { SectionHeading } from "./section-heading";
-import { StatTiles } from "./stat-tiles";
 
-/**
- * Monetization module — income stats, a CSS-only revenue chart, my
- * publications, studio access tiers and payout methods.
- * Pure visual mock: no fetch, local state only where needed.
- */
-export function MonetizeScreen({ onOpenMobileNav }: ModuleScreenProps) {
+export function MonetizeScreen({
+  onOpenMobileNav,
+  workspaceId,
+}: ModuleScreenProps & { workspaceId?: string }) {
+  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
+  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const effectiveId = workspaceId ?? pickedId;
+
+  /* Контент выбранного воркспейса. */
+  const [planDoc, setPlanDoc] = useState<DocumentDto | null>(null);
+  const [artifacts, setArtifacts] = useState<ArtifactDto[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+
+  const setMainArea = useAppUi((s) => s.setMainArea);
+
+  /* Загрузка списка воркспейсов для глобального экрана. */
+  useEffect(() => {
+    if (workspaceId) return;
+    let cancelled = false;
+    api
+      .listWorkspaces()
+      .then((ws) => {
+        if (!cancelled) setWorkspaces(ws);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  /* Загрузка контента воркспейса: план-документ + все артефакты. */
+  const loadContent = useCallback(async () => {
+    if (!effectiveId) {
+      setPlanDoc(null);
+      setArtifacts([]);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [docs, arts] = await Promise.all([
+        api.listDocuments(effectiveId),
+        api.listArtifacts(effectiveId),
+      ]);
+      const found = docs.find(isPlanDocument) ?? null;
+      const full = found ? await api.getDocument(found.id) : null;
+      setPlanDoc(full);
+      setArtifacts(arts);
+    } catch (err) {
+      setPlanDoc(null);
+      setArtifacts([]);
+      setLoadError(
+        err instanceof ApiError ? err.message : "Не удалось загрузить данные",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [effectiveId]);
+
+  useEffect(() => {
+    void loadContent();
+  }, [loadContent]);
+
+  const plan = useMemo(
+    () => (planDoc ? planFromDocument(planDoc) : null),
+    [planDoc],
+  );
+
+  /* Сборка/пересборка плана через LLM (15–25 секунд). */
+  const runGenerate = useCallback(
+    async (brief: string) => {
+      if (!effectiveId) return;
+      setGenerating(true);
+      try {
+        const res = await api.aiMonetize(effectiveId, brief || undefined);
+        setPlanDoc(res.document);
+        toast.success("План монетизации готов", {
+          description: res.document.title,
+        });
+      } catch (err) {
+        toast.error(
+          err instanceof ApiError ? err.message : "Не удалось собрать план",
+          { description: "Модель иногда занята — попробуйте ещё раз." },
+        );
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [effectiveId],
+  );
+
+  const showContent = Boolean(effectiveId);
+
   return (
     <section
       aria-label="Монетизация"
@@ -30,50 +144,116 @@ export function MonetizeScreen({ onOpenMobileNav }: ModuleScreenProps) {
       <ModuleHeader
         icon={Coins}
         title="Монетизация"
-        description="Публикации, тарифы и доход со ваших работ"
-        stage="soon"
+        description="LLM-план монетизации воркспейса и активы к публикации"
+        stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       >
-        <Button variant="outline" size="sm">
-          <Landmark className="size-4" aria-hidden="true" />
-          Подключить выплаты
-        </Button>
+        {showContent && loadError ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void loadContent()}
+          >
+            <RefreshCw className="size-4" aria-hidden="true" />
+            Повторить
+          </Button>
+        ) : null}
       </ModuleHeader>
 
-      <div className="vf-scroll min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
-          <StatTiles />
+      <main className="vf-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
+        {/* Глобальный экран: выбор воркспейса чипами. */}
+        {!workspaceId ? (
+          <section
+            aria-label="Выбор воркспейса"
+            className="rounded-xl border bg-card p-4"
+          >
+            <h2 className="text-sm font-medium">План какого воркспейса?</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              План монетизации живёт внутри воркспейса — выберите, для чего
+              считаем.
+            </p>
+            {workspaces === null ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {Array.from({ length: 4 }, (_, i) => (
+                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
+                ))}
+              </div>
+            ) : workspaces.length === 0 ? (
+              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
+                <p className="text-sm text-muted-foreground">
+                  Пока нет ни одного воркспейса — сначала создайте его.
+                </p>
+                <Button size="sm" onClick={() => setMainArea("workspaces")}>
+                  <Coins className="size-4" aria-hidden="true" />
+                  К воркспейсам
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {workspaces.map((ws) => {
+                  const Meta = WORKSPACE_TYPE_META[ws.type];
+                  const Icon = Meta.icon;
+                  return (
+                    <SelectableChip
+                      key={ws.id}
+                      label={ws.name}
+                      icon={Icon}
+                      selected={pickedId === ws.id}
+                      count={ws.counts.images + ws.counts.audio}
+                      onClick={() =>
+                        setPickedId(pickedId === ws.id ? null : ws.id)
+                      }
+                      className="max-w-full"
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ) : null}
 
-          <RevenueChartCard />
-
-          <section aria-label="Мои публикации" className="space-y-3">
-            <SectionHeading
-              title="Мои публикации"
-              hint="портфолио: книги, статьи, треки, курсы"
+        {!showContent ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center">
+            <Coins
+              className="size-8 text-muted-foreground/50"
+              aria-hidden="true"
             />
-            <PublicationsSection />
-          </section>
-
-          <section aria-label="Тарифы студии" className="space-y-3">
-            <SectionHeading
-              title="Тарифы студии"
-              hint="продажа доступа к студии"
+            <p className="text-sm text-muted-foreground">
+              Выберите воркспейс — соберём для него план
+            </p>
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
+            <p className="text-sm text-muted-foreground">{loadError}</p>
+            <Button size="sm" variant="outline" onClick={() => void loadContent()}>
+              <RefreshCw className="size-4" aria-hidden="true" />
+              Повторить
+            </Button>
+          </div>
+        ) : (
+          <>
+            <PlanCard
+              planDoc={planDoc}
+              plan={plan}
+              generating={generating}
+              onGenerate={(brief) => void runGenerate(brief)}
             />
-            <PricingTiers />
-          </section>
 
-          <section aria-label="Способы выплат" className="space-y-3">
-            <SectionHeading title="Способы выплат" />
-            <PayoutsSection />
-          </section>
+            <section aria-label="Прогноз дохода" className="space-y-3">
+              <SectionHeading
+                title="Прогноз"
+                hint="помесячно, ₽ — из плана монетизации"
+              />
+              <ForecastChart
+                forecast={plan?.forecast ?? null}
+                loading={loading}
+              />
+            </section>
 
-          <WipBanner
-            title="Скоро: приём платежей"
-            description="Приём платежей подключается после релиза публичной версии"
-            features={["ЮKassa", "Boosty", "Gumroad", "крипта"]}
-          />
-        </div>
-      </div>
+            <AssetsSection artifacts={artifacts} loading={loading} />
+          </>
+        )}
+      </main>
     </section>
   );
 }

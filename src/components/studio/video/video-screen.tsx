@@ -1,91 +1,59 @@
 "use client";
 
 /**
- * Видео — карманная киностудия (флагманский модуль).
- * Два режима: «Продакшн» (пайплайн, превью, раскадровка, сценарий)
- * и «Монтаж» — NLE-монтажный стол (Premiere/Vegas-lite, вкладка PS-2).
- * Генерация подключается позже.
+ * Видео (Task 5-b) — студия раскадровки: сцены с реальными кадрами
+ * (AI-генерация изображений) и озвучкой (TTS) + браузерный плеер,
+ * проигрывающий «фильм» из сцен.
+ *
+ * Вкладка воркспейса (workspaceId из шва workspace-tabs) — сразу контент
+ * сценария. Глобальный экран (без id) — выбор воркспейса чипами, затем
+ * тот же контент (как в images-screen).
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Clapperboard, Film, Images } from "lucide-react";
 
-import {
-  ChevronDown,
-  Clapperboard,
-  Film,
-  Languages,
-  MonitorPlay,
-  Plus,
-  Scissors,
-  Timer,
-} from "lucide-react";
-
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ModuleHeader,
-  WipBanner,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
+import { cn } from "@/lib/utils";
+import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import type { WorkspaceDto } from "@/lib/workspace-types";
+import { StoryboardWorkspace } from "./storyboard-workspace";
 
-import { EditingTab } from "./editing-tab";
-import { PipelineStepper } from "./pipeline-stepper";
-import { PreviewPlayer } from "./preview-player";
-import { SceneStrip } from "./scene-strip";
-import { SidePanel } from "./side-panel";
-import { Timeline } from "./timeline";
-import {
-  ACTIVE_STEP,
-  CURRENT_SECONDS,
-  FILM_PROJECT,
-  PROJECTS,
-  SCENES,
-  TIMELINE_SCENES,
-} from "./video-data";
+const VIDEO_DESCRIPTION =
+  "Раскадровка: сцены с AI-кадрами и озвучкой + плеер сборки";
 
-/** Индекс шага «Монтаж» в конвейере производства. */
-const MONTAGE_STEP = 4;
+export function VideoScreen({
+  onOpenMobileNav,
+  workspaceId,
+}: ModuleScreenProps & { workspaceId?: string }) {
+  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
+  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const effectiveId = workspaceId ?? pickedId;
+  const setMainArea = useAppUi((s) => s.setMainArea);
 
-type VideoView = "production" | "editing";
-
-export function VideoScreen({ onOpenMobileNav }: ModuleScreenProps) {
-  const [playing, setPlaying] = useState(false);
-  const [selectedSceneId, setSelectedSceneId] = useState(3);
-  const [activeStep, setActiveStep] = useState(ACTIVE_STEP);
-  const [project, setProject] = useState(PROJECTS[0]);
-  const [view, setView] = useState<VideoView>("production");
-
-  const selectedScene =
-    SCENES.find((s) => s.id === selectedSceneId) ?? SCENES[2];
-  const isFilm = project === FILM_PROJECT;
-  const formatBadges = [
-    { icon: MonitorPlay, label: "16:9" },
-    { icon: Film, label: "1080p" },
-    { icon: Timer, label: isFilm ? "14:32" : "~90 сек" },
-    { icon: Languages, label: "Русская озвучка" },
-  ];
-
-  /** Клик по шагу конвейера: «Монтаж» открывает NLE, остальные — продакшн. */
-  const handleStepSelect = (index: number) => {
-    setActiveStep(index);
-    if (index === MONTAGE_STEP) {
-      setView("editing");
-      setProject(FILM_PROJECT);
-    } else {
-      setView("production");
-    }
-  };
-
-  const handleViewChange = (value: string) => {
-    const next = value as VideoView;
-    setView(next);
-    if (next === "editing") {
-      setActiveStep(MONTAGE_STEP);
-      setProject(FILM_PROJECT);
-    } else if (activeStep === MONTAGE_STEP) {
-      setActiveStep(ACTIVE_STEP);
-    }
-  };
+  useEffect(() => {
+    if (workspaceId) return undefined;
+    let cancelled = false;
+    api
+      .listWorkspaces()
+      .then((list) => {
+        if (!cancelled) setWorkspaces(list);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
 
   return (
     <section
@@ -95,136 +63,89 @@ export function VideoScreen({ onOpenMobileNav }: ModuleScreenProps) {
       <ModuleHeader
         icon={Clapperboard}
         title="Видео"
-        description="Карманная киностудия: сценарий, раскадровка, монтаж"
-        stage="wip"
+        description={VIDEO_DESCRIPTION}
+        stage="beta"
         onOpenMobileNav={onOpenMobileNav}
-      >
-        <Button variant="outline" size="sm">
-          <Plus aria-hidden="true" />
-          Новый проект
-        </Button>
-        <Button size="sm">
-          <Film aria-hidden="true" />
-          Рендер
-        </Button>
-      </ModuleHeader>
+      />
 
-      {/* 1. Проект и формат */}
-      <div className="shrink-0 border-b bg-muted/30 px-4 py-3 sm:px-6">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-wrap items-center gap-x-3 gap-y-2">
-          <label className="relative flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border bg-background pl-3 pr-2 shadow-xs sm:max-w-xs sm:flex-none">
-            <Clapperboard
-              className="size-4 shrink-0 text-primary"
-              aria-hidden="true"
-            />
-            <select
-              aria-label="Проект"
-              value={project}
-              onChange={(e) => setProject(e.target.value)}
-              className="h-full w-full appearance-none truncate bg-transparent pr-6 text-sm font-medium outline-none"
-            >
-              {PROJECTS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              className="pointer-events-none absolute right-2.5 size-4 text-muted-foreground"
-              aria-hidden="true"
-            />
-          </label>
-          <ul
-            className="ml-auto flex flex-wrap items-center gap-1.5"
-            aria-label="Параметры формата"
-          >
-            {formatBadges.map((badge) => (
-              <li
-                key={badge.label}
-                className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-[11px] text-muted-foreground"
-              >
-                <badge.icon className="size-3.5" aria-hidden="true" />
-                {badge.label}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      {/* 2. Конвейер производства */}
-      <div className="shrink-0 border-b px-4 py-3 sm:px-6">
-        <div className="mx-auto w-full max-w-[1600px]">
-          <PipelineStepper selected={activeStep} onSelect={handleStepSelect} />
-        </div>
-      </div>
-
-      {/* 3. Режимы: Продакшн / Монтаж */}
-      <div className="shrink-0 border-b px-4 py-2 sm:px-6">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-wrap items-center justify-between gap-2">
-          <Tabs value={view} onValueChange={handleViewChange}>
-            <TabsList className="grid h-9 w-auto grid-cols-2">
-              <TabsTrigger value="production">
-                <Clapperboard aria-hidden="true" />
-                Продакшн
-              </TabsTrigger>
-              <TabsTrigger value="editing">
-                <Scissors aria-hidden="true" />
-                Монтаж
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          {view === "editing" ? (
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/70 sm:block">
-              NLE · Хроники Долгой Зимы · часть I
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      {/* 4. Контент режима */}
-      {view === "production" ? (
-        <div className="vf-scroll min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="flex min-w-0 flex-col gap-4 p-4 sm:gap-5 sm:p-6">
-              <PreviewPlayer
-                playing={playing}
-                onTogglePlaying={() => setPlaying((p) => !p)}
-                scene={selectedScene}
-              />
-              <Timeline
-                scenes={TIMELINE_SCENES}
-                selectedSceneId={selectedSceneId}
-                onSelectScene={setSelectedSceneId}
-                playing={playing}
-                currentSeconds={CURRENT_SECONDS}
-              />
-              <SceneStrip
-                selectedSceneId={selectedSceneId}
-                onSelectScene={setSelectedSceneId}
-              />
-            </div>
-
-            <aside className="flex min-w-0 flex-col gap-4 border-t bg-card/50 p-4 sm:gap-5 sm:p-5 lg:border-l lg:border-t-0">
-              <SidePanel scene={selectedScene} playing={playing} />
-              <div className="shrink-0">
-                <WipBanner
-                  title="Пока это визуальный макет"
-                  description="Рендер и озвучка подключаются к движку генерации"
-                  features={[
-                    "Текст→видео",
-                    "Голосовая озвучка",
-                    "Авто-субтитры",
-                    "Экспорт MP4",
-                  ]}
-                />
-              </div>
-            </aside>
-          </div>
-        </div>
+      {workspaceId ? (
+        /* Вкладка воркспейса — сразу студия раскадровки. */
+        <StoryboardWorkspace projectId={workspaceId} />
       ) : (
-        <div className="vf-scroll min-h-0 flex-1 overflow-y-auto">
-          <EditingTab />
-        </div>
+        /* Глобальный экран — выбор воркспейса чипами. */
+        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
+          <section
+            aria-label="Выбор воркспейса"
+            className="shrink-0 rounded-xl border bg-card p-4"
+          >
+            <h2 className="text-sm font-medium">
+              Раскадровку какого воркспейса открываем?
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Сцены и фильмы живут внутри воркспейса — выберите, где снимаем.
+            </p>
+            {workspaces === null ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {Array.from({ length: 4 }, (_, i) => (
+                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
+                ))}
+              </div>
+            ) : workspaces.length === 0 ? (
+              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
+                <p className="text-sm text-muted-foreground">
+                  Пока нет ни одного воркспейса — сначала создайте его.
+                </p>
+                <Button size="sm" onClick={() => setMainArea("workspaces")}>
+                  <Images className="size-4" aria-hidden="true" />
+                  К воркспейсам
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {workspaces.map((ws) => {
+                  const Icon = WORKSPACE_TYPE_META[ws.type].icon;
+                  return (
+                    <button
+                      key={ws.id}
+                      type="button"
+                      onClick={() =>
+                        setPickedId(pickedId === ws.id ? null : ws.id)
+                      }
+                      aria-current={pickedId === ws.id}
+                      title={ws.name}
+                      className={cn(
+                        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                        pickedId === ws.id
+                          ? "border-primary/60 bg-primary/10 text-primary"
+                          : "border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground",
+                      )}
+                    >
+                      <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{ws.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {effectiveId ? (
+            <StoryboardWorkspace
+              key={effectiveId}
+              projectId={effectiveId}
+            />
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center">
+              <Film
+                className="size-8 text-muted-foreground/50"
+                aria-hidden="true"
+              />
+              <p className="text-sm text-muted-foreground">
+                Выберите воркспейс — откроем студию раскадровки
+              </p>
+            </div>
+          )}
+        </main>
       )}
     </section>
   );
