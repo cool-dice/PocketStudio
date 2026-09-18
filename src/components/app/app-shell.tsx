@@ -22,6 +22,13 @@ import { NotebookScreen } from "@/components/app/notebook-screen";
 import { ProjectScreen } from "@/components/app/project-screen";
 import { ProjectsScreen } from "@/components/app/projects-screen";
 import { SidebarContent } from "@/components/app/sidebar";
+import {
+  HomeScreen,
+  LibraryScreen,
+  ToolsScreen,
+  WorkspacesScreen,
+  WorkspaceShell,
+} from "@/components/workspaces";
 import { DocumentsScreen } from "@/components/studio/documents/documents-screen";
 import { ImagesScreen } from "@/components/studio/images/images-screen";
 import { DesignScreen } from "@/components/studio/design/design-screen";
@@ -120,6 +127,18 @@ export function AppShell() {
         <SkillsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : mainArea === "monetize" ? (
         <MonetizeScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "home" ? (
+        <HomeScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "workspaces" || mainArea === "workspace" ? (
+        mainArea === "workspace" ? (
+          <WorkspaceShell onOpenMobileNav={() => setMobileNavOpen(true)} />
+        ) : (
+          <WorkspacesScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+        )
+      ) : mainArea === "library" ? (
+        <LibraryScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "tools" ? (
+        <ToolsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : (
         <ProjectsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       )}

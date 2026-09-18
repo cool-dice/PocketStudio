@@ -15,6 +15,10 @@ import { create } from "zustand";
 
 import { api } from "@/lib/api";
 import type { Note } from "@/lib/types";
+import type {
+  WorkspaceSummary,
+  WorkspaceTab,
+} from "@/lib/workspace-data";
 
 export type MainArea =
   | "chat"
@@ -31,7 +35,13 @@ export type MainArea =
   | "deploy" // Сборка → реестр → хост
   | "mcp" // MCP-интеграции
   | "skills" // Импорт и создание скиллов
-  | "monetize"; // Публикации и доход
+  | "monetize" // Публикации и доход
+  /* ── PS-3: единый поток — воркспейсы ── */
+  | "home" // Главная: дашборд и быстрый старт
+  | "workspaces" // Список воркспейсов
+  | "library" // Библиотека: весь контент всех воркспейсов
+  | "tools" // Инструменты: скиллы, интеграции, монетизация, админ
+  | "workspace"; // Контекстная оболочка воркспейса
 
 
 interface AppUiState {
@@ -104,6 +114,23 @@ interface AppUiState {
   /** Global search dialog (Ctrl+P / ⌘P, Stage 4). */
   searchOpen: boolean;
   setSearchOpen: (open: boolean) => void;
+
+  /* ── PS-3: воркспейсы — единый творческий контекст ── */
+
+  /** Открытый воркспейс (mainArea === "workspace"): id из мок-данных. */
+  activeWorkspaceId: string | null;
+  /** Объект-переопределение (воркспейс, созданный мастером на клиенте). */
+  activeWorkspaceOverride: WorkspaceSummary | null;
+  /** Активная вкладка оболочки воркспейса. */
+  workspaceTab: WorkspaceTab;
+  /** Открыть мок-воркспейс по id (optionally на конкретной вкладке). */
+  openWorkspace: (id: string, tab?: WorkspaceTab) => void;
+  /** Открыть клиентский воркспейс-объект (мастер создания). */
+  openWorkspaceData: (ws: WorkspaceSummary, tab?: WorkspaceTab) => void;
+  /** Выйти из воркспейса → к списку. */
+  closeWorkspace: () => void;
+  /** Переключить вкладку открытого воркспейса. */
+  setWorkspaceTab: (tab: WorkspaceTab) => void;
 }
 
 export const useAppUi = create<AppUiState>((set, get) => ({
@@ -184,4 +211,30 @@ export const useAppUi = create<AppUiState>((set, get) => ({
 
   searchOpen: false,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
+
+  activeWorkspaceId: null,
+  activeWorkspaceOverride: null,
+  workspaceTab: "overview",
+  openWorkspace: (id, tab) =>
+    set({
+      mainArea: "workspace",
+      activeWorkspaceId: id,
+      activeWorkspaceOverride: null,
+      workspaceTab: tab ?? "overview",
+    }),
+  openWorkspaceData: (ws, tab) =>
+    set({
+      mainArea: "workspace",
+      activeWorkspaceId: ws.id,
+      activeWorkspaceOverride: ws,
+      workspaceTab: tab ?? "overview",
+    }),
+  closeWorkspace: () =>
+    set({
+      mainArea: "workspaces",
+      activeWorkspaceId: null,
+      activeWorkspaceOverride: null,
+      workspaceTab: "overview",
+    }),
+  setWorkspaceTab: (workspaceTab) => set({ workspaceTab }),
 }));

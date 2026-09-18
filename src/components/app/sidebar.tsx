@@ -9,27 +9,21 @@
 
 import { useState } from "react";
 import {
-  AudioWaveform,
-  Blocks,
-  BookOpenText,
   Check,
-  Clapperboard,
-  Coins,
   FolderKanban,
-  ImagePlus,
+  House,
+  Library,
   LogOut,
   MessageSquarePlus,
   Moon,
   NotebookPen,
   PenLine,
-  PenTool,
   Pencil,
-  Rocket,
   Search,
   Shield,
   Sun,
   Trash2,
-  Wand2,
+  Wrench,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -66,10 +60,8 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import { useNotes } from "@/hooks/use-notes";
-import { useProjects } from "@/hooks/use-projects";
 import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
-import { ORIGIN_META } from "@/lib/project-style";
 import { useAppUi, type MainArea } from "@/lib/store";
 import type { ThreadListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -129,7 +121,6 @@ function StudioNavItem({
 export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const { user, logout } = useAuth();
   const { connected } = useSocket();
-  const { projects } = useProjects();
   const { total: notesTotal } = useNotes();
   const {
     threads,
@@ -144,8 +135,6 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
-  const activeProjectId = useAppUi((s) => s.activeProjectId);
-  const openProject = useAppUi((s) => s.openProject);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -178,16 +167,6 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const handleOpenNotebook = () => {
     onNavigate?.();
     setMainArea("notebook");
-  };
-
-  const handleOpenProjects = () => {
-    onNavigate?.();
-    setMainArea("projects");
-  };
-
-  const handleOpenProject = (id: string) => {
-    onNavigate?.();
-    openProject(id);
   };
 
   const handleOpenCapture = () => {
@@ -406,12 +385,47 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
         </div>
       </nav>
 
-      {/* ── Collections ── */}
+      {/* ── PS-3: единый поток — глобальная навигация ── */}
       <div className="shrink-0 border-t p-3">
         <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Коллекции
+          Навигация
         </h3>
         <ul className="space-y-1">
+          <StudioNavItem
+            icon={House}
+            label="Главная"
+            area="home"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
+          <li>
+            <button
+              type="button"
+              onClick={() => handleOpenStudio("workspaces")}
+              aria-current={
+                mainArea === "workspaces" || mainArea === "workspace"
+                  ? "true"
+                  : undefined
+              }
+              title="Воркспейсы"
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
+                mainArea === "workspaces" || mainArea === "workspace"
+                  ? "bg-accent font-medium text-accent-foreground"
+                  : "text-foreground/90 hover:bg-accent/60",
+              )}
+            >
+              <FolderKanban
+                className={cn(
+                  "size-4 shrink-0 transition-colors duration-150",
+                  (mainArea === "workspaces" || mainArea === "workspace") &&
+                    "text-primary",
+                )}
+                aria-hidden="true"
+              />
+              <span className="flex-1 text-left">Воркспейсы</span>
+            </button>
+          </li>
           <li>
             <button
               type="button"
@@ -439,164 +453,21 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
               )}
             </button>
           </li>
-        </ul>
-      </div>
-
-      {/* ── Studio modules: идея → создание ── */}
-      <div className="shrink-0 border-t p-3">
-        <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Студия
-        </h3>
-        <ul className="space-y-1">
           <StudioNavItem
-            icon={BookOpenText}
-            label="Документы"
-            area="documents"
+            icon={Library}
+            label="Библиотека"
+            area="library"
             mainArea={mainArea}
             onOpen={handleOpenStudio}
           />
           <StudioNavItem
-            icon={ImagePlus}
-            label="Изображения"
-            area="images"
-            mainArea={mainArea}
-            onOpen={handleOpenStudio}
-          />
-          <StudioNavItem
-            icon={PenTool}
-            label="Дизайн"
-            area="design"
-            mainArea={mainArea}
-            onOpen={handleOpenStudio}
-          />
-          <StudioNavItem
-            icon={AudioWaveform}
-            label="Аудио"
-            area="audio"
-            mainArea={mainArea}
-            onOpen={handleOpenStudio}
-          />
-          <StudioNavItem
-            icon={Clapperboard}
-            label="Видео"
-            area="video"
+            icon={Wrench}
+            label="Инструменты"
+            area="tools"
             mainArea={mainArea}
             onOpen={handleOpenStudio}
           />
         </ul>
-      </div>
-
-      {/* ── Orchestrator: публикация и автоматизация ── */}
-      <div className="shrink-0 border-t p-3">
-        <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Оркестратор
-        </h3>
-        <ul className="space-y-1">
-          <StudioNavItem
-            icon={Rocket}
-            label="Деплой"
-            area="deploy"
-            mainArea={mainArea}
-            onOpen={handleOpenStudio}
-          />
-          <StudioNavItem
-            icon={Blocks}
-            label="Интеграции"
-            area="mcp"
-            mainArea={mainArea}
-            onOpen={handleOpenStudio}
-          />
-          <StudioNavItem
-            icon={Wand2}
-            label="Скиллы"
-            area="skills"
-            mainArea={mainArea}
-            onOpen={handleOpenStudio}
-          />
-          <StudioNavItem
-            icon={Coins}
-            label="Монетизация"
-            area="monetize"
-            mainArea={mainArea}
-            onOpen={handleOpenStudio}
-          />
-        </ul>
-      </div>
-
-      {/* ── Projects ── */}
-      <div className="shrink-0 border-t p-3">
-        <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Проекты
-        </h3>
-        <ul className="space-y-1">
-          <li>
-            <button
-              type="button"
-              onClick={handleOpenProjects}
-              aria-current={mainArea === "projects" ? "true" : undefined}
-              className={cn(
-                "flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
-                mainArea === "projects"
-                  ? "bg-accent font-medium text-accent-foreground"
-                  : "text-foreground/90 hover:bg-accent/60",
-              )}
-            >
-              <FolderKanban
-                className={cn(
-                  "size-4 shrink-0 transition-colors duration-150",
-                  (mainArea === "projects" || mainArea === "project") &&
-                    "text-primary",
-                )}
-                aria-hidden="true"
-              />
-              <span className="flex-1 text-left">Все проекты</span>
-              {projects.length > 0 && (
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                  {projects.length}
-                </span>
-              )}
-            </button>
-          </li>
-        </ul>
-        {projects.length > 0 && (
-          <div className="vf-scroll mt-1 max-h-48 overflow-y-auto">
-            <ul className="space-y-0.5">
-              {projects.map((project) => {
-                const active =
-                  mainArea === "project" && activeProjectId === project.id;
-                const meta = ORIGIN_META[project.origin] ?? ORIGIN_META.template;
-                const Icon = meta.icon;
-                return (
-                  <li key={project.id}>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenProject(project.id)}
-                      aria-current={active ? "true" : undefined}
-                      title={project.name}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
-                        active
-                          ? "bg-accent font-medium text-accent-foreground"
-                          : "text-foreground/80 hover:bg-accent/60",
-                      )}
-                    >
-                      <Icon
-                        className={cn(
-                          "size-3.5 shrink-0",
-                          active ? meta.iconClass : "text-muted-foreground/70",
-                        )}
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 truncate text-left">
-                        {project.name}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
       </div>
 
       {/* ── Profile ── */}
