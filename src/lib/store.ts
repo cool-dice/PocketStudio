@@ -214,27 +214,29 @@ export const useAppUi = create<AppUiState>((set, get) => ({
 
   activeWorkspaceId: null,
   activeWorkspaceOverride: null,
-  workspaceTab: "overview",
+  /* Chat-first: воркспейс открывается сразу на вкладке «Чат» —
+     оркестратор является главным инструментом, остальное — вкладки. */
+  workspaceTab: "chat",
   openWorkspace: (id, tab) =>
     set({
       mainArea: "workspace",
       activeWorkspaceId: id,
       activeWorkspaceOverride: null,
-      workspaceTab: tab ?? "overview",
+      workspaceTab: tab ?? "chat",
     }),
   openWorkspaceData: (ws, tab) =>
     set({
       mainArea: "workspace",
       activeWorkspaceId: ws.id,
       activeWorkspaceOverride: ws,
-      workspaceTab: tab ?? "overview",
+      workspaceTab: tab ?? "chat",
     }),
   closeWorkspace: () =>
     set({
       mainArea: "workspaces",
       activeWorkspaceId: null,
       activeWorkspaceOverride: null,
-      workspaceTab: "overview",
+      workspaceTab: "chat",
     }),
   setWorkspaceTab: (workspaceTab) => set({ workspaceTab }),
 }));

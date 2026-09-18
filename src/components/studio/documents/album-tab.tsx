@@ -27,7 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { GradientArt } from "./art-placeholder";
-import { WipBadge } from "./codex-entity-sheet";
+import { WipBadge } from "./entity-sheet";
 import { SelectableChip } from "./narrative-chip";
 import { agoLabel } from "./narrative-data";
 import {
@@ -54,12 +54,12 @@ export function AlbumTab({
   items,
   generatingVariationId,
   onGenerateVariation,
-  onOpenCharacter,
+  onOpenEntity,
 }: {
   items: AlbumItem[];
   generatingVariationId: string | null;
   onGenerateVariation: (item: AlbumItem) => void;
-  onOpenCharacter: (characterId: string) => void;
+  onOpenEntity: (entityId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<AlbumItemKind | "all">("all");
@@ -277,7 +277,7 @@ export function AlbumTab({
                       variant="outline"
                       onClick={() => {
                         setOpenId(null);
-                        onOpenCharacter(openItem.entityId);
+                        onOpenEntity(openItem.entityId);
                       }}
                     >
                       <User className="size-4" aria-hidden="true" />

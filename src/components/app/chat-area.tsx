@@ -4,7 +4,8 @@
  * ChatArea — center zone: header (mobile nav, thread title, mode selector
  * dropdown, project chip, context toggle), scrollable messages with smart
  * auto-scroll and a «к новым» pill, welcome screen for empty threads,
- * composer.
+ * composer. `embedded` прячет мобильный хедер, когда ChatArea встроен
+ * в другой экран со своим хедером (например, на Главной).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -60,12 +61,15 @@ interface ChatAreaProps {
   contextOpen: boolean;
   onToggleContext: () => void;
   onOpenMobileNav: () => void;
+  /** Встроенный режим (Главная): мобильный хедер скрыт — навигацию открывает хедер экрана-носителя. */
+  embedded?: boolean;
 }
 
 export function ChatArea({
   contextOpen,
   onToggleContext,
   onOpenMobileNav,
+  embedded = false,
 }: ChatAreaProps) {
   const {
     activeThread,
@@ -120,15 +124,17 @@ export function ChatArea({
     >
       {/* ── Header ── */}
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-9 md:hidden"
-          onClick={onOpenMobileNav}
-          aria-label="Открыть меню"
-        >
-          <Menu className="size-4" aria-hidden="true" />
-        </Button>
+        {!embedded && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9 md:hidden"
+            onClick={onOpenMobileNav}
+            aria-label="Открыть меню"
+          >
+            <Menu className="size-4" aria-hidden="true" />
+          </Button>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h1 className="truncate text-sm font-semibold sm:text-[15px]">

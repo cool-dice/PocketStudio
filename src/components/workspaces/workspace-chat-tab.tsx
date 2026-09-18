@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * WorkspaceChatTab — вкладка «Чат» воркспейса (PS-3-d).
+ * WorkspaceChatTab — вкладка «Чат» воркспейса (PS-3-d → PS-3.2-a).
  *
- * Демо-кокпит оркестратора воркспейса: осмысленная мок-беседа о
- * КОНКРЕТНОМ воркспейсе (тип, стадия, следующий шаг пайплайна),
- * композер с быстрыми подсказками и «печатающим» демо-ответом.
- * В Фазе A сюда подключится настоящий оркестратор со скоупом
- * тредов этого воркспейса (Thread.projectId).
+ * Хаб оркестратора: главный инструмент студии — по описанной задаче
+ * он генерирует контент и открывает нужный модуль. В шапке — быстрый
+ * доступ к модулям ЭТОГО воркспейса (чипы → setWorkspaceTab), ниже —
+ * мок-беседа о конкретном воркспейсе и композер с быстрыми
+ * подсказками. В Фазе A сюда подключится настоящий оркестратор
+ * со скоупом тредов этого воркспейса (Thread.projectId).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -22,13 +23,30 @@ import {
 } from "@/components/workspaces/workspace-chat-data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAppUi } from "@/lib/store";
 import {
+  WORKSPACE_TABS_BY_TYPE,
+  WORKSPACE_TAB_META,
   WORKSPACE_TYPE_META,
   type WorkspaceSummary,
+  type WorkspaceTab,
 } from "@/lib/workspace-data";
 
 /** Задержка «печати» демо-ответа. */
 const REPLY_DELAY_MS = 900;
+
+/** Максимум чипов быстрого доступа к модулям в шапке. */
+const MODULE_CHIPS_LIMIT = 5;
+
+/** Служебные вкладки — не модули: сам чат, обзор и заметки уже рядом. */
+const NON_MODULE_TABS: readonly WorkspaceTab[] = ["chat", "overview", "notes"];
+
+/** Модули этого воркспейса для чипов быстрого доступа (макс. 5). */
+function moduleTabsOf(ws: WorkspaceSummary): WorkspaceTab[] {
+  return WORKSPACE_TABS_BY_TYPE[ws.type]
+    .filter((tab) => !NON_MODULE_TABS.includes(tab))
+    .slice(0, MODULE_CHIPS_LIMIT);
+}
 
 function ChatBubble({ message }: { message: WorkspaceChatMessage }) {
   if (message.role === "user") {
@@ -89,6 +107,8 @@ export function WorkspaceChatTab({
   workspace: WorkspaceSummary;
 }) {
   const typeMeta = WORKSPACE_TYPE_META[workspace.type];
+  const setWorkspaceTab = useAppUi((s) => s.setWorkspaceTab);
+  const moduleTabs = moduleTabsOf(workspace);
 
   const [messages, setMessages] = useState<WorkspaceChatMessage[]>(() =>
     chatSeedFor(workspace),
@@ -143,9 +163,9 @@ export function WorkspaceChatTab({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      {/* ── Шапка кокпита ── */}
+      {/* ── Шапка хаба оркестратора ── */}
       <header className="shrink-0 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
-        <div className="mx-auto flex max-w-3xl items-center gap-3">
+        <div className="mx-auto flex max-w-3xl items-start gap-3">
           <span
             aria-hidden="true"
             className={`flex size-10 shrink-0 items-center justify-center rounded-xl border bg-gradient-to-br text-white ${workspace.gradient}`}
@@ -159,10 +179,36 @@ export function WorkspaceChatTab({
               </h2>
               <StageBadge stage="wip" />
             </div>
-            <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-              {typeMeta.label} · стадия «{workspace.stage}» · демо-собеседник
-              до Фазы A
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {typeMeta.label} · стадия «{workspace.stage}»
             </p>
+            <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
+              Главный инструмент: опишите задачу — соберу контент и открою
+              нужный модуль · демо до Фазы A
+            </p>
+            {moduleTabs.length > 0 && (
+              <nav
+                aria-label="Быстрый доступ к модулям"
+                className="mt-2 flex flex-wrap gap-1.5"
+              >
+                {moduleTabs.map((tab) => {
+                  const meta = WORKSPACE_TAB_META[tab];
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setWorkspaceTab(tab)}
+                      title={`Открыть вкладку «${meta.label}»`}
+                      aria-label={`Открыть вкладку «${meta.label}»`}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full border bg-card px-2 py-0.5 text-[11px] text-muted-foreground outline-none transition-colors duration-150 hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+                    >
+                      <meta.icon className="size-3" aria-hidden="true" />
+                      {meta.label}
+                    </button>
+                  );
+                })}
+              </nav>
+            )}
           </div>
         </div>
       </header>

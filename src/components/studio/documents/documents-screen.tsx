@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Документы → NarrativeCore. Оболочка модуля с пятью вкладками:
- * Рукопись (трёхпанельный редактор), Кодекс, Персонажи, Альбом
- * и Канон. Портреты и вариации генерируются моком: таймер живёт
+ * Документы → NarrativeCore. Оболочка модуля с четырьмя вкладками:
+ * Рукопись (трёхпанельный редактор), Сущности (универсальный каталог
+ * для текста и документации), Альбом и Аналитик (поиск противоречий
+ * и расхождений). Портреты и вариации генерируются моком: таймер живёт
  * здесь, чтобы результат долетал до альбома даже при смене вкладки.
  */
 
@@ -17,9 +18,8 @@ import {
   Newspaper,
   Plus,
   Save,
-  ScrollText,
-  ShieldCheck,
-  Users,
+  ScanSearch,
+  Shapes,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -36,14 +36,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared/module-header";
 import { AlbumTab } from "./album-tab";
 import { AiAssistantPanel } from "./ai-assistant-panel";
-import { CanonTab } from "./canon-tab";
+import { AnalystTab } from "./analyst-tab";
 import { ChapterTree, ChapterTreeEmpty } from "./chapter-tree";
-import { CharactersTab } from "./characters-tab";
-import { CodexTab } from "./codex-tab";
 import { DocChipsBar, DocumentLibrary } from "./doc-library";
 import { DocumentTitleRow, EditorFooterStats, EditorPage } from "./editor-page";
 import { EditorToolbar } from "./editor-toolbar";
+import { EntitiesTab } from "./entities-tab";
 import { ALBUM_ITEMS, type AlbumItem } from "./album-data";
+import { ENTITY_SETS } from "./entities-data";
 import { PORTRAIT_VARIANTS } from "./narrative-data";
 import { MOCK_DOCS } from "./types";
 import type { StoryCharacter } from "./character-data";
@@ -55,7 +55,7 @@ const NEW_DOC_ITEMS: { icon: LucideIcon; label: string; hint: string }[] = [
   { icon: ListPlus, label: "Глава", hint: "добавить в текущую книгу" },
 ];
 
-type ModuleTab = "manuscript" | "codex" | "characters" | "album" | "canon";
+type ModuleTab = "manuscript" | "entities" | "album" | "analyst";
 
 export function DocumentsScreen({ onOpenMobileNav }: ModuleScreenProps) {
   const [tab, setTab] = useState<ModuleTab>("manuscript");
@@ -67,7 +67,7 @@ export function DocumentsScreen({ onOpenMobileNav }: ModuleScreenProps) {
   const [portraitOverrides, setPortraitOverrides] = useState<Record<string, string>>({});
   const [portraitGenId, setPortraitGenId] = useState<string | null>(null);
   const [generatingVariationId, setGeneratingVariationId] = useState<string | null>(null);
-  const [focusCharacterId, setFocusCharacterId] = useState<string | null>(null);
+  const [focusEntityId, setFocusEntityId] = useState<string | null>(null);
 
   const variantCounterRef = useRef(0);
   const portraitTimerRef = useRef<number | null>(null);
@@ -92,12 +92,12 @@ export function DocumentsScreen({ onOpenMobileNav }: ModuleScreenProps) {
 
   function handleTabChange(value: string) {
     setTab(value as ModuleTab);
-    if (value !== "characters") setFocusCharacterId(null);
+    if (value !== "entities") setFocusEntityId(null);
   }
 
-  function handleOpenCharacter(characterId: string) {
-    setFocusCharacterId(characterId);
-    setTab("characters");
+  function handleOpenEntity(entityId: string) {
+    setFocusEntityId(entityId);
+    setTab("entities");
   }
 
   function nextVariantGradient(): string {
@@ -168,7 +168,7 @@ export function DocumentsScreen({ onOpenMobileNav }: ModuleScreenProps) {
       <ModuleHeader
         icon={BookOpenText}
         title="Документы"
-        description="Рукопись, кодекс мира, персонажи и канон — писательская студия"
+        description="Рукопись, сущности, альбом и аналитик — тексты и документация"
         stage="wip"
         onOpenMobileNav={onOpenMobileNav}
       >
@@ -210,10 +210,14 @@ export function DocumentsScreen({ onOpenMobileNav }: ModuleScreenProps) {
         <div className="shrink-0 border-b bg-background px-3 py-2 sm:px-4">
           <TabsList className="vf-scroll-x h-auto w-full justify-start gap-1 overflow-x-auto bg-transparent p-0">
             <TabTrigger icon={BookOpenText} value="manuscript" label="Рукопись" />
-            <TabTrigger icon={ScrollText} value="codex" label="Кодекс" />
-            <TabTrigger icon={Users} value="characters" label="Персонажи" />
+            <TabTrigger
+              icon={Shapes}
+              value="entities"
+              label="Сущности"
+              count={ENTITY_SETS[0].entities.length}
+            />
             <TabTrigger icon={ImageIcon} value="album" label="Альбом" count={albumItems.length} />
-            <TabTrigger icon={ShieldCheck} value="canon" label="Канон" />
+            <TabTrigger icon={ScanSearch} value="analyst" label="Аналитик" />
           </TabsList>
         </div>
 
@@ -270,13 +274,9 @@ export function DocumentsScreen({ onOpenMobileNav }: ModuleScreenProps) {
           </div>
         </TabsContent>
 
-        <TabsContent value="codex" className="flex min-h-0 flex-1 flex-col">
-          <CodexTab />
-        </TabsContent>
-
-        <TabsContent value="characters" className="flex min-h-0 flex-1 flex-col">
-          <CharactersTab
-            focusCharacterId={focusCharacterId}
+        <TabsContent value="entities" className="flex min-h-0 flex-1 flex-col">
+          <EntitiesTab
+            focusEntityId={focusEntityId}
             portraitOverrides={portraitOverrides}
             generatingPortraitId={portraitGenId}
             onGeneratePortrait={handleGeneratePortrait}
@@ -288,12 +288,12 @@ export function DocumentsScreen({ onOpenMobileNav }: ModuleScreenProps) {
             items={albumItems}
             generatingVariationId={generatingVariationId}
             onGenerateVariation={handleGenerateVariation}
-            onOpenCharacter={handleOpenCharacter}
+            onOpenEntity={handleOpenEntity}
           />
         </TabsContent>
 
-        <TabsContent value="canon" className="flex min-h-0 flex-1 flex-col">
-          <CanonTab />
+        <TabsContent value="analyst" className="flex min-h-0 flex-1 flex-col">
+          <AnalystTab />
         </TabsContent>
       </Tabs>
     </section>

@@ -1,12 +1,15 @@
 "use client";
 
 /**
- * Панель сущности кодекса: полное описание, атрибуты, связи,
- * упоминания в главах и мок-кнопка «Сгенерировать описание»
- * (спиннер ~1,5 с → абзац дописывается в карточку + тост).
+ * Универсальная панель сущности: вид, полное описание, атрибуты,
+ * связи, упоминания (главы или разделы документации) и мок-кнопка
+ * «Сгенерировать описание» (спиннер ~1,5 с → абзац дописывается
+ * в карточку + тост). Персонажи открываются в CharacterSheet — эта
+ * панель для всех остальных видов. Здесь же живёт WipBadge, общий
+ * для вкладок модуля «Документы».
  */
 
-import { BookOpenText, Check, Link2, Loader2, MapPin, Sparkles } from "lucide-react";
+import { BookOpenText, Check, FileText, Link2, Loader2, MapPin, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -19,13 +22,8 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { MiniChip } from "./narrative-chip";
-import {
-  GENERATED_LORE_TEMPLATES,
-  LORE_CATEGORY_META,
-  agoLabel,
-  getLoreEntity,
-  type LoreEntity,
-} from "./narrative-data";
+import { agoLabel } from "./narrative-data";
+import { ENTITY_KIND_META, getEntity, getEntitySet, type StudioEntity } from "./entities-data";
 
 export function WipBadge({ className }: { className?: string }) {
   return (
@@ -40,7 +38,8 @@ export function WipBadge({ className }: { className?: string }) {
   );
 }
 
-export function CodexEntitySheet({
+export function EntitySheet({
+  setId,
   entityId,
   onClose,
   onOpenEntity,
@@ -48,34 +47,39 @@ export function CodexEntitySheet({
   generatingId,
   onGenerate,
 }: {
+  setId: string;
   entityId: string | null;
   onClose: () => void;
   onOpenEntity: (id: string) => void;
   generated: Record<string, string>;
   generatingId: string | null;
-  onGenerate: (entity: LoreEntity) => void;
+  onGenerate: (entity: StudioEntity) => void;
 }) {
-  const entity = entityId ? getLoreEntity(entityId) : undefined;
-  const meta = entity ? LORE_CATEGORY_META[entity.category] : null;
-  const CategoryIcon = meta?.icon;
+  const set = getEntitySet(setId);
+  const entity = entityId && set ? getEntity(setId, entityId) : undefined;
+  const meta = entity ? ENTITY_KIND_META[entity.kind] : null;
+  const KindIcon = meta?.icon;
+  const isNarrative = set?.domain === "narrative";
   const generatedText = entity ? generated[entity.id] : undefined;
   const isGenerating = entity ? generatingId === entity.id : false;
 
   return (
     <Sheet open={Boolean(entity)} onOpenChange={(open) => !open && onClose()}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-md">
-        {entity && meta && CategoryIcon ? (
+        {entity && set && meta && KindIcon ? (
           <>
             <SheetHeader className="shrink-0 space-y-1 border-b px-5 pb-4">
               <div className="flex items-center gap-2">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-primary/10 text-primary">
-                  <CategoryIcon className="size-4" aria-hidden="true" />
+                  <KindIcon className="size-4" aria-hidden="true" />
                 </span>
-                <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                  {meta.label} кодекса · {agoLabel(entity.updatedAgo)}
+                <p className="truncate text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  {meta.label} · {set.label}
                 </p>
               </div>
-              <SheetTitle className="text-left font-serif text-xl leading-tight">
+              <SheetTitle
+                className={cn("text-left text-xl leading-tight", isNarrative && "font-serif")}
+              >
                 {entity.name}
               </SheetTitle>
               <SheetDescription className="text-left">{entity.short}</SheetDescription>
@@ -84,7 +88,12 @@ export function CodexEntitySheet({
             <div className="vf-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
               {/* Полное описание */}
               <section aria-label="Описание сущности">
-                <p className="font-serif text-[15px] leading-[1.75] text-foreground/90">
+                <p
+                  className={cn(
+                    "text-[15px] leading-[1.75] text-foreground/90",
+                    isNarrative && "font-serif",
+                  )}
+                >
                   {entity.description}
                 </p>
                 {generatedText ? (
@@ -93,7 +102,12 @@ export function CodexEntitySheet({
                       <Sparkles className="size-3" aria-hidden="true" />
                       Сгенерировано ИИ
                     </p>
-                    <p className="font-serif text-[15px] leading-[1.75] text-foreground/90">
+                    <p
+                      className={cn(
+                        "text-[15px] leading-[1.75] text-foreground/90",
+                        isNarrative && "font-serif",
+                      )}
+                    >
                       {generatedText}
                     </p>
                   </div>
@@ -132,9 +146,9 @@ export function CodexEntitySheet({
                 </h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {entity.related.map((relatedId) => {
-                    const related = getLoreEntity(relatedId);
+                    const related = getEntity(set.id, relatedId);
                     if (!related) return null;
-                    const RelatedIcon = LORE_CATEGORY_META[related.category].icon;
+                    const RelatedIcon = ENTITY_KIND_META[related.kind].icon;
                     return (
                       <MiniChip
                         key={relatedId}
@@ -154,22 +168,31 @@ export function CodexEntitySheet({
 
               <Separator />
 
-              {/* Упоминания в главах */}
-              <section aria-label="Упоминания в главах">
+              {/* Упоминания: главы романа или разделы документации */}
+              <section aria-label={isNarrative ? "Упоминания в главах" : "Разделы документации"}>
                 <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <MapPin className="size-3.5" aria-hidden="true" />
-                  Упомянута в главах
+                  {isNarrative ? (
+                    <MapPin className="size-3.5" aria-hidden="true" />
+                  ) : (
+                    <FileText className="size-3.5" aria-hidden="true" />
+                  )}
+                  {isNarrative ? "Упомянута в главах" : "Разделы документации"}
                 </h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.chapters.map((chapter) => (
-                    <MiniChip key={chapter} title={`Хроники Долгой Зимы, глава ${chapter}`}>
-                      гл. {chapter}
+                  {entity.refs.items.map((ref) => (
+                    <MiniChip
+                      key={ref}
+                      className="font-mono"
+                      title={isNarrative ? `${set.label}, глава ${ref}` : `Раздел ${ref}`}
+                    >
+                      {isNarrative ? `гл. ${ref}` : ref}
                     </MiniChip>
                   ))}
                 </div>
                 <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <BookOpenText className="size-3.5 shrink-0" aria-hidden="true" />
-                  «Хроники Долгой Зимы» — черновик
+                  {set.label} — {isNarrative ? "черновик" : "текущая редакция"} · обновлена{" "}
+                  {agoLabel(entity.updatedAgo)}
                 </p>
               </section>
 

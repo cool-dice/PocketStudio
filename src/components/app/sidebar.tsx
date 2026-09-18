@@ -14,6 +14,7 @@ import {
   House,
   Library,
   LogOut,
+  MessageSquare,
   MessageSquarePlus,
   Moon,
   NotebookPen,
@@ -391,6 +392,14 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
           Навигация
         </h3>
         <ul className="space-y-1">
+          {/* Чат — главный инструмент и оркестратор всего: всегда первый. */}
+          <StudioNavItem
+            icon={MessageSquare}
+            label="Чат"
+            area="chat"
+            mainArea={mainArea}
+            onOpen={handleOpenStudio}
+          />
           <StudioNavItem
             icon={House}
             label="Главная"

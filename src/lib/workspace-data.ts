@@ -117,14 +117,16 @@ export const WORKSPACE_STAGES: Record<WorkspaceType, string[]> = {
   universal: ["Подготовка", "Создание", "Сборка", "Публикация"],
 };
 
-/** Единая строка вкладок оболочки воркспейса (состав зависит от типа). */
+/** Единая строка вкладок оболочки воркспейса (состав зависит от типа).
+ *  Chat-first: «Чат» — первая вкладка любого типа: оркестратор
+ *  открывается сразу, а Обзор/модули доступны рядом. */
 export const WORKSPACE_TABS_BY_TYPE: Record<WorkspaceType, WorkspaceTab[]> = {
-  film: ["overview", "chat", "notes", "documents", "images", "video", "design", "monetize"],
-  book: ["overview", "chat", "notes", "documents", "design", "monetize"],
-  music: ["overview", "chat", "notes", "audio", "design", "monetize"],
-  app: ["overview", "chat", "notes", "code", "design", "deploy", "monetize"],
+  film: ["chat", "overview", "notes", "documents", "images", "video", "design", "monetize"],
+  book: ["chat", "overview", "notes", "documents", "design", "monetize"],
+  music: ["chat", "overview", "notes", "audio", "design", "monetize"],
+  app: ["chat", "overview", "notes", "code", "design", "deploy", "monetize"],
   universal: [
-    "overview", "chat", "notes", "documents", "images", "audio", "video", "design", "deploy", "monetize",
+    "chat", "overview", "notes", "documents", "images", "audio", "video", "design", "deploy", "monetize",
   ],
 };
 
@@ -178,7 +180,7 @@ export const MOCK_WORKSPACES: WorkspaceSummary[] = [
     title: "Тишина фьорда",
     subtitle: "Психологический роман, черновик",
     description:
-      "История смотрителя маяка и лета, которое изменило всё. Кодекс мира и персонажи ведутся в документах.",
+      "История смотрителя маяка и лета, которое изменило всё. Сущности мира и портреты героев ведутся в документах.",
     stage: "Черновик",
     stageIndex: 3,
     progress: 44,

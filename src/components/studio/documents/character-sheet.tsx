@@ -19,7 +19,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { GradientArt } from "./art-placeholder";
-import { WipBadge } from "./codex-entity-sheet";
+import { WipBadge } from "./entity-sheet";
 import { MiniChip } from "./narrative-chip";
 import { ageLabel, agoLabel } from "./narrative-data";
 import {
