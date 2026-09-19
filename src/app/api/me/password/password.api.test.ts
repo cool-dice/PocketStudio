@@ -46,6 +46,20 @@ function cookieHeader(res: Response): string {
     : (res.headers.get("set-cookie") ?? "");
 }
 
+function sessionCookieValue(res: Response): string | null {
+  for (const line of cookieHeader(res).split("\n")) {
+    const match = line.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`));
+    if (match?.[1]) {
+      try {
+        return decodeURIComponent(match[1]);
+      } catch {
+        return match[1];
+      }
+    }
+  }
+  return null;
+}
+
 describe.skipIf(SKIP_PG)("PATCH /api/me/password", () => {
   const ids: string[] = [];
 
@@ -224,8 +238,15 @@ describe.skipIf(SKIP_PG)("PATCH /api/me/password", () => {
     const payload = await verifyToken(patchedJson.token!, "session");
     expect(payload?.sub).toBe(user.id);
     expect(payload?.email).toBe(user.email);
+    expect(payload?.tokenVersion).toBe(1);
+
+    const stale = await getMe(
+      jsonRequest("http://localhost/api/me", "GET", undefined, token),
+    );
+    expect(stale.status).toBe(401);
 
     const row = await db.user.findUnique({ where: { id: user.id } });
+    expect(row?.tokenVersion).toBe(1);
     expect(row?.email).toBe(user.email);
     expect(row?.role).toBe("client");
     expect(await verifyPassword(nextSecret, row!.passwordHash)).toBe(true);
@@ -255,6 +276,81 @@ describe.skipIf(SKIP_PG)("PATCH /api/me/password", () => {
     const loginJson = (await newLogin.json()) as { token?: string; user: { id: string } };
     expect(loginJson.user.id).toBe(user.id);
     expect(JSON.stringify(loginJson)).not.toContain(nextSecret);
+  });
+
+  test("login, change password: old Bearer and cookie 401, new token 200", async () => {
+    const { user } = await seedUser("kill-session");
+    resetRateLimit(`login:${user.email}:local`);
+    const loggedIn = await login(
+      jsonRequest("http://localhost/api/auth/login", "POST", {
+        email: user.email,
+        password: "password-ok",
+      }),
+    );
+    expect(loggedIn.status).toBe(200);
+    const loginJson = (await loggedIn.json()) as { token?: string };
+    expect(loginJson.token).toBeTruthy();
+    const oldBearer = loginJson.token!;
+    const oldCookie = sessionCookieValue(loggedIn);
+    expect(oldCookie).toBeTruthy();
+
+    const before = await getMe(
+      jsonRequest("http://localhost/api/me", "GET", undefined, oldBearer),
+    );
+    expect(before.status).toBe(200);
+
+    const nextSecret = `kill-${stamp}-secret`;
+    const patched = await patchPassword(
+      jsonRequest(
+        "http://localhost/api/me/password",
+        "PATCH",
+        {
+          currentPassword: "password-ok",
+          newPassword: nextSecret,
+          confirmPassword: nextSecret,
+        },
+        oldBearer,
+      ),
+    );
+    expect(patched.status).toBe(200);
+    const patchedJson = (await patched.json()) as { token?: string };
+    expect(patchedJson.token).toBeTruthy();
+    expect(patchedJson.token).not.toBe(oldBearer);
+
+    const staleBearer = await getMe(
+      jsonRequest("http://localhost/api/me", "GET", undefined, oldBearer),
+    );
+    expect(staleBearer.status).toBe(401);
+
+    const staleCookie = await getMe(
+      new Request("http://localhost/api/me", {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          cookie: `${SESSION_COOKIE}=${oldCookie}`,
+        },
+      }),
+    );
+    expect(staleCookie.status).toBe(401);
+
+    const fresh = await getMe(
+      jsonRequest("http://localhost/api/me", "GET", undefined, patchedJson.token),
+    );
+    expect(fresh.status).toBe(200);
+
+    resetRateLimit(`login:${user.email}:local`);
+    const relogin = await login(
+      jsonRequest("http://localhost/api/auth/login", "POST", {
+        email: user.email,
+        password: nextSecret,
+      }),
+    );
+    expect(relogin.status).toBe(200);
+    const reloginJson = (await relogin.json()) as { token?: string };
+    const afterLogin = await getMe(
+      jsonRequest("http://localhost/api/me", "GET", undefined, reloginJson.token),
+    );
+    expect(afterLogin.status).toBe(200);
   });
 
   test("repeated wrong current is rate-limited like login", async () => {

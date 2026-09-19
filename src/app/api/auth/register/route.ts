@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { attachSessionCookie, hashPassword, signSession } from "@/lib/auth";
+import {
+  attachSessionCookie,
+  hashPassword,
+  sessionPayloadFromUser,
+  signSession,
+} from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
 import { inviteLifecycle, sanitizeInviteRole } from "@/lib/invite-status";
 
@@ -149,12 +154,7 @@ export async function POST(req: Request) {
     console.error("[audit] auth.register failed:", err);
   }
 
-  const token = await signSession({
-    sub: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-  });
+  const token = await signSession(sessionPayloadFromUser(user));
 
   const res = NextResponse.json(
     {

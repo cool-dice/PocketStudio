@@ -12,4 +12,6 @@ export interface SessionPayload {
   email: string;
   name: string;
   role: string;
+  /** Mirrors User.tokenVersion. Omitted at sign time and in legacy JWTs → 0. */
+  tokenVersion?: number;
 }

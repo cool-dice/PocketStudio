@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   attachSessionCookie,
   getUserFromRequest,
+  sessionPayloadFromUser,
   signSession,
 } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -58,12 +59,7 @@ export async function PATCH(req: Request) {
     data: { name: parsed.name },
   });
 
-  const token = await signSession({
-    sub: updated.id,
-    email: updated.email,
-    name: updated.name,
-    role: updated.role,
-  });
+  const token = await signSession(sessionPayloadFromUser(updated));
 
   const res = NextResponse.json({
     user: publicUserDto(updated),

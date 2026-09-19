@@ -17,6 +17,9 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
+  /// Bumped on password change. JWT carries the same integer; mismatch → 401.
+  /// Column on User is enough — no Redis denylist.
+  tokenVersion Int      @default(0)
   // 'client' | 'admin' (IDE modes are NOT roles)
   role         String   @default("client")
   avatarUrl    String?

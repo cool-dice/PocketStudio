@@ -4,6 +4,7 @@ import {
   attachSessionCookie,
   getUserFromRequest,
   hashPassword,
+  sessionPayloadFromUser,
   signSession,
   verifyPassword,
 } from "@/lib/auth";
@@ -93,7 +94,10 @@ export async function PATCH(req: Request) {
   const passwordHash = await hashPassword(parsed.newPassword);
   const updated = await db.user.update({
     where: { id: loaded.user.id },
-    data: { passwordHash },
+    data: {
+      passwordHash,
+      tokenVersion: { increment: 1 },
+    },
   });
   resetRateLimit(rateKey);
 
@@ -110,12 +114,7 @@ export async function PATCH(req: Request) {
     console.error("[audit] auth.password_change failed:", err);
   }
 
-  const token = await signSession({
-    sub: updated.id,
-    email: updated.email,
-    name: updated.name,
-    role: updated.role,
-  });
+  const token = await signSession(sessionPayloadFromUser(updated));
 
   const res = NextResponse.json({
     user: publicUserDto(updated),

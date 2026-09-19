@@ -21,7 +21,7 @@ export const PASSWORD_JSON_INVALID = "Некорректный JSON в запр�
 
 export const PASSWORD_SECTION_TITLE = "Пароль";
 export const PASSWORD_SECTION_HINT =
-  "Нужен текущий пароль. Письмо со сбросом не отправляем — почтовый сервер не настроен.";
+  "Нужен текущий пароль. После смены остальные сессии сразу перестанут работать. Письмо со сбросом не отправляем — почтовый сервер не настроен.";
 export const PASSWORD_CURRENT_LABEL = "Текущий пароль";
 export const PASSWORD_NEW_LABEL = "Новый пароль";
 export const PASSWORD_CONFIRM_LABEL = "Ещё раз новый";

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { attachSessionCookie, signSession, verifyPassword } from "@/lib/auth";
+import {
+  attachSessionCookie,
+  sessionPayloadFromUser,
+  signSession,
+  verifyPassword,
+} from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
 import { consumeRateLimit, resetRateLimit } from "@/lib/rate-limit";
 
@@ -71,12 +76,7 @@ export async function POST(req: Request) {
     console.error("[audit] auth.login failed:", err);
   }
 
-  const token = await signSession({
-    sub: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-  });
+  const token = await signSession(sessionPayloadFromUser(user));
 
   const res = NextResponse.json({
     user: {

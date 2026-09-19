@@ -109,6 +109,7 @@ describe("password change copy is honest", () => {
     expect(PASSWORD_UNCHANGED).toMatch(/[А-Яа-яЁё]/);
     expect(PASSWORD_RATE_LIMITED).toMatch(/попыток/i);
     expect(PASSWORD_SECTION_HINT).toMatch(/почтовый сервер не настроен/i);
+    expect(PASSWORD_SECTION_HINT).toMatch(/сессии сразу перестанут/i);
     expect(PASSWORD_SECTION_HINT).not.toMatch(/отправим письмо|SMTP готов/i);
   });
 });

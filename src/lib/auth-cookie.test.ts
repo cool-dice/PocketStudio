@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   attachSessionCookie,
-  getUserFromRequest,
+  readSessionToken,
   signSession,
   verifyToken,
 } from "./auth";
@@ -15,6 +15,14 @@ function cookieRequest(cookie: string): Request {
   return new Request("http://localhost/api/auth/me", {
     headers: { cookie },
   });
+}
+
+function jwtPayload(token: string): Record<string, unknown> {
+  const part = token.split(".")[1];
+  return JSON.parse(Buffer.from(part, "base64url").toString()) as Record<
+    string,
+    unknown
+  >;
 }
 
 describe("session cookie branding", () => {
@@ -30,14 +38,15 @@ describe("session cookie branding", () => {
       name: "Cookie",
       role: "client",
     });
-    const fromNew = await getUserFromRequest(
-      cookieRequest(`${SESSION_COOKIE}=${token}`),
+    expect(readSessionToken(cookieRequest(`${SESSION_COOKIE}=${token}`))).toBe(
+      token,
     );
-    const fromLegacy = await getUserFromRequest(
-      cookieRequest(`${LEGACY_SESSION_COOKIE}=${token}`),
-    );
-    expect(fromNew?.sub).toBe("user-cookie");
-    expect(fromLegacy?.sub).toBe("user-cookie");
+    expect(
+      readSessionToken(cookieRequest(`${LEGACY_SESSION_COOKIE}=${token}`)),
+    ).toBe(token);
+    const payload = await verifyToken(token, "session");
+    expect(payload?.sub).toBe("user-cookie");
+    expect(payload?.tokenVersion).toBe(0);
   });
 
   test("Bearer still wins over cookies", async () => {
@@ -53,7 +62,7 @@ describe("session cookie branding", () => {
       name: "C",
       role: "client",
     });
-    const payload = await getUserFromRequest(
+    const token = readSessionToken(
       new Request("http://localhost/api/auth/me", {
         headers: {
           authorization: `Bearer ${bearer}`,
@@ -61,7 +70,7 @@ describe("session cookie branding", () => {
         },
       }),
     );
-    expect(payload?.sub).toBe("bearer-user");
+    expect(token).toBe(bearer);
   });
 });
 
@@ -78,6 +87,26 @@ describe("signSession", () => {
     expect(a).not.toBe(b);
     expect((await verifyToken(a, "session"))?.sub).toBe("user-jti");
     expect((await verifyToken(b, "session"))?.sub).toBe("user-jti");
+  });
+
+  test("JWT embeds tokenVersion (default 0)", async () => {
+    const token = await signSession({
+      sub: "user-tv",
+      email: "tv@example.test",
+      name: "Tv",
+      role: "client",
+      tokenVersion: 3,
+    });
+    expect(jwtPayload(token).tokenVersion).toBe(3);
+    expect((await verifyToken(token, "session"))?.tokenVersion).toBe(3);
+
+    const legacyShaped = await signSession({
+      sub: "user-tv0",
+      email: "tv0@example.test",
+      name: "Tv0",
+      role: "client",
+    });
+    expect(jwtPayload(legacyShaped).tokenVersion).toBe(0);
   });
 });
 
