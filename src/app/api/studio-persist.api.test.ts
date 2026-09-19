@@ -13,6 +13,7 @@ import { POST as compileFilm } from "./workspaces/[id]/compile-film/route";
 
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 const stamp = Date.now().toString(36);
+let seedN = 0;
 const ids: string[] = [];
 
 function jsonRequest(
@@ -47,7 +48,7 @@ describe.skipIf(SKIP_PG)("studio persist: design / NLE / DAW", () => {
     const user = await db.user.create({
       data: {
         name: "Persist",
-        email: `persist-${stamp}@example.test`,
+        email: `persist-${stamp}-${seedN++}@example.test`,
         passwordHash: await hashPassword("password-ok"),
         role: "client",
       },
