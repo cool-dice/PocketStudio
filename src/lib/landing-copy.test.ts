@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  FIRST_USER_BECOMES_ADMIN,
   LANDING_CHAT_MOCK_LABEL,
   LANDING_CHAT_MOCK_PILL,
   LANDING_DEPLOY_BLURB,
@@ -27,14 +26,16 @@ describe("landing CTA and honesty copy", () => {
     expect(landingCtaHref("register")).toBe("/login?tab=register");
   });
 
-  test("first-user-admin copy only when the product still does that", () => {
-    expect(FIRST_USER_BECOMES_ADMIN).toBe(true);
+  test("first-user-admin copy only when the bootstrap flag is true", () => {
+    expect(firstUserAdminHint()).toBe("");
     expect(firstUserAdminHint(true)).toMatch(/администратор/i);
     expect(firstUserAdminHint(true)).toMatch(/ещё нет аккаунтов/i);
     expect(firstUserAdminHint(false)).toBe("");
     expect(landingHeroNote(true)).toMatch(/администратор/i);
     expect(landingHeroNote(false)).not.toMatch(/администратор/i);
+    expect(landingHeroNote()).not.toMatch(/администратор/i);
     expect(landingCtaBandNote(false)).not.toMatch(/администратор/i);
+    expect(landingCtaBandNote()).not.toMatch(/администратор/i);
   });
 
   test("does not promise live hosting, card payouts, or GitHub MCP connected", () => {

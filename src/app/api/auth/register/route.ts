@@ -45,6 +45,7 @@ export async function POST(req: Request) {
   const { name, email, password, invite: inviteToken } = parsed.data;
 
   // Seed env admin first so it takes priority over "first user becomes admin".
+  // GET /api/auth/bootstrap must predict this order (see firstUserBecomesAdminFromState).
   await ensureAdminSeed();
 
   const passwordHash = await hashPassword(password);

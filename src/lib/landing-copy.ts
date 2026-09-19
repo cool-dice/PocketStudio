@@ -1,10 +1,8 @@
 /**
  * Guest landing + auth CTA copy.
  * Do not promise live hosting, card payouts, or a connected GitHub MCP.
+ * First-user-admin sentence is gated by GET /api/auth/bootstrap.
  */
-
-/** Product still promotes the first registered user to admin. */
-export const FIRST_USER_BECOMES_ADMIN = true;
 
 export const LANDING_LOGIN_HREF = "/login";
 export const LANDING_REGISTER_HREF = "/login?tab=register";
@@ -13,9 +11,7 @@ export function landingCtaHref(intent: "login" | "register"): string {
   return intent === "register" ? LANDING_REGISTER_HREF : LANDING_LOGIN_HREF;
 }
 
-export function firstUserAdminHint(
-  firstUserBecomesAdmin = FIRST_USER_BECOMES_ADMIN,
-): string {
+export function firstUserAdminHint(firstUserBecomesAdmin = false): string {
   return firstUserBecomesAdmin
     ? "Если в студии ещё нет аккаунтов, первый зарегистрированный пользователь становится администратором."
     : "";
@@ -24,9 +20,7 @@ export function firstUserAdminHint(
 export const LANDING_HERO_SUB =
   "PocketStudio превращает диалог с ИИ в творческий конвейер: книги и статьи, изображения, аудио и видео, код приложения — от первой мысли до оффера в студии. Выплаты симулируются: карточная сеть не подключена.";
 
-export function landingHeroNote(
-  firstUserBecomesAdmin = FIRST_USER_BECOMES_ADMIN,
-): string {
+export function landingHeroNote(firstUserBecomesAdmin = false): string {
   return [
     "Без карты.",
     firstUserAdminHint(firstUserBecomesAdmin),
@@ -63,9 +57,7 @@ export const LANDING_CHAT_MOCK_LABEL = "Макет диалога — не жи�
 
 export const LANDING_CHAT_MOCK_PILL = "Оффер · симуляция";
 
-export function landingCtaBandNote(
-  firstUserBecomesAdmin = FIRST_USER_BECOMES_ADMIN,
-): string {
+export function landingCtaBandNote(firstUserBecomesAdmin = false): string {
   const admin = firstUserAdminHint(firstUserBecomesAdmin);
   return [
     "Регистрация занимает минуту — студия уже ждёт первую идею.",
@@ -78,7 +70,8 @@ export function landingCtaBandNote(
 export function landingMarketingBlob(): string {
   return [
     LANDING_HERO_SUB,
-    landingHeroNote(),
+    landingHeroNote(false),
+    landingHeroNote(true),
     LANDING_LAUNCH_CAPTION,
     LANDING_DEPLOY_BLURB,
     LANDING_MCP_BLURB,
@@ -89,6 +82,7 @@ export function landingMarketingBlob(): string {
     LANDING_CHAT_SECTION,
     LANDING_CHAT_MOCK_LABEL,
     LANDING_CHAT_MOCK_PILL,
-    landingCtaBandNote(),
+    landingCtaBandNote(false),
+    landingCtaBandNote(true),
   ].join("\n");
 }

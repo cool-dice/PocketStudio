@@ -329,5 +329,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Deploy honesty | ZIP только владельца; Dockerfile `published: false`; `docker build` — лог или `unavailable`; пустой app не «собрано»; IDOR 404 |
 | 2026-09-19 | deploy_project | Агент: только app; пустой не built; без Docker — текст unavailable в чат; никогда не published |
 | 2026-09-19 | Landing CTA honesty | Гость `/`: CTA → `/login` и `/login?tab=register`; first-user-admin copy; чат-мок подписан; без обещаний живого хоста / карт / GitHub MCP |
+| 2026-09-19 | First-user-admin flag | Публичный GET `/api/auth/bootstrap`: `firstUserBecomesAdmin` true только при 0 пользователей и без `ADMIN_EMAIL`+`ADMIN_PASSWORD` сида (как `register()`). Лендинг и вкладка регистрации показывают фразу только при true. |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

@@ -26,6 +26,7 @@ import {
   inviteRoleLabel,
   type InviteLifecycle,
 } from "@/lib/invite-status";
+import { useFirstUserBecomesAdmin } from "@/hooks/use-auth-bootstrap";
 import { firstUserAdminHint } from "@/lib/landing-copy";
 
 type AuthTab = "login" | "register";
@@ -42,6 +43,7 @@ export function AuthCard({
   inviteToken,
 }: AuthCardProps) {
   const { login, register } = useAuth();
+  const firstUserBecomesAdmin = useFirstUserBecomesAdmin();
 
   const [tab, setTab] = useState<AuthTab>(
     inviteToken ? "register" : defaultTab,
@@ -155,7 +157,10 @@ export function AuthCard({
                 : inviteRole
                   ? `Вас пригласили как ${inviteRoleLabel(inviteRole)}. Email должен совпадать с приглашением.`
                   : inviteRegisterCopy("ok")
-              : ["Пара шагов — и мысли потекут.", firstUserAdminHint()]
+              : [
+                  "Пара шагов — и мысли потекут.",
+                  firstUserAdminHint(firstUserBecomesAdmin),
+                ]
                   .filter(Boolean)
                   .join(" ")}
         </p>

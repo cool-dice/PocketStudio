@@ -17,9 +17,12 @@ import { ModulesSection } from "@/components/landing/modules-section";
 import { PipelineSection } from "@/components/landing/pipeline-section";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
+import { useFirstUserBecomesAdmin } from "@/hooks/use-auth-bootstrap";
 import { landingCtaHref } from "@/lib/landing-copy";
 
 export function LandingScreen() {
+  const firstUserBecomesAdmin = useFirstUserBecomesAdmin();
+
   return (
     <div className="flex min-h-dvh flex-col overflow-x-clip bg-background">
       <ThemeToggleGhost className="fixed top-4 right-4 z-10" />
@@ -40,11 +43,11 @@ export function LandingScreen() {
       </header>
 
       <main className="flex flex-1 flex-col">
-        <HeroSection />
+        <HeroSection firstUserBecomesAdmin={firstUserBecomesAdmin} />
         <PipelineSection />
         <ModulesSection />
         <ChatFeatureSection />
-        <HowItWorksSection />
+        <HowItWorksSection firstUserBecomesAdmin={firstUserBecomesAdmin} />
       </main>
 
       <footer className="mt-auto border-t">

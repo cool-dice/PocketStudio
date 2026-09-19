@@ -38,7 +38,11 @@ const STEPS = [
   },
 ] as const;
 
-export function HowItWorksSection() {
+export function HowItWorksSection({
+  firstUserBecomesAdmin = false,
+}: {
+  firstUserBecomesAdmin?: boolean;
+}) {
   return (
     <>
       <section id="how-it-works" className="border-t">
@@ -75,7 +79,7 @@ export function HowItWorksSection() {
           </Reveal>
           <Reveal delay={0.16}>
             <p className="max-w-md text-pretty text-muted-foreground">
-              {landingCtaBandNote()}
+              {landingCtaBandNote(firstUserBecomesAdmin)}
             </p>
           </Reveal>
           <Reveal delay={0.24}>

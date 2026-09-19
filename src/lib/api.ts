@@ -231,6 +231,10 @@ export const api = {
     return request<{ user: User }>("/api/auth/me").then((r) => r.user);
   },
 
+  authBootstrap(): Promise<{ firstUserBecomesAdmin: boolean }> {
+    return request<{ firstUserBecomesAdmin: boolean }>("/api/auth/bootstrap");
+  },
+
   login(email: string, password: string): Promise<User> {
     return request<{ user: User; token?: string }>("/api/auth/login", {
       method: "POST",

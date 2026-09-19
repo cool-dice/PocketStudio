@@ -31,7 +31,11 @@ import {
 } from "@/lib/landing-copy";
 import { cn } from "@/lib/utils";
 
-export function HeroSection() {
+export function HeroSection({
+  firstUserBecomesAdmin = false,
+}: {
+  firstUserBecomesAdmin?: boolean;
+}) {
   return (
     <section className="relative mx-auto w-full max-w-6xl px-4 sm:px-6">
       {/* soft emerald wash behind the whole hero */}
@@ -79,7 +83,9 @@ export function HeroSection() {
               Как это работает
             </Button>
           </div>
-          <p className="text-sm text-muted-foreground">{landingHeroNote()}</p>
+          <p className="text-sm text-muted-foreground">
+            {landingHeroNote(firstUserBecomesAdmin)}
+          </p>
         </motion.div>
 
         <HeroTileDock />
