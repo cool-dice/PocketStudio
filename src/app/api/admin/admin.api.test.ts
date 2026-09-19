@@ -357,6 +357,9 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
     expect(stillB?.role).toBe("client");
     expect(stillB?.passwordHash).toBe(passwordHash);
 
+    const otherAdmins = await db.user.count({
+      where: { role: "admin", id: { not: adminA.id } },
+    });
     const lastSelf = await adminPatchUser(
       jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, tokenA, {
         method: "PATCH",
@@ -367,7 +370,9 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
     expect(lastSelf.status).toBe(409);
     const lastJson = (await lastSelf.json()) as { user?: unknown; error: string };
     expect(lastJson.user).toBeUndefined();
-    expect(lastJson.error).toBe(LAST_ADMIN_DEMOTE);
+    expect(lastJson.error).toBe(
+      otherAdmins === 0 ? LAST_ADMIN_DEMOTE : SELF_ROLE_CHANGE,
+    );
     const stillA = await db.user.findUnique({
       where: { id: adminA.id },
       select: { role: true },
