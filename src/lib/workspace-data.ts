@@ -5,8 +5,9 @@
  * замысла (заметки, документы, медиа, код, деплой, доход). Тип воркспейса
  * задаёт стадийный пайплайн Обзора и состав вкладок оболочки.
  *
- * Пока это визуальная волна: мок-данные. В Фазе A закрепится в БД
- * (Project.type + content-таблицы с workspaceId) — см. docs/ROADMAP.md.
+ * Пока это визуальная мета (типы, вкладки, стадии). Список воркспейсов
+ * живёт в БД (`/api/workspaces`). MOCK_WORKSPACES ниже — только для
+ * `scripts/seed-workspaces.ts`, UI их не читает.
  */
 
 import {
@@ -158,7 +159,7 @@ export const WORKSPACE_PIPELINE_TITLE: Record<WorkspaceType, string> = {
 
 // ─────────────────────────── mock data ───────────────────────────
 
-/** Мок-воркспейсы визуальной волны PS-3 (Фаза A заменит на БД). */
+/** Демо-воркспейсы для `scripts/seed-workspaces.ts`. Не импортировать в UI. */
 export const MOCK_WORKSPACES: WorkspaceSummary[] = [
   {
     id: "ws-film-dwinter",

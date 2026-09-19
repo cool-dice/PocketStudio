@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 
 import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
-import { generateImage, synthesizeSpeech } from "../../src/lib/ai/connector";
+import { generateImage as gatewayGenerateImage, synthesizeSpeech } from "../../src/lib/ai/connector";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
 import type { ToolContext, ToolDef } from "./tools";
 
@@ -455,7 +455,7 @@ const generateImage: ToolDef = {
 
     try {
       const route = await resolveToolRoute(db, userId, "image");
-      const { buffer } = await generateImage(route, { prompt, size });
+      const { buffer } = await gatewayGenerateImage(route, { prompt, size });
       const url = saveGenFile(buffer, "png");
       const artifact = await db.artifact.create({
         data: {

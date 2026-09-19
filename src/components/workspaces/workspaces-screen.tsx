@@ -3,13 +3,12 @@
 /**
  * WorkspacesScreen — «Воркспейсы» (Фаза A): живой список из БД
  * (/api/workspaces) с каталогизацией (чипы типов, поиск, фильтр стадии,
- * сортировка), сетка карточек с избранным, скелетоны загрузки,
+ * сортировка), сетка карточек, скелетоны загрузки,
  * состояние ошибки с повтором и мастер создания воркспейса.
  */
 
 import { useMemo, useState } from "react";
 import { FolderKanban, Plus, RotateCcw, SearchX } from "lucide-react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,7 +39,6 @@ export function WorkspacesScreen({
   const [type, setType] = useState<WorkspacesTypeFilter>("all");
   const [stage, setStage] = useState<string>("all");
   const [sort, setSort] = useState<WorkspacesSort>("updated");
-  const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
   const [createOpen, setCreateOpen] = useState(false);
 
   /** Фасетная база: поиск не влияет на счётчики чипов и список стадий. */
@@ -89,21 +87,6 @@ export function WorkspacesScreen({
     setQuery("");
     setType("all");
     setStage("all");
-  }
-
-  function toggleFavorite(id: string) {
-    const name = workspaces.find((ws) => ws.id === id)?.name ?? "Воркспейс";
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-        toast("Убрано из избранного", { description: `«${name}»` });
-      } else {
-        next.add(id);
-        toast("Добавлено в избранное", { description: `«${name}»` });
-      }
-      return next;
-    });
   }
 
   const showSkeleton = loading && workspaces.length === 0;
@@ -175,8 +158,6 @@ export function WorkspacesScreen({
               <WorkspacesCard
                 key={ws.id}
                 workspace={ws}
-                favorite={favorites.has(ws.id)}
-                onToggleFavorite={toggleFavorite}
                 onOpen={(id) => openWorkspace(id)}
               />
             ))}

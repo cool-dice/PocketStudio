@@ -24,7 +24,6 @@ import {
 } from "@/components/ui/dialog";
 import type { ArtifactDto, WorkspaceDto } from "@/lib/workspace-types";
 import {
-  findWorkspace,
   WORKSPACE_TABS_BY_TYPE,
   WORKSPACE_TYPE_META,
 } from "@/lib/workspace-data";
@@ -60,7 +59,7 @@ export function LibraryArtifactDialog({
   const gradient = artifactGradient(data);
   const isCssGradient = /gradient\(/.test(gradient);
   const liveWorkspace = workspaceById[data.projectId] ?? null;
-  const workspace = liveWorkspace ? toWorkspaceSummary(liveWorkspace) : findWorkspace(data.projectId);
+  const workspace = liveWorkspace ? toWorkspaceSummary(liveWorkspace) : null;
   const wsMeta = workspace ? WORKSPACE_TYPE_META[workspace.type] : null;
 
   function handleOpenInWorkspace() {
@@ -74,11 +73,7 @@ export function LibraryArtifactDialog({
       ? kind.tab
       : "overview";
     onOpenChange(false);
-    if (liveWorkspace) {
-      useAppUi.getState().openWorkspaceData(workspace, tab);
-    } else {
-      useAppUi.getState().openWorkspace(workspace.id, tab);
-    }
+    useAppUi.getState().openWorkspaceData(workspace, tab);
   }
 
   function handleFavorite() {

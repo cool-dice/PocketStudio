@@ -3,11 +3,9 @@
 /**
  * ToolsScreen — «Инструменты» (PS-3-d).
  *
- * Глобальный уровень Инструментов поверх воркспейсов: Скиллы,
- * Интеграции, Монетизация (сводка) и Админ — существующие экраны
- * студии, встроенные во внутренние под-вкладки со своими
- * заголовками и внутренними скроллами (рамка WorkspaceModuleFrame).
- * Админ закрыт для не-администраторов дружелюбной карточкой-замком.
+ * Глобальный уровень Инструментов поверх воркспейсов: Интеграции,
+ * Модели ИИ, Монетизация (сводка) и Админ. Скиллы спрятаны до инъекции
+ * SKILL.md в промпт агента (см. docs/MVP.md W2).
  */
 
 import { useState } from "react";
@@ -16,7 +14,6 @@ import {
   Coins,
   KeyRound,
   ShieldCheck,
-  Wand2,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -29,16 +26,14 @@ import {
   ModuleHeader,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
-import { SkillsScreen } from "@/components/studio/skills/skills-screen";
 import { WorkspaceModuleFrame } from "@/components/workspaces/workspace-tabs-ui";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 
-type ToolsTabValue = "skills" | "integrations" | "models" | "monetize" | "admin";
+type ToolsTabValue = "integrations" | "models" | "monetize" | "admin";
 
 const TOOL_TABS: { value: ToolsTabValue; label: string; icon: LucideIcon }[] = [
-  { value: "skills", label: "Скиллы", icon: Wand2 },
   { value: "integrations", label: "Интеграции", icon: Blocks },
   { value: "models", label: "Модели ИИ", icon: KeyRound },
   { value: "monetize", label: "Монетизация", icon: Coins },
@@ -77,7 +72,7 @@ function AdminLockedCard({ role }: { role: string | null }) {
 }
 
 export function ToolsScreen({ onOpenMobileNav }: ModuleScreenProps) {
-  const [tab, setTab] = useState<ToolsTabValue>("skills");
+  const [tab, setTab] = useState<ToolsTabValue>("integrations");
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
@@ -86,8 +81,7 @@ export function ToolsScreen({ onOpenMobileNav }: ModuleScreenProps) {
       <ModuleHeader
         icon={Wrench}
         title="Инструменты"
-        description="Скиллы, интеграции, модели ИИ, монетизация и администрирование"
-        stage="wip"
+        description="Интеграции, модели ИИ, монетизация и администрирование"
         onOpenMobileNav={onOpenMobileNav}
       />
 
@@ -111,13 +105,6 @@ export function ToolsScreen({ onOpenMobileNav }: ModuleScreenProps) {
             ))}
           </TabsList>
         </div>
-
-        {/* ── Скиллы ── */}
-        <TabsContent value="skills" className="mt-0 min-h-0 flex-1">
-          <WorkspaceModuleFrame>
-            <SkillsScreen onOpenMobileNav={onOpenMobileNav} />
-          </WorkspaceModuleFrame>
-        </TabsContent>
 
         {/* ── Интеграции ── */}
         <TabsContent value="integrations" className="mt-0 min-h-0 flex-1">

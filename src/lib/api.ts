@@ -280,6 +280,7 @@ export const api = {
     q?: string;
     page?: number;
     limit?: number;
+    projectId?: string;
   }): Promise<{ notes: Note[]; total: number; hasMore: boolean }> {
     const qs = new URLSearchParams();
     if (params?.categoryId) qs.set("categoryId", params.categoryId);
@@ -287,11 +288,16 @@ export const api = {
     if (params?.q) qs.set("q", params.q);
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.projectId) qs.set("projectId", params.projectId);
     const query = qs.toString();
     return request(`/api/notes${query ? `?${query}` : ""}`);
   },
 
-  createNote(data: { text: string; categoryId?: string }): Promise<Note> {
+  createNote(data: {
+    text: string;
+    categoryId?: string;
+    projectId?: string;
+  }): Promise<Note> {
     return request<{ note: Note }>("/api/notes", {
       method: "POST",
       body: JSON.stringify(data),

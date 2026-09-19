@@ -283,19 +283,17 @@ export interface QuickAction {
   label: string;
   icon: LucideIcon;
   tab: WorkspaceTab;
-  /** Генерация ещё не настоящая — вешаем бейдж «В разработке». */
-  wip?: boolean;
 }
 
 export const QUICK_ACTIONS: Record<WorkspaceType, QuickAction[]> = {
   film: [
-    { label: "Сгенерировать сцену", icon: Clapperboard, tab: "video", wip: true },
+    { label: "Сгенерировать сцену", icon: Clapperboard, tab: "video" },
     { label: "Нарисовать кадр", icon: ImagePlus, tab: "images" },
     { label: "Открыть сценарий", icon: BookOpenText, tab: "documents" },
   ],
   book: [
     { label: "Написать главу", icon: NotebookPen, tab: "documents" },
-    { label: "Сгенерировать портрет", icon: Sparkles, tab: "documents", wip: true },
+    { label: "Сгенерировать портрет", icon: Sparkles, tab: "documents" },
     { label: "Спросить оркестратора", icon: Wand2, tab: "chat" },
   ],
   music: [
@@ -304,14 +302,14 @@ export const QUICK_ACTIONS: Record<WorkspaceType, QuickAction[]> = {
     { label: "Текст песни", icon: NotebookPen, tab: "notes" },
   ],
   app: [
-    { label: "Сгенерировать компонент", icon: FileCode2, tab: "code", wip: true },
-    { label: "Задеплоить превью", icon: Rocket, tab: "deploy", wip: true },
+    { label: "Открыть код", icon: FileCode2, tab: "code" },
+    { label: "Dockerfile и zip", icon: Rocket, tab: "deploy" },
     { label: "Сводка дохода", icon: Coins, tab: "monetize" },
   ],
   universal: [
     { label: "Записать заметку", icon: NotebookPen, tab: "notes" },
-    { label: "Сгенерировать артефакт", icon: Sparkles, tab: "chat", wip: true },
-    { label: "Опубликовать", icon: Rocket, tab: "monetize", wip: true },
+    { label: "Спросить оркестратора", icon: Sparkles, tab: "chat" },
+    { label: "План монетизации", icon: Rocket, tab: "monetize" },
   ],
 };
 

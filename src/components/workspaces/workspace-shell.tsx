@@ -103,6 +103,8 @@ export function WorkspaceShell({
         settingsOpen={settingsOpen}
         onOpenSettings={() => setSettingsOpen(true)}
         onCloseSettings={() => setSettingsOpen(false)}
+        onUpdated={reload}
+        onDeleted={closeWorkspace}
       />
 
       {/* ── Единая строка вкладок ── */}

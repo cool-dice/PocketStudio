@@ -1,10 +1,8 @@
 "use client";
 
 /**
- * WorkspaceCard — карточка воркспейса в списке (Фаза A): большая
- * градиентная обложка с типом и стадией, звезда избранного, прогресс
- * с процентом, живые счётчики counts из БД и человекочитаемое обновление.
- * Клик по карточке открывает оболочку воркспейса.
+ * WorkspaceCard — карточка воркспейса в списке: градиентная обложка,
+ * тип и стадия, прогресс, живые счётчики counts из БД.
  */
 
 import {
@@ -15,7 +13,6 @@ import {
   FolderKanban,
   ImagePlus,
   NotebookPen,
-  Star,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -39,15 +36,11 @@ const COUNT_ITEMS = [
 
 interface WorkspaceCardProps {
   workspace: WorkspaceDto;
-  favorite: boolean;
-  onToggleFavorite: (id: string) => void;
   onOpen: (id: string) => void;
 }
 
 export function WorkspacesCard({
   workspace,
-  favorite,
-  onToggleFavorite,
   onOpen,
 }: WorkspaceCardProps) {
   const meta = WORKSPACE_TYPE_META[workspace.type];
@@ -87,29 +80,6 @@ export function WorkspacesCard({
         >
           {stage}
         </Badge>
-      </button>
-
-      {/* ── Избранное ── */}
-      <button
-        type="button"
-        onClick={() => onToggleFavorite(workspace.id)}
-        aria-pressed={favorite}
-        aria-label={
-          favorite ? "Убрать из избранного" : "Добавить в избранное"
-        }
-        title={favorite ? "Убрать из избранного" : "Добавить в избранное"}
-        className={cn(
-          "absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-lg border backdrop-blur transition-colors",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-          favorite
-            ? "border-amber-400/60 bg-amber-500/25 text-amber-400"
-            : "border-white/25 bg-black/20 text-white/85 hover:bg-black/30 hover:text-white",
-        )}
-      >
-        <Star
-          className={cn("size-4", favorite && "fill-amber-400 text-amber-400")}
-          aria-hidden="true"
-        />
       </button>
 
       {/* ── Тело карточки ── */}

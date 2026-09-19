@@ -402,14 +402,6 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
                       <span className="min-w-0 flex-1 truncate font-medium">
                         {action.label}
                       </span>
-                      {action.wip ? (
-                        <Badge
-                          variant="outline"
-                          className="shrink-0 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-400"
-                        >
-                          В разработке
-                        </Badge>
-                      ) : null}
                       <ChevronRight
                         className="size-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5"
                         aria-hidden="true"

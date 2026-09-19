@@ -14,6 +14,8 @@ const createNoteSchema = z.object({
     .min(1, "Текст заметки не может быть пустым")
     .max(5000, "Текст заметки не может превышать 5000 символов"),
   categoryId: z.string().trim().min(1).optional(),
+  /** Привязать к воркспейсу (NoteLink kind=context). */
+  projectId: z.string().trim().min(1).optional(),
 });
 
 export async function GET(req: Request) {
@@ -25,6 +27,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const categoryId = url.searchParams.get("categoryId")?.trim() || null;
   const favorite = url.searchParams.get("favorite") === "1";
+  const projectId = url.searchParams.get("projectId")?.trim() || null;
   // Case-insensitive substring search on rawText.
   const q = url.searchParams.get("q")?.trim().toLowerCase() || null;
 
@@ -56,6 +59,24 @@ export async function GET(req: Request) {
   const where: Prisma.NoteWhereInput = { userId: session.sub };
   if (categoryId) where.categoryId = categoryId;
   if (favorite) where.favorite = true;
+
+  if (projectId) {
+    const owned = await db.project.findFirst({
+      where: { id: projectId, userId: session.sub },
+      select: { id: true },
+    });
+    if (!owned) {
+      return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
+    }
+    const links = await db.noteLink.findMany({
+      where: { projectId },
+      select: { noteId: true },
+    });
+    if (links.length === 0) {
+      return NextResponse.json({ notes: [], total: 0, hasMore: false });
+    }
+    where.id = { in: links.map((l) => l.noteId) };
+  }
 
   if (q) {
     // Unicode-safe case-insensitive matching: SQLite LIKE/lower() are
@@ -127,6 +148,18 @@ export async function POST(req: Request) {
     }
   }
 
+  let projectId: string | null = null;
+  if (parsed.data.projectId) {
+    const project = await db.project.findFirst({
+      where: { id: parsed.data.projectId, userId: session.sub },
+      select: { id: true },
+    });
+    if (!project) {
+      return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
+    }
+    projectId = project.id;
+  }
+
   const note = await db.note.create({
     data: {
       userId: session.sub,
@@ -135,6 +168,12 @@ export async function POST(req: Request) {
       categoryId: category?.id ?? undefined,
     },
   });
+
+  if (projectId) {
+    await db.noteLink.create({
+      data: { noteId: note.id, projectId, kind: "context" },
+    });
+  }
 
   return NextResponse.json(
     { note: noteWithCategory({ ...note, category }) },
