@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * DeployScreen (5-c) — «Экспорт и публикация».
+ * DeployScreen (5-c) — «Экспорт и деплой».
  *
  * Честно: деплой в облако в песочнице недоступен (задел на будущее —
  * домены, сборка, релизы). Рабочая часть — экспорт воркспейса в ZIP
@@ -31,6 +31,10 @@ import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import {
+  DEPLOY_SCREEN_DESCRIPTION,
+  DEPLOY_SCREEN_TITLE,
+} from "@/lib/docker-copy";
 import type { WorkspaceDto } from "@/lib/workspace-types";
 import type { ProjectListItem } from "@/lib/types";
 import { DockerfileCard } from "./dockerfile-card";
@@ -164,13 +168,13 @@ export function DeployScreen({
 
   return (
     <section
-      aria-label="Экспорт и публикация"
+      aria-label={DEPLOY_SCREEN_TITLE}
       className="flex h-full min-w-0 flex-1 flex-col bg-background"
     >
       <ModuleHeader
         icon={Rocket}
-        title="Экспорт и публикация"
-        description="Dockerfile, docker build если демон есть, ZIP и локальный preview — без фейкового «опубликовано»."
+        title={DEPLOY_SCREEN_TITLE}
+        description={DEPLOY_SCREEN_DESCRIPTION}
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />

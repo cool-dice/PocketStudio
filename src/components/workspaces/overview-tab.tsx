@@ -59,6 +59,7 @@ import {
   WORKSPACE_STAGES,
   WORKSPACE_TAB_META,
   WORKSPACE_TYPE_META,
+  samePipelineStage,
   type WorkspaceTab,
 } from "@/lib/workspace-data";
 import type { WorkspaceDto } from "@/lib/workspace-types";
@@ -121,7 +122,9 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
   );
 
   /** Артефакты со стадией вне пайплайна типа — отдельным бакетом. */
-  const extras = (artifacts ?? []).filter((a) => !stages.includes(a.stage));
+  const extras = (artifacts ?? []).filter(
+    (a) => !stages.some((stage) => samePipelineStage(a.stage, stage)),
+  );
 
   /** Клик по карточке артефакта → его модуль внутри воркспейса. */
   function openArtifact(artifact: ArtifactItem) {
@@ -280,7 +283,9 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
               ) : (
                 <>
                   {stages.map((stage, i) => {
-                    const list = artifacts.filter((a) => a.stage === stage);
+                    const list = artifacts.filter((a) =>
+                      samePipelineStage(a.stage, stage),
+                    );
                     const status = stageStatusOf(i, workspace);
                     return (
                       <section key={stage} aria-label={`Стадия «${stage}»`} className="rounded-xl border bg-card">

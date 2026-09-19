@@ -6,6 +6,8 @@ import {
   DOCKER_BUILD_LOCAL_ONLY,
   DOCKER_DAEMON_MISSING_LOG,
   DEPLOY_APP_ONLY_ERROR,
+  DEPLOY_SCREEN_DESCRIPTION,
+  DEPLOY_SCREEN_TITLE,
   DEPLOY_ZIP_HINT,
   EMPTY_APP_BUILD_ERROR,
   dockerCliMissingLog,
@@ -45,6 +47,13 @@ describe("deploy honesty copy", () => {
     expect(`${DEPLOY_APP_ONLY_ERROR}\n${DEPLOY_ZIP_HINT}`).not.toMatch(
       FAKE_SUCCESS,
     );
+  });
+
+  test("deploy screen title is export/deploy, not hosted publish", () => {
+    expect(DEPLOY_SCREEN_TITLE).toBe("Экспорт и деплой");
+    expect(DEPLOY_SCREEN_TITLE).not.toMatch(/публикац/i);
+    expect(DEPLOY_SCREEN_DESCRIPTION).toMatch(/без фейкового/i);
+    expect(DEPLOY_SCREEN_DESCRIPTION).not.toMatch(FAKE_SUCCESS);
   });
 });
 

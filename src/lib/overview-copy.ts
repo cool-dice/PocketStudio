@@ -3,7 +3,12 @@
  * «запрос отправлен» are never shown as live status of this workspace.
  */
 
-import { WORKSPACE_STAGES, type WorkspaceType } from "./workspace-data";
+import {
+  PIPELINE_RELEASE_STAGE,
+  WORKSPACE_STAGES,
+  canonicalStageLabel,
+  type WorkspaceType,
+} from "./workspace-data";
 
 export interface NextStepPrompt {
   /** Generic action for the current pipeline stage. */
@@ -43,7 +48,7 @@ export const NEXT_STEP_PROMPTS: Record<
       title: "Собрать WebM из сцен",
       hint: "Браузерный рендер или ffmpeg, если он есть. Не Premiere и не выкладка на хост.",
     },
-    Публикация: {
+    [PIPELINE_RELEASE_STAGE]: {
       title: "Скачать файлы и собрать оффер",
       hint: "ZIP и WebM остаются в студии. Внешний хост и карточные выплаты — не эта кнопка.",
     },
@@ -69,7 +74,7 @@ export const NEXT_STEP_PROMPTS: Record<
       title: "Собрать обложку в дизайне",
       hint: "Растр и макет — ручные правки, не магазинная вёрстка.",
     },
-    Публикация: {
+    [PIPELINE_RELEASE_STAGE]: {
       title: "Собрать оффер в студии",
       hint: "Цена и статус живут здесь. Магазины и карточные выплаты не подключены.",
     },
@@ -135,7 +140,7 @@ export const NEXT_STEP_PROMPTS: Record<
       title: "Экспортировать файлы",
       hint: "ZIP, WAV или WebM из того, что уже есть. Это не публикация на площадку.",
     },
-    Публикация: {
+    [PIPELINE_RELEASE_STAGE]: {
       title: "Собрать оффер в студии",
       hint: "Кабинет выплат симулирует оплату. Карточная сеть не подключена.",
     },
@@ -147,7 +152,8 @@ export function nextStepOf(ws: {
   stage?: string | null;
 }): NextStepPrompt {
   const byStage = NEXT_STEP_PROMPTS[ws.type];
-  return (ws.stage ? byStage[ws.stage] : undefined) ?? OVERVIEW_NEXT_FALLBACK;
+  const stage = ws.stage ? canonicalStageLabel(ws.stage) : undefined;
+  return (stage ? byStage[stage] : undefined) ?? OVERVIEW_NEXT_FALLBACK;
 }
 
 /** Draft sent to the workspace thread — never toast this as already delivered. */

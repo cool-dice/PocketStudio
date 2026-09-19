@@ -4,7 +4,11 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { workspaceCounts, workspaceDto } from "@/lib/workspace-shapes";
-import { WORKSPACE_STAGES } from "@/lib/workspace-data";
+import {
+  WORKSPACE_STAGES,
+  canonicalStageLabel,
+  pipelineStageIndex,
+} from "@/lib/workspace-data";
 import type { WorkspaceKind } from "@/lib/workspace-types";
 
 export const dynamic = "force-dynamic";
@@ -71,8 +75,11 @@ export async function PATCH(req: Request, { params }: Params) {
 
   // stageIndex по названию стадии — согласованно с пайплайном типа.
   let { stage, stageIndex } = parsed.data;
+  if (stage !== undefined) {
+    stage = canonicalStageLabel(stage);
+  }
   if (stage !== undefined && stageIndex === undefined) {
-    const idx = stages.indexOf(stage);
+    const idx = pipelineStageIndex(stages, stage);
     stageIndex = idx >= 0 ? idx + 1 : undefined;
   }
   if (stageIndex !== undefined && stage === undefined) {

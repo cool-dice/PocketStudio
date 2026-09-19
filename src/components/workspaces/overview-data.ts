@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import {
+  PIPELINE_RELEASE_STAGE,
   WORKSPACE_STAGES,
   WORKSPACE_TABS_BY_TYPE,
   type WorkspaceTab,
@@ -113,7 +114,7 @@ export const STAGE_WORK_TABS: Record<WorkspaceType, Record<string, WorkspaceTab>
     Видеоряд: "video",
     Озвучка: "video",
     Монтаж: "video",
-    Публикация: "monetize",
+    [PIPELINE_RELEASE_STAGE]: "monetize",
   },
   book: {
     Замысел: "notes",
@@ -121,7 +122,7 @@ export const STAGE_WORK_TABS: Record<WorkspaceType, Record<string, WorkspaceTab>
     Черновик: "documents",
     Правка: "documents",
     Вёрстка: "design",
-    Публикация: "monetize",
+    [PIPELINE_RELEASE_STAGE]: "monetize",
   },
   music: {
     Идея: "notes",
@@ -142,7 +143,7 @@ export const STAGE_WORK_TABS: Record<WorkspaceType, Record<string, WorkspaceTab>
     Подготовка: "notes",
     Создание: "audio",
     Сборка: "video",
-    Публикация: "monetize",
+    [PIPELINE_RELEASE_STAGE]: "monetize",
   },
 };
 

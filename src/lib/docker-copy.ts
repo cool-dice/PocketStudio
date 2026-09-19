@@ -35,6 +35,10 @@ export const DEPLOY_APP_ONLY_ERROR =
 export const DEPLOY_ZIP_HINT =
   "ZIP исходников можно скачать на экране «Деплой». Это архив, не публикация.";
 
+export const DEPLOY_SCREEN_TITLE = "Экспорт и деплой";
+export const DEPLOY_SCREEN_DESCRIPTION =
+  "Dockerfile, docker build если демон есть, ZIP и локальный preview — без фейкового «опубликовано».";
+
 const TYPE_LABELS: Record<string, string> = {
   film: "фильм",
   book: "книга",

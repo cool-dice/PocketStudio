@@ -80,13 +80,13 @@ export const WORKSPACE_TYPE_META: Record<
   film: {
     label: "Фильм",
     icon: Clapperboard,
-    hint: "Сценарий → раскадровка → видеоряд → озвучка → монтаж → публикация",
+    hint: "Сценарий → раскадровка → видеоряд → озвучка → монтаж → выпуск",
     gradient: "from-sky-500/70 via-indigo-500/40 to-violet-500/60",
   },
   book: {
     label: "Книга",
     icon: BookOpenText,
-    hint: "Замысел → структура → черновик → правка → вёрстка → публикация",
+    hint: "Замысел → структура → черновик → правка → вёрстка → выпуск",
     gradient: "from-emerald-500/70 via-teal-500/40 to-cyan-500/60",
   },
   music: {
@@ -109,13 +109,41 @@ export const WORKSPACE_TYPE_META: Record<
   },
 };
 
+/**
+ * Last pipeline stage: ZIP / Dockerfile / оффер в студии.
+ * Not hosted publish — older rows may still store the legacy label.
+ */
+export const PIPELINE_RELEASE_STAGE = "Выпуск";
+
+/** Stored in older `Project.stage` strings; display and lookups map forward. */
+const PIPELINE_RELEASE_STAGE_LEGACY = "Публикация";
+
+/** Map a stored stage name onto the current pipeline label. */
+export function canonicalStageLabel(stage: string): string {
+  return stage === PIPELINE_RELEASE_STAGE_LEGACY
+    ? PIPELINE_RELEASE_STAGE
+    : stage;
+}
+
+export function samePipelineStage(stored: string, pipelineStage: string): boolean {
+  return canonicalStageLabel(stored) === canonicalStageLabel(pipelineStage);
+}
+
+/** 0-based index in a pipeline, honoring the legacy release label. */
+export function pipelineStageIndex(
+  stages: readonly string[],
+  stage: string,
+): number {
+  return stages.indexOf(canonicalStageLabel(stage));
+}
+
 /** Стадийный пайплайн Обзора по типу воркспейса. */
 export const WORKSPACE_STAGES: Record<WorkspaceType, string[]> = {
-  film: ["Сценарий", "Раскадровка", "Видеоряд", "Озвучка", "Монтаж", "Публикация"],
-  book: ["Замысел", "Структура", "Черновик", "Правка", "Вёрстка", "Публикация"],
+  film: ["Сценарий", "Раскадровка", "Видеоряд", "Озвучка", "Монтаж", PIPELINE_RELEASE_STAGE],
+  book: ["Замысел", "Структура", "Черновик", "Правка", "Вёрстка", PIPELINE_RELEASE_STAGE],
   music: ["Идея", "Демо", "Аранжировка", "Сведение", "Релиз"],
   app: ["Идея", "Спека", "Код", "Тесты", "Деплой", "Мониторинг"],
-  universal: ["Подготовка", "Создание", "Сборка", "Публикация"],
+  universal: ["Подготовка", "Создание", "Сборка", PIPELINE_RELEASE_STAGE],
 };
 
 /** Единая строка вкладок оболочки воркспейса (состав зависит от типа).
