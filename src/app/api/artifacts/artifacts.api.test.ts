@@ -369,4 +369,95 @@ describe.skipIf(SKIP_PG)("album artifacts: persist, empty vs error, IDOR", () =>
       await db.artifact.count({ where: { projectId: attacker.ws.id } }),
     ).toBe(0);
   });
+
+  test("GET /api/artifacts?projectId= is 404 for another user; own other project is scoped", async () => {
+    const owner = await seedUser("lib-owner");
+    const attacker = await seedUser("lib-atk");
+    const other = await db.project.create({
+      data: {
+        userId: owner.user.id,
+        name: "Другая полка владельца",
+        type: "book",
+        origin: "workspace",
+      },
+    });
+    const secret = await db.artifact.create({
+      data: {
+        projectId: owner.ws.id,
+        type: "image",
+        title: "Секрет библиотеки",
+      },
+    });
+    const ownOther = await db.artifact.create({
+      data: {
+        projectId: other.id,
+        type: "image",
+        title: "Своя другая полка",
+      },
+    });
+    const attackerArt = await db.artifact.create({
+      data: {
+        projectId: attacker.ws.id,
+        type: "image",
+        title: "Артефакт атакующего",
+      },
+    });
+
+    const stolen = await listLibrary(
+      jsonRequest(
+        `http://localhost/api/artifacts?projectId=${owner.ws.id}`,
+        "GET",
+        undefined,
+        attacker.token,
+      ),
+    );
+    expect(stolen.status).toBe(404);
+    const stolenJson = (await stolen.json()) as {
+      error: string;
+      artifacts?: unknown;
+    };
+    expect(stolenJson.artifacts).toBeUndefined();
+    expect(stolenJson.error).toMatch(/не найден/i);
+    expect(JSON.stringify(stolenJson)).not.toContain("Секрет библиотеки");
+    expect(JSON.stringify(stolenJson)).not.toContain(secret.id);
+    expect(JSON.stringify(stolenJson)).not.toContain(attackerArt.id);
+
+    const missing = await listLibrary(
+      jsonRequest(
+        "http://localhost/api/artifacts?projectId=does-not-exist",
+        "GET",
+        undefined,
+        attacker.token,
+      ),
+    );
+    expect(missing.status).toBe(404);
+    const missingJson = (await missing.json()) as { artifacts?: unknown };
+    expect(missingJson.artifacts).toBeUndefined();
+
+    const unscoped = await listLibrary(
+      jsonRequest("http://localhost/api/artifacts", "GET", undefined, attacker.token),
+    );
+    expect(unscoped.status).toBe(200);
+    const unscopedJson = (await unscoped.json()) as {
+      artifacts: Array<{ id: string; title: string }>;
+    };
+    expect(unscopedJson.artifacts.some((a) => a.id === attackerArt.id)).toBe(true);
+    expect(unscopedJson.artifacts.some((a) => a.id === secret.id)).toBe(false);
+
+    const scoped = await listLibrary(
+      jsonRequest(
+        `http://localhost/api/artifacts?projectId=${other.id}`,
+        "GET",
+        undefined,
+        owner.token,
+      ),
+    );
+    expect(scoped.status).toBe(200);
+    const scopedJson = (await scoped.json()) as {
+      artifacts: Array<{ id: string; title: string; projectId: string }>;
+    };
+    expect(scopedJson.artifacts.map((a) => a.id)).toEqual([ownOther.id]);
+    expect(scopedJson.artifacts[0]?.projectId).toBe(other.id);
+    expect(scopedJson.artifacts.some((a) => a.id === secret.id)).toBe(false);
+  });
 });

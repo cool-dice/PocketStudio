@@ -19,6 +19,7 @@ import {
   PATCH as patchEntity,
   DELETE as deleteEntity,
 } from "./entities/[id]/route";
+import { GET as listLibrary } from "./artifacts/route";
 import { PATCH as patchArtifact, DELETE as deleteArtifact } from "./artifacts/[id]/route";
 import { PATCH as patchFinding } from "./findings/[id]/route";
 
@@ -291,6 +292,24 @@ describe.skipIf(SKIP_PG)("IDOR: other user's ids are 404", () => {
       { params: Promise.resolve({ id: entity.id }) },
     );
     expect(entDel.status).toBe(404);
+
+    const stolenList = await listLibrary(
+      jsonRequest(
+        `http://localhost/api/artifacts?projectId=${ws.id}`,
+        "GET",
+        undefined,
+        attackerToken!,
+      ),
+    );
+    expect(stolenList.status).toBe(404);
+    const stolenListJson = (await stolenList.json()) as {
+      error: string;
+      artifacts?: unknown;
+    };
+    expect(stolenListJson.artifacts).toBeUndefined();
+    expect(stolenListJson.error).toMatch(/не найден/i);
+    expect(JSON.stringify(stolenListJson)).not.toContain("портрет");
+    expect(JSON.stringify(stolenListJson)).not.toContain(artifact.id);
 
     const artPatch = await patchArtifact(
       jsonRequest(

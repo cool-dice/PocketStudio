@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { LIBRARY_FAVORITE_FAILED } from "@/lib/library-copy";
 import type { ArtifactDto, WorkspaceDto } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 import { LibraryArtifactDialog } from "@/components/workspaces/library-artifact-dialog";
@@ -99,9 +100,9 @@ export function LibraryScreen({
     [workspaces],
   );
 
-  /* Избранное — оптимистично, с откатом при ошибке. */
+  /* Избранное — оптимистично; успех тостит диалог только после PATCH. */
   const toggleFavorite = useCallback(
-    async (artifact: ArtifactDto) => {
+    async (artifact: ArtifactDto): Promise<boolean> => {
       const next = !artifact.favorite;
       setArtifacts((prev) =>
         prev
@@ -110,13 +111,15 @@ export function LibraryScreen({
       );
       try {
         await api.updateArtifact(artifact.id, { favorite: next });
+        return true;
       } catch {
         setArtifacts((prev) =>
           prev
-            ? prev.map((a) => (a.id === artifact.id ? { ...a, favorite: !next } : a))
+            ? prev.map((a) => (a.id === artifact.id ? { ...a, favorite: artifact.favorite } : a))
             : prev,
         );
-        toast.error("Не удалось обновить избранное");
+        toast.error(LIBRARY_FAVORITE_FAILED);
+        return false;
       }
     },
     [],
@@ -379,7 +382,7 @@ function LibraryStatsRow({
             <stat.icon className="size-4" />
           </span>
           <div className="min-w-0">
-            {loading || artifacts === null ? (
+            {loading ? (
               <Skeleton className="h-5 w-10 rounded" />
             ) : (
               <p className="text-xl font-semibold leading-none tabular-nums">

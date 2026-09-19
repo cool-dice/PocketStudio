@@ -5,7 +5,7 @@
  * (ArtifactDto): крупное превью (реальная картинка при url, иначе
  * градиент с иконкой типа), название, описание, промпт, контекст
  * воркспейса и дата, действия: «Открыть в воркспейсе» (переход на
- * вкладку типа контента), «В избранное» (api.updateArtifact),
+ * вкладку типа контента), «В избранное» (PATCH, toast только после успеха),
  * «Скачать» (реальный файл при url).
  */
 
@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ArtifactDto, WorkspaceDto } from "@/lib/workspace-types";
+import { libraryFavoriteToast } from "@/lib/library-copy";
 import {
   WORKSPACE_TABS_BY_TYPE,
   WORKSPACE_TYPE_META,
@@ -41,7 +42,7 @@ interface LibraryArtifactDialogProps {
   /** Живые воркспейсы (для контекста и перехода). */
   workspaceById: Record<string, WorkspaceDto>;
   onOpenChange: (open: boolean) => void;
-  onToggleFavorite: (artifact: ArtifactDto) => void;
+  onToggleFavorite: (artifact: ArtifactDto) => boolean | void | Promise<boolean | void>;
 }
 
 export function LibraryArtifactDialog({
@@ -76,12 +77,12 @@ export function LibraryArtifactDialog({
     useAppUi.getState().openWorkspaceData(workspace, tab);
   }
 
-  function handleFavorite() {
-    onToggleFavorite(data);
-    toast.success(
-      data.favorite ? "Убрано из избранного" : "Добавлено в избранное",
-      { description: `«${data.title}»` },
-    );
+  async function handleFavorite() {
+    const wasFavorite = data.favorite;
+    const ok = await onToggleFavorite(data);
+    if (ok !== true) return;
+    const result = libraryFavoriteToast(true, wasFavorite);
+    toast.success(result.message, { description: `«${data.title}»` });
   }
 
   function handleDownload() {
