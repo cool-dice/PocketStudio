@@ -969,7 +969,7 @@ export const api = {
     return request<{ config: string; count: number }>("/api/mcp/config");
   },
 
-  /** Dockerfile-генератор (Фаза D): пишет файлы в проект, возвращает текст. */
+  /** Dockerfile-генератор: пишет файлы в проект. Образ не публикуется. */
   generateDockerfile(
     projectId: string,
     overwrite = false,
@@ -978,6 +978,11 @@ export const api = {
     dockerfile: string;
     dockerignore: string;
     workspace: { id: string; name: string };
+    published: false;
+    imageTag: null;
+    status: string;
+    empty: boolean;
+    hint: string;
   }> {
     return request(`/api/workspaces/${encodeURIComponent(projectId)}/dockerfile`, {
       method: "POST",
@@ -1564,6 +1569,7 @@ export const api = {
     status: string;
     log: string;
     imageTag: string | null;
+    published: false;
   }> {
     return request(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/docker-build`,

@@ -1,90 +1,124 @@
-import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { getUserFromRequest } from "@/lib/auth";
-import { projectRoot } from "@/lib/workspace";
+import { ensureWorkspace } from "@/lib/workspace-api";
+import {
+  DOCKERFILE_MISSING_ERROR,
+  DOCKER_DAEMON_MISSING_LOG,
+  EMPTY_APP_BUILD_ERROR,
+  dockerCliMissingLog,
+  hasBuildableAppFiles,
+  hasDockerfile,
+} from "@/lib/docker-copy";
+import { runDockerBuild, whichDocker } from "@/lib/docker-deploy";
+import { listWorkspaceTree, projectRoot } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 type Params = { params: Promise<{ id: string }> };
 
-function whichDocker(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const child = spawn("docker", ["version", "--format", "{{.Server.Version}}"], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (d) => {
-      out += String(d);
-    });
-    child.stderr.on("data", (d) => {
-      err += String(d);
-    });
-    child.on("error", () => resolve(null));
-    child.on("close", (code) => {
-      if (code === 0 && out.trim()) resolve(out.trim());
-      else resolve(err.includes("Cannot connect") ? "no-daemon" : null);
-    });
-  });
+function json(
+  body: {
+    status: "empty" | "unavailable" | "failed" | "built";
+    log: string;
+    imageTag: string | null;
+    published: false;
+    error?: string;
+  },
+  status: number,
+) {
+  return NextResponse.json(body, { status });
 }
 
 export async function POST(req: Request, { params }: Params) {
-  const session = await getUserFromRequest(req);
-  if (!session) {
-    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
-  }
   const { id } = await params;
+  const check = await ensureWorkspace(req, id);
+  if (!check.ok) return check.response;
+
   const project = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: { id, userId: check.userId },
+    select: { id: true, rootPath: true },
   });
   if (!project) {
-    return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
+    return json(
+      {
+        status: "empty",
+        log: EMPTY_APP_BUILD_ERROR,
+        imageTag: null,
+        published: false,
+        error: "Воркспейс не найден",
+      },
+      404,
+    );
   }
+
   const root = project.rootPath || projectRoot(project.id);
+  let files: { path: string; type: string }[] = [];
+  try {
+    files = (await listWorkspaceTree(root)).entries;
+  } catch {
+    files = [];
+  }
+
+  if (!hasBuildableAppFiles(files)) {
+    return json(
+      {
+        status: "empty",
+        log: EMPTY_APP_BUILD_ERROR,
+        imageTag: null,
+        published: false,
+        error: EMPTY_APP_BUILD_ERROR,
+      },
+      400,
+    );
+  }
+  if (!hasDockerfile(files)) {
+    return json(
+      {
+        status: "empty",
+        log: DOCKERFILE_MISSING_ERROR,
+        imageTag: null,
+        published: false,
+        error: DOCKERFILE_MISSING_ERROR,
+      },
+      400,
+    );
+  }
 
   const docker = await whichDocker();
-  if (!docker) {
-    return NextResponse.json({
-      status: "unavailable",
-      log: "docker CLI не найден в PATH. Соберите образ локально:\n  docker build -t pocketstudio/" +
-        id.slice(0, 8) +
-        " " +
-        root,
-      imageTag: null,
-    });
+  if (docker === "no-cli") {
+    return json(
+      {
+        status: "unavailable",
+        log: dockerCliMissingLog(id, root),
+        imageTag: null,
+        published: false,
+      },
+      200,
+    );
   }
   if (docker === "no-daemon") {
-    return NextResponse.json({
-      status: "unavailable",
-      log: "Docker CLI есть, но демон не запущен. Запустите Docker Desktop / dockerd и повторите.",
-      imageTag: null,
-    });
+    return json(
+      {
+        status: "unavailable",
+        log: DOCKER_DAEMON_MISSING_LOG,
+        imageTag: null,
+        published: false,
+      },
+      200,
+    );
   }
 
   const tag = `pocketstudio/${id.slice(0, 12).toLowerCase()}:local`;
-  const log = await new Promise<string>((resolve) => {
-    const child = spawn("docker", ["build", "-t", tag, "."], {
-      cwd: root,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let buf = "";
-    child.stdout.on("data", (d) => {
-      buf += String(d);
-    });
-    child.stderr.on("data", (d) => {
-      buf += String(d);
-    });
-    child.on("error", (err) => resolve(err.message));
-    child.on("close", () => resolve(buf.slice(-8_000)));
-  });
-
-  const ok = /Successfully tagged|naming to/i.test(log);
-  return NextResponse.json({
-    status: ok ? "built" : "failed",
-    log,
-    imageTag: ok ? tag : null,
-  });
+  const result = await runDockerBuild(root, tag);
+  return json(
+    {
+      status: result.ok ? "built" : "failed",
+      log: result.log || (result.ok ? "docker build завершился без лога" : "docker build не удался"),
+      imageTag: result.ok ? tag : null,
+      published: false,
+    },
+    200,
+  );
 }

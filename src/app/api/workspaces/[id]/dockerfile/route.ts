@@ -3,7 +3,11 @@ import { z } from "zod";
 import fs from "node:fs";
 
 import { db } from "@/lib/db";
-import { getUserFromRequest } from "@/lib/auth";
+import { ensureWorkspace } from "@/lib/workspace-api";
+import {
+  DOCKERFILE_NOT_PUBLISHED,
+  hasBuildableAppFiles,
+} from "@/lib/docker-copy";
 import {
   projectRoot,
   readWorkspaceFile,
@@ -18,9 +22,8 @@ export const dynamic = "force-dynamic";
  * POST /api/workspaces/[id]/dockerfile — генератор Dockerfile (Фаза D).
  *
  * Анализирует реальные файлы воркспейса (package.json, фреймворк-маркеры)
- * и пишет Dockerfile + .dockerignore в корень проекта на диск. Сборка
- * образа в песочнице недоступна (docker CLI отсутствует) — поэтому
- * генератор возвращает содержимое и сохраняет файлы, а не запускает build.
+ * и пишет Dockerfile + .dockerignore в корень проекта на диск.
+ * Генератор не публикует образ и не помечает сборку успешной.
  */
 
 interface PackageJson {
@@ -221,15 +224,13 @@ export async function POST(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const session = await getUserFromRequest(req);
-  if (!session) {
-    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
-  }
   const { id } = await ctx.params;
+  const check = await ensureWorkspace(req, id);
+  if (!check.ok) return check.response;
   const body = bodySchema.safeParse(await req.json().catch(() => ({})));
 
   const project = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: { id, userId: check.userId },
     select: { id: true, name: true, rootPath: true },
   });
   if (!project) {
@@ -277,10 +278,16 @@ export async function POST(
     // .dockerignore — best effort, Dockerfile уже записан.
   }
 
+  const empty = !hasBuildableAppFiles(files);
   return NextResponse.json({
     kind: profile.kind,
     dockerfile: profile.dockerfile,
     dockerignore: profile.dockerignore,
     workspace: { id: project.id, name: project.name },
+    published: false,
+    imageTag: null,
+    status: "ready_zip",
+    empty,
+    hint: DOCKERFILE_NOT_PUBLISHED,
   });
 }

@@ -22,6 +22,11 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
+import {
+  DOCKER_BUILD_LOCAL_ONLY,
+  DOCKERFILE_NOT_PUBLISHED,
+  EMPTY_APP_BUILD_ERROR,
+} from "@/lib/docker-copy";
 import type { WorkspaceDto } from "@/lib/workspace-types";
 
 export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
@@ -39,10 +44,16 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
         const res = await api.generateDockerfile(workspace.id, overwrite);
         setKind(res.kind);
         setDockerfile(res.dockerfile);
-        toast.success(`Dockerfile готов — профиль: ${res.kind}`, {
-          description:
-            "Файлы Dockerfile и .dockerignore сохранены в корне проекта",
-        });
+        setBuildStatus(res.empty ? "empty" : "ready_zip");
+        if (res.empty) {
+          toast.message("Заготовка Dockerfile", {
+            description: EMPTY_APP_BUILD_ERROR,
+          });
+        } else {
+          toast.success(`Dockerfile готов — профиль: ${res.kind}`, {
+            description: res.hint || DOCKERFILE_NOT_PUBLISHED,
+          });
+        }
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           // Уже есть — перегенерируем поверх по подтверждению.
@@ -50,7 +61,12 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
             const res = await api.generateDockerfile(workspace.id, true);
             setKind(res.kind);
             setDockerfile(res.dockerfile);
-            toast.success(`Dockerfile перезаписан — профиль: ${res.kind}`);
+            setBuildStatus(res.empty ? "empty" : "ready_zip");
+            toast.success(`Dockerfile перезаписан — профиль: ${res.kind}`, {
+              description: res.empty
+                ? EMPTY_APP_BUILD_ERROR
+                : res.hint || DOCKERFILE_NOT_PUBLISHED,
+            });
             return;
           } catch (retry) {
             toast.error(
@@ -80,15 +96,29 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
       const res = await api.dockerBuild(workspace.id);
       setBuildStatus(res.status);
       setBuildLog(res.log);
-      if (res.status === "built") {
-        toast.success("Образ собран", { description: res.imageTag ?? undefined });
+      if (res.status === "built" && !res.published) {
+        toast.success("Образ собран локально", {
+          description: DOCKER_BUILD_LOCAL_ONLY,
+        });
       } else if (res.status === "unavailable") {
-        toast.message("Docker недоступен", { description: "Команда для локальной сборки в логе." });
+        toast.message("Docker недоступен", {
+          description: "Команда для локальной сборки в логе. Образ не опубликован.",
+        });
+      } else if (res.status === "empty") {
+        toast.message("Нечего собирать", { description: EMPTY_APP_BUILD_ERROR });
       } else {
         toast.error("Сборка не удалась");
       }
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Не удалось запустить docker build");
+      const message =
+        err instanceof ApiError ? err.message : "Не удалось запустить docker build";
+      if (err instanceof ApiError && err.status === 400) {
+        setBuildStatus("empty");
+        setBuildLog(message);
+        toast.message("Нечего собирать", { description: message });
+      } else {
+        toast.error(message);
+      }
     } finally {
       setBuilding(false);
     }
@@ -109,8 +139,8 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
             Dockerfile
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Генератор анализирует файлы проекта и пишет готовый к сборке
-            Dockerfile в корень
+            Генератор пишет Dockerfile в корень проекта. Это не публикация
+            образа и не «собрано».
           </p>
         </div>
         <Button
@@ -134,14 +164,19 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
       {dockerfile ? (
         <div className="mt-4">
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">
+            <span className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 font-medium">
               <Check className="size-3" aria-hidden="true" />
               Профиль: {kind}
             </span>
             <span className="inline-flex items-center gap-1">
               <FileCode2 className="size-3.5" aria-hidden="true" />
-              Dockerfile + .dockerignore сохранены в проекте
+              {DOCKERFILE_NOT_PUBLISHED}
             </span>
+            {buildStatus ? (
+              <span className="rounded-full border px-2 py-0.5 font-mono">
+                {buildStatus}
+              </span>
+            ) : null}
           </div>
           <pre className="overflow-x-auto vf-scroll rounded-lg bg-stone-950 p-4 font-mono text-xs leading-relaxed text-stone-300">
             <code>{dockerfile}</code>
