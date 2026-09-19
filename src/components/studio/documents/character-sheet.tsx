@@ -8,7 +8,7 @@
  * а картинка — и здесь. «Сгенерировать описание» — LLM (~15–20 с).
  */
 
-import { Check, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, X } from "lucide-react";
+import { Check, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,12 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import {
+  CHARACTER_SHEET_NO_LINKS,
+  CHARACTER_SHEET_NO_PORTRAIT,
+  CHARACTER_SHEET_NO_REFS,
+  CHARACTER_SHEET_NO_TRAITS,
+} from "@/lib/entity-copy";
 import type { EntityDto } from "@/lib/workspace-types";
 import { GradientArt } from "./art-placeholder";
 import { MiniChip } from "./narrative-chip";
@@ -41,6 +47,8 @@ export function CharacterSheet({
   onClearPortrait,
   portraitGenerating,
   portraitUrl,
+  portraitError,
+  onDelete,
 }: {
   entity: EntityDto | null;
   entities: EntityDto[];
@@ -54,6 +62,8 @@ export function CharacterSheet({
   portraitGenerating: boolean;
   /** Персистентный URL портрета из БД (PS-6). */
   portraitUrl: string | null;
+  portraitError: string | null;
+  onDelete: (entity: EntityDto) => void;
 }) {
   const { draft, update, isDirty } = useEntityDraft(entity);
   const roleMeta = entity ? ROLE_CATEGORY_META[roleCategoryOf(entity)] : null;
@@ -120,9 +130,14 @@ export function CharacterSheet({
                   />
                 ) : (
                   <div className="flex aspect-[4/5] w-full items-center justify-center rounded-xl border bg-muted text-xs text-muted-foreground">
-                    Портрета пока нет
+                    {CHARACTER_SHEET_NO_PORTRAIT}
                   </div>
                 )}
+                {portraitError ? (
+                  <p role="alert" className="mt-2 text-xs text-destructive">
+                    {portraitError}
+                  </p>
+                ) : null}
                 {portraitGenerating ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl bg-background/70 backdrop-blur-sm">
                     <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
@@ -174,7 +189,7 @@ export function CharacterSheet({
                   {entity.tags.length > 0 ? (
                     entity.tags.map((tag) => <MiniChip key={tag}>#{tag}</MiniChip>)
                   ) : (
-                    <p className="text-xs text-muted-foreground">Черт пока нет.</p>
+                    <p className="text-xs text-muted-foreground">{CHARACTER_SHEET_NO_TRAITS}</p>
                   )}
                 </div>
               </section>
@@ -230,7 +245,7 @@ export function CharacterSheet({
                       );
                     })
                   ) : (
-                    <p className="text-xs text-muted-foreground">Связей пока нет.</p>
+                    <p className="text-xs text-muted-foreground">{CHARACTER_SHEET_NO_LINKS}</p>
                   )}
                 </div>
               </section>
@@ -244,11 +259,15 @@ export function CharacterSheet({
                   Упомянута в главах
                 </h4>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.refs.items.map((ref) => (
-                    <MiniChip key={ref} className="font-mono">
-                      гл. {ref}
-                    </MiniChip>
-                  ))}
+                  {entity.refs.items.length > 0 ? (
+                    entity.refs.items.map((ref) => (
+                      <MiniChip key={ref} className="font-mono">
+                        гл. {ref}
+                      </MiniChip>
+                    ))
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{CHARACTER_SHEET_NO_REFS}</p>
+                  )}
                 </div>
                 <p className="mt-1.5 text-[11px] text-muted-foreground">
                   обновлена {agoFromISO(entity.updatedAt)}
@@ -319,6 +338,16 @@ export function CharacterSheet({
                   Все изменения сохранены
                 </p>
               )}
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full text-destructive hover:text-destructive"
+                disabled={describing || portraitGenerating}
+                onClick={() => onDelete(entity)}
+              >
+                <Trash2 className="size-3.5" aria-hidden="true" />
+                Удалить карточку
+              </Button>
             </div>
           </>
         ) : null}

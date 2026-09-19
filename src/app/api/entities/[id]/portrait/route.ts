@@ -46,6 +46,12 @@ export async function POST(req: Request, { params }: Params) {
 
   try {
     const { url } = await aiGenerateImage(check.userId, prompt, "1024x1024");
+    if (!url || url.startsWith("data:") || /placeholder/i.test(url)) {
+      return NextResponse.json(
+        { error: "Провайдер не вернул изображение" },
+        { status: 502 },
+      );
+    }
     const [updated, artifact] = await db.$transaction([
       db.entity.update({
         where: { id },

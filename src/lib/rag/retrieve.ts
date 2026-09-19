@@ -17,7 +17,19 @@ import type { RagChunkRow, RagHit, RagScope, RetrieveResult } from "./types";
 
 const KEYWORD_NOTICE = "поиск без эмбеддингов";
 
-/** Drop chunks whose project was archived (global chat) or whose note/section is gone. */
+function sourceIds(rows: RagChunkRow[], type: string): string[] {
+  return [...new Set(rows.filter((r) => r.sourceType === type).map((r) => r.sourceId))];
+}
+
+async function liveIdSet(
+  ids: string[],
+  load: () => Promise<{ id: string }[]>,
+): Promise<Set<string> | null> {
+  if (ids.length === 0) return null;
+  return new Set((await load()).map((row) => row.id));
+}
+
+/** Drop chunks whose project was archived or whose note/section/entity is gone. */
 async function filterLiveChunks(
   db: PrismaClient,
   scope: RagScope,
@@ -40,40 +52,28 @@ async function filterLiveChunks(
       next = next.filter((r) => !r.projectId || !skip.has(r.projectId));
     }
   }
-  const noteIds = [
-    ...new Set(next.filter((r) => r.sourceType === "note").map((r) => r.sourceId)),
-  ];
-  const sectionIds = [
-    ...new Set(next.filter((r) => r.sourceType === "section").map((r) => r.sourceId)),
-  ];
-  const liveNotes =
-    noteIds.length === 0
-      ? null
-      : new Set(
-          (
-            await db.note.findMany({
-              where: { id: { in: noteIds } },
-              select: { id: true },
-            })
-          ).map((n) => n.id),
-        );
-  const liveSections =
-    sectionIds.length === 0
-      ? null
-      : new Set(
-          (
-            await db.documentSection.findMany({
-              where: { id: { in: sectionIds } },
-              select: { id: true },
-            })
-          ).map((s) => s.id),
-        );
-  if (!liveNotes && !liveSections) {
+  const noteIds = sourceIds(next, "note");
+  const sectionIds = sourceIds(next, "section");
+  const entityIds = sourceIds(next, "entity");
+  const liveNotes = await liveIdSet(noteIds, () =>
+    db.note.findMany({ where: { id: { in: noteIds } }, select: { id: true } }),
+  );
+  const liveSections = await liveIdSet(sectionIds, () =>
+    db.documentSection.findMany({
+      where: { id: { in: sectionIds } },
+      select: { id: true },
+    }),
+  );
+  const liveEntities = await liveIdSet(entityIds, () =>
+    db.entity.findMany({ where: { id: { in: entityIds } }, select: { id: true } }),
+  );
+  if (!liveNotes && !liveSections && !liveEntities) {
     return filterLiveFiles(next, signal);
   }
   const withSources = next.filter((r) => {
     if (r.sourceType === "note" && liveNotes) return liveNotes.has(r.sourceId);
     if (r.sourceType === "section" && liveSections) return liveSections.has(r.sourceId);
+    if (r.sourceType === "entity" && liveEntities) return liveEntities.has(r.sourceId);
     return true;
   });
   return filterLiveFiles(withSources, signal);

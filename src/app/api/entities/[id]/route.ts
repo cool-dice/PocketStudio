@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
 import { entityDto } from "@/lib/workspace-shapes";
-import { scheduleIndexEntity, scheduleRemove } from "@/lib/rag";
+import { removeSource, scheduleIndexEntity } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +101,6 @@ export async function DELETE(req: Request, { params }: Params) {
   const entity = check.row;
 
   await db.entity.delete({ where: { id } });
-  scheduleRemove(db, check.userId, "entity", id);
+  await removeSource(db, check.userId, "entity", id);
   return NextResponse.json({ ok: true });
 }

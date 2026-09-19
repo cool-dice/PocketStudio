@@ -10,7 +10,7 @@
  * сущности и персонажа.
  */
 
-import { BookOpenText, Check, FileText, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, X } from "lucide-react";
+import { BookOpenText, Check, FileText, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, Trash2, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -23,9 +23,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import {
+  ENTITY_SHEET_NO_ATTRIBUTES,
+  ENTITY_SHEET_NO_LINKS,
+  ENTITY_SHEET_NO_REFS_NARRATIVE,
+  ENTITY_SHEET_NO_REFS_PRODUCT,
+  ENTITY_SHEET_NO_TAGS,
+  ENTITY_SHEET_OPEN_ERROR,
+  ENTITY_SHEET_OPEN_ERROR_HINT,
+} from "@/lib/entity-copy";
 import type { EntityDto } from "@/lib/workspace-types";
 import { MiniChip } from "./narrative-chip";
 import { ENTITY_KIND_META, refsLabel } from "./entities-data";
@@ -81,6 +89,8 @@ export function EntitySheet({
   onGeneratePortrait,
   onClearPortrait,
   portraitGenerating,
+  portraitError,
+  onDelete,
 }: {
   entity: EntityDto | null;
   /** Сущности набора — для имён связей. */
@@ -93,6 +103,8 @@ export function EntitySheet({
   onGeneratePortrait: (entity: EntityDto) => void;
   onClearPortrait: (entity: EntityDto) => void;
   portraitGenerating: boolean;
+  portraitError: string | null;
+  onDelete: (entity: EntityDto) => void;
 }) {
   const { draft, update, isDirty } = useEntityDraft(entity);
   const meta = entity ? ENTITY_KIND_META[entity.kind] : null;
@@ -169,10 +181,15 @@ export function EntitySheet({
                     <div className="flex aspect-[16/10] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed bg-muted/40 text-center">
                       <ImagePlus className="size-5 text-muted-foreground" aria-hidden="true" />
                       <p className="text-xs text-muted-foreground">
-                        Студия может нарисовать {meta.label.toLowerCase()} по описанию
+                        Студия может нарисовать {meta.label.toLowerCase()} по описанию этой карточки
                       </p>
                     </div>
                   )}
+                  {portraitError ? (
+                    <p role="alert" className="mt-2 text-xs text-destructive">
+                      {portraitError}
+                    </p>
+                  ) : null}
                   {portraitGenerating ? (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl bg-background/70 backdrop-blur-sm">
                       <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
@@ -225,7 +242,7 @@ export function EntitySheet({
                 </h4>
                 <dl className="mt-2 grid grid-cols-1 gap-1.5">
                   {entity.attributes.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Атрибутов пока нет.</p>
+                    <p className="text-xs text-muted-foreground">{ENTITY_SHEET_NO_ATTRIBUTES}</p>
                   ) : (
                     entity.attributes.map((attribute) => (
                       <div
@@ -268,7 +285,7 @@ export function EntitySheet({
                       );
                     })
                   ) : (
-                    <p className="text-xs text-muted-foreground">Связей пока нет.</p>
+                    <p className="text-xs text-muted-foreground">{ENTITY_SHEET_NO_LINKS}</p>
                   )}
                 </div>
               </section>
@@ -293,7 +310,9 @@ export function EntitySheet({
                       </MiniChip>
                     ))
                   ) : (
-                    <p className="text-xs text-muted-foreground">Упоминаний пока нет.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isNarrative ? ENTITY_SHEET_NO_REFS_NARRATIVE : ENTITY_SHEET_NO_REFS_PRODUCT}
+                    </p>
                   )}
                 </div>
                 <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -311,7 +330,7 @@ export function EntitySheet({
                   {entity.tags.length > 0 ? (
                     entity.tags.map((tag) => <MiniChip key={tag}>#{tag}</MiniChip>)
                   ) : (
-                    <p className="text-xs text-muted-foreground">Тегов пока нет.</p>
+                    <p className="text-xs text-muted-foreground">{ENTITY_SHEET_NO_TAGS}</p>
                   )}
                 </div>
               </section>
@@ -383,13 +402,22 @@ export function EntitySheet({
                   </>
                 )}
               </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full text-destructive hover:text-destructive"
+                disabled={describing || portraitGenerating}
+                onClick={() => onDelete(entity)}
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+                Удалить карточку
+              </Button>
             </div>
           </>
         ) : entity === null ? null : (
-          <div className="space-y-4 px-5 py-6">
-            <Skeleton className="h-6 w-2/3" />
-            <Skeleton className="h-4 w-1/2" />
-            <Skeleton className="h-24 w-full" />
+          <div role="alert" className="space-y-2 px-5 py-6">
+            <p className="text-sm font-medium">{ENTITY_SHEET_OPEN_ERROR}</p>
+            <p className="text-xs text-muted-foreground">{ENTITY_SHEET_OPEN_ERROR_HINT}</p>
           </div>
         )}
       </SheetContent>

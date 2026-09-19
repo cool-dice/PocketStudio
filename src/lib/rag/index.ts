@@ -26,6 +26,7 @@ export {
   scheduleRemove,
   indexFileContent,
   indexSectionById,
+  indexEntityById,
   flushRagQueue,
 } from "./hooks";
 export {
