@@ -9,11 +9,14 @@ import { api, ApiError } from "@/lib/api";
 import { compileFilm, filmRenderSupported } from "./film-compiler";
 import {
   DEFAULT_LUTS,
+  EMPTY_TIMELINE_COMPILE_ERROR,
   emptyTimeline,
   timelineDuration,
+  timelineHasRenderableClips,
   type NleClip,
   type NleTimeline,
 } from "@/lib/nle-model";
+import { NLE_SCOPE_HINT } from "@/lib/studio-copy";
 import type { ArtifactDto } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 
@@ -135,12 +138,12 @@ export function NleTimeline({
   }
 
   async function assemble() {
-    const v1 = tl.tracks.find((t) => t.id === "v1");
-    const clips = [...(v1?.clips ?? [])].sort((a, b) => a.start - b.start);
-    if (clips.length === 0) {
-      toast.message("Нет клипов на V1 — добавьте кадры из медиатеки");
+    if (!timelineHasRenderableClips(tl)) {
+      toast.message(EMPTY_TIMELINE_COMPILE_ERROR);
       return;
     }
+    const v1 = tl.tracks.find((t) => t.id === "v1");
+    const clips = [...(v1?.clips ?? [])].sort((a, b) => a.start - b.start);
     const a1 = tl.tracks.find((t) => t.id === "a1")?.clips ?? [];
     const scenes = clips
       .map((c, i) => ({
@@ -222,13 +225,13 @@ export function NleTimeline({
         <Button
           size="sm"
           variant="outline"
-          disabled={compiling || !filmRenderSupported()}
+          disabled={compiling || !filmRenderSupported() || !timelineHasRenderableClips(tl)}
           onClick={() => void assemble()}
         >
           <Film className="size-3.5" /> {compiling ? "Сборка…" : "Собрать"}
         </Button>
         <span className="text-xs text-muted-foreground">
-          Цель 10–20 мин, перспектива до 2 ч · сейчас {duration.toFixed(0)} с
+          {NLE_SCOPE_HINT} · сейчас {duration.toFixed(0)} с
         </span>
       </div>
       <div className="flex min-h-0 flex-1 gap-3">

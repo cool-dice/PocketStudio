@@ -6,6 +6,10 @@ import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { saveGeneratedFile } from "@/lib/ai";
 import { compileFilmFfmpeg, whichFfmpeg } from "@/lib/ffmpeg-film";
+import {
+  EMPTY_TIMELINE_COMPILE_ERROR,
+  isExplicitEmptyCompileClips,
+} from "@/lib/nle-model";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
@@ -32,6 +36,21 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
   }
 
+  const body = (await req.json().catch(() => ({}))) as {
+    clips?: { imageUrl?: string | null; durationSec?: number }[];
+  };
+  if (isExplicitEmptyCompileClips(body.clips)) {
+    return NextResponse.json(
+      {
+        status: "empty",
+        error: EMPTY_TIMELINE_COMPILE_ERROR,
+        log: EMPTY_TIMELINE_COMPILE_ERROR,
+        url: null,
+      },
+      { status: 400 },
+    );
+  }
+
   const has = await whichFfmpeg();
   if (!has) {
     return NextResponse.json({
@@ -40,10 +59,6 @@ export async function POST(req: Request, { params }: Params) {
       url: null,
     });
   }
-
-  const body = (await req.json().catch(() => ({}))) as {
-    clips?: { imageUrl?: string | null; durationSec?: number }[];
-  };
   const requested = Array.isArray(body.clips) ? body.clips : null;
 
   type SceneFile = { abs: string; durationSec: number };

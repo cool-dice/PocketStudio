@@ -24,6 +24,7 @@ export function DawTransport({
   saveStatus,
   position,
   exporting,
+  canExport = true,
   bpm,
   bars,
   transpose,
@@ -41,6 +42,7 @@ export function DawTransport({
   saveStatus: SaveStatus;
   position: { bar: number; beat: number; step: number; total: number };
   exporting: boolean;
+  canExport?: boolean;
   bpm: number;
   bars: number;
   transpose: number;
@@ -101,7 +103,8 @@ export function DawTransport({
           size="sm"
           className="ml-auto shrink-0"
           onClick={onExport}
-          disabled={exporting}
+          disabled={exporting || !canExport}
+          title={canExport ? undefined : "Нет ударов, нот и клипов — экспортировать нечего"}
         >
           {exporting ? (
             <Loader2 className="size-4 animate-spin" aria-hidden="true" />

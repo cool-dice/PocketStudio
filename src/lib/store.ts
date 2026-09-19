@@ -136,6 +136,9 @@ interface AppUiState {
   closeWorkspace: () => void;
   /** Переключить вкладку открытого воркспейса. */
   setWorkspaceTab: (tab: WorkspaceTab) => void;
+  /** Последний открытый документ вкладки «Документы» (`?doc=`). */
+  workspaceDocId: string | null;
+  setWorkspaceDocId: (id: string | null) => void;
 
   /** Картинка, с которой открыли растр («Редактировать» в галерее). */
   designSourceUrl: string | null;
@@ -242,28 +245,33 @@ export const useAppUi = create<AppUiState>((set, get) => ({
   /* Chat-first: воркспейс открывается сразу на вкладке «Чат» —
      оркестратор является главным инструментом, остальное — вкладки. */
   workspaceTab: "chat",
+  workspaceDocId: null,
   openWorkspace: (id, tab) =>
-    set({
+    set((state) => ({
       mainArea: "workspace",
       activeWorkspaceId: id,
       activeWorkspaceOverride: null,
       workspaceTab: tab ?? "chat",
-    }),
+      workspaceDocId: state.activeWorkspaceId === id ? state.workspaceDocId : null,
+    })),
   openWorkspaceData: (ws, tab) =>
-    set({
+    set((state) => ({
       mainArea: "workspace",
       activeWorkspaceId: ws.id,
       activeWorkspaceOverride: ws,
       workspaceTab: tab ?? "chat",
-    }),
+      workspaceDocId: state.activeWorkspaceId === ws.id ? state.workspaceDocId : null,
+    })),
   closeWorkspace: () =>
     set({
       mainArea: "workspaces",
       activeWorkspaceId: null,
       activeWorkspaceOverride: null,
       workspaceTab: "chat",
+      workspaceDocId: null,
     }),
   setWorkspaceTab: (workspaceTab) => set({ workspaceTab }),
+  setWorkspaceDocId: (workspaceDocId) => set({ workspaceDocId }),
 
   designSourceUrl: null,
   openDesignEditor: (opts) => {

@@ -20,6 +20,11 @@ import {
 } from "lucide-react";
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
+import {
+  AUDIO_LANDING_BLURB,
+  DESIGN_LANDING_BLURB,
+  VIDEO_LANDING_BLURB,
+} from "@/lib/studio-copy";
 
 const MODULES: {
   icon: LucideIcon;
@@ -39,17 +44,17 @@ const MODULES: {
   {
     icon: PenTool,
     title: "Дизайн",
-    description: "Редактор: растр, макеты и правки интерфейса руками.",
+    description: DESIGN_LANDING_BLURB,
   },
   {
     icon: AudioWaveform,
     title: "Аудио",
-    description: "Озвучка, музыка и подкасты голосами студии.",
+    description: AUDIO_LANDING_BLURB,
   },
   {
     icon: Clapperboard,
     title: "Видео",
-    description: "Карманная киностудия: сценарий, раскадровка, монтаж.",
+    description: VIDEO_LANDING_BLURB,
   },
   {
     icon: Rocket,

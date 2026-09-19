@@ -14,6 +14,8 @@ import { toast } from "sonner";
 
 import {
   TRACK_KIND_LABELS,
+  dawHasAudibleContent,
+  EMPTY_DAW_EXPORT_ERROR,
   stepCount,
   type DawProjectDto,
   type DawState,
@@ -254,6 +256,10 @@ export function DawStudio({
 
   const exportMix = useCallback(async () => {
     if (!state || exporting) return;
+    if (!dawHasAudibleContent(state)) {
+      toast.message(EMPTY_DAW_EXPORT_ERROR);
+      return;
+    }
     setExporting(true);
     try {
       const buffers = await loadVoiceBuffers(state);
@@ -325,6 +331,7 @@ export function DawStudio({
         playing={playing}
         saveStatus={saveStatus}
         exporting={exporting}
+        canExport={dawHasAudibleContent(state)}
         position={{
           bar: Math.floor(displayStep / 16) + 1,
           beat: Math.floor((displayStep % 16) / 4) + 1,

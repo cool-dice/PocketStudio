@@ -321,6 +321,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Prompts + proto port | Аудит промптов (`docs/PROMPTS.md`), retrieve_canon/apply_patch, инспектор DOM, теги/напоминания/график блокнота, ffmpeg-сборка если есть, брендинг PocketStudio |
 | 2026-09-19 | Honesty + RAG harden | Cookie/token `ps_session`/`ps_token` (dual-read `vf_*`). Лендинг: деплой/выплаты/MCP без вранья. Напоминания стреляют в колокол. RAG: очередь с retry, skip huge files. MCP: CLI missing. CI `bun test` + prisma generate. |
 | 2026-09-19 | Reminder bell + inspect send | Тип `reminder` в колоколе (иконка, клик → заметка). Бейдж RAG = `Thread.projectId`. «Попросить агента» отправляет контекст в чат. Tool JSON: trailing commas + name/arguments. Login `useState` (крэш входа). |
-| 2026-09-19 | Routing + stale RAG + persist | Back/forward URL sync. `?next=` без open-redirect. Книга не открывает film-only вкладку. Удаление документа/откат главы чистят и переиндексируют RAG. Архив и удалённые заметки не всплывают в поиске. Эмбеддинги ≠1536 — русская ошибка. Design/NLE PUT отвергает мусор; DAW не падает на битом JSON. Composer в воркспейсе ждёт свой тред. extraHeaders не отдаются клиенту. |
+| 2026-09-19 | Design/NLE/DAW persist | PUT→GET round-trip; invalid JSON 400 without wipe; empty timeline/DAW export honest; empty canvas save OK; `?doc=` restores last manuscript |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

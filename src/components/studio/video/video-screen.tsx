@@ -20,15 +20,13 @@ import {
 } from "@/components/studio/shared/module-header";
 import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { api } from "@/lib/api";
+import { VIDEO_MODULE_DESCRIPTION } from "@/lib/studio-copy";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { cn } from "@/lib/utils";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import type { ArtifactDto } from "@/lib/workspace-types";
 import { StoryboardWorkspace } from "./storyboard-workspace";
 import { NleTimeline } from "./nle-timeline";
-
-const VIDEO_DESCRIPTION =
-  "Раскадровка, озвучка, монтажный стол и сборка фильма";
 
 export function VideoScreen({
   onOpenMobileNav,
@@ -47,7 +45,7 @@ export function VideoScreen({
       <ModuleHeader
         icon={Clapperboard}
         title="Видео"
-        description={VIDEO_DESCRIPTION}
+        description={VIDEO_MODULE_DESCRIPTION}
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />

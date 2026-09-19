@@ -101,3 +101,20 @@ export function timelineDuration(tl: NleTimeline): number {
   }
   return max;
 }
+
+/** Клипы с файлом на видеодорожке — без них сборка не должна считаться успешной. */
+export function timelineHasRenderableClips(tl: NleTimeline): boolean {
+  return tl.tracks.some(
+    (track) =>
+      track.kind === "video" &&
+      track.clips.some((clip) => Boolean(clip.url) || Boolean(clip.artifactId)),
+  );
+}
+
+export const EMPTY_TIMELINE_COMPILE_ERROR =
+  "Пустой таймлайн: нет клипов для сборки. Добавьте кадры на V1.";
+
+/** Явно переданный пустой `clips: []` — отказ, без фолбэка на все сцены раскадровки. */
+export function isExplicitEmptyCompileClips(clips: unknown): boolean {
+  return Array.isArray(clips) && clips.length === 0;
+}

@@ -5,7 +5,9 @@ import { safeNextPath } from "./safe-next";
 describe("safeNextPath", () => {
   test("keeps workspace and area deep links", () => {
     expect(safeNextPath("/w/abc123")).toBe("/w/abc123");
-    expect(safeNextPath("/w/abc123?tab=documents")).toBe("/w/abc123?tab=documents");
+    expect(safeNextPath("/w/abc123?tab=documents&doc=clastworkdoc01")).toBe(
+      "/w/abc123?tab=documents&doc=clastworkdoc01",
+    );
     expect(safeNextPath("/?area=notebook")).toBe("/?area=notebook");
   });
 

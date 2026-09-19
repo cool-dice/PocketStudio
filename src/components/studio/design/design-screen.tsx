@@ -26,6 +26,7 @@ import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-pick
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, ApiError } from "@/lib/api";
+import { DESIGN_MODULE_DESCRIPTION } from "@/lib/studio-copy";
 import { briefFromArtifact, paletteFromArtifact } from "@/lib/palette";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
@@ -314,7 +315,7 @@ export function DesignScreen({
       <ModuleHeader
         icon={PenTool}
         title="Дизайн"
-        description="Мудборд, растр (Photoshop-lite) и макет (Figma-lite)"
+        description={DESIGN_MODULE_DESCRIPTION}
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />

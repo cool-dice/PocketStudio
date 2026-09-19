@@ -22,6 +22,7 @@ import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-pick
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
+import { AUDIO_MODULE_DESCRIPTION } from "@/lib/studio-copy";
 import { AudioLibraryTab } from "./audio-library-tab";
 import { DawStudio } from "./daw-studio";
 import { NarrationLibrary } from "./narration-library";
@@ -80,7 +81,7 @@ export function AudioScreen({
       <ModuleHeader
         icon={AudioWaveform}
         title="Аудио"
-        description="Озвучка, DAW-студия и аудиотека"
+        description={AUDIO_MODULE_DESCRIPTION}
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />

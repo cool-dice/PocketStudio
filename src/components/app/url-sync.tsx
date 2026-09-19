@@ -2,7 +2,7 @@
 
 /**
  * Sync zustand mainArea / workspace id with the URL so chats and
- * workspaces are bookmarkable: /w/[id]?tab=… and /?area=…
+ * workspaces are bookmarkable: /w/[id]?tab=…&doc=… and /?area=…
  *
  * Store → URL runs when UI state changes. URL → store handles back/forward
  * so the browser history is not immediately overwritten.
@@ -11,10 +11,9 @@
 import { useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { parseAppLocation, pathFor, TAB_SET, type AppLocation } from "@/lib/app-url";
+import { parseAppLocation, pathFor, type AppLocation } from "@/lib/app-url";
 import { useAppUi } from "@/lib/store";
 import { createUrlSyncGuard } from "@/lib/url-sync-guard";
-import type { WorkspaceTab } from "@/lib/workspace-data";
 
 function currentHref(pathname: string, searchParams: URLSearchParams): string {
   return `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
@@ -25,10 +24,14 @@ function applyLocationToStore(parsed: AppLocation): void {
   if (parsed.mainArea === "workspace" && parsed.workspaceId) {
     if (s.activeWorkspaceId !== parsed.workspaceId || s.mainArea !== "workspace") {
       s.openWorkspace(parsed.workspaceId, parsed.workspaceTab);
+      if (parsed.workspaceDocId) s.setWorkspaceDocId(parsed.workspaceDocId);
       return;
     }
     if (s.workspaceTab !== parsed.workspaceTab) {
       s.setWorkspaceTab(parsed.workspaceTab);
+    }
+    if (parsed.workspaceDocId && s.workspaceDocId !== parsed.workspaceDocId) {
+      s.setWorkspaceDocId(parsed.workspaceDocId);
     }
     return;
   }
@@ -38,6 +41,7 @@ function applyLocationToStore(parsed: AppLocation): void {
     activeWorkspaceId: null,
     activeWorkspaceOverride: null,
     workspaceTab: "chat",
+    workspaceDocId: null,
   });
 }
 
@@ -52,22 +56,22 @@ export function UrlSync({
   const mainArea = useAppUi((s) => s.mainArea);
   const workspaceId = useAppUi((s) => s.activeWorkspaceId);
   const workspaceTab = useAppUi((s) => s.workspaceTab);
+  const workspaceDocId = useAppUi((s) => s.workspaceDocId);
   const hydrated = useRef(false);
   const guardRef = useRef(createUrlSyncGuard());
 
   useEffect(() => {
     if (hydrated.current) return;
     hydrated.current = true;
-    const tabParam = searchParams.get("tab");
-    const tab =
-      tabParam && TAB_SET.has(tabParam as WorkspaceTab)
-        ? (tabParam as WorkspaceTab)
-        : "chat";
+    const parsed = parseAppLocation(pathname, searchParams);
     if (initialWorkspaceId) {
-      useAppUi.getState().openWorkspace(initialWorkspaceId, tab);
+      useAppUi.getState().openWorkspace(initialWorkspaceId, parsed.workspaceTab);
+      if (parsed.workspaceDocId) {
+        useAppUi.getState().setWorkspaceDocId(parsed.workspaceDocId);
+      }
       return;
     }
-    applyLocationToStore(parseAppLocation(pathname, searchParams));
+    applyLocationToStore(parsed);
   }, [initialWorkspaceId, pathname, searchParams]);
 
   useEffect(() => {
@@ -78,7 +82,7 @@ export function UrlSync({
 
   useEffect(() => {
     if (!hydrated.current) return;
-    const next = pathFor(mainArea, workspaceId, workspaceTab);
+    const next = pathFor(mainArea, workspaceId, workspaceTab, workspaceDocId);
     if (currentHref(pathname, searchParams) === next) return;
     guardRef.current.markStoreNav();
     router.replace(next, { scroll: false });
@@ -86,7 +90,7 @@ export function UrlSync({
     // a back/forward change updates the path first, while zustand still
     // holds the previous screen — replacing then would undo history.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-  }, [mainArea, workspaceId, workspaceTab, router]);
+  }, [mainArea, workspaceId, workspaceTab, workspaceDocId, router]);
 
   return null;
 }
