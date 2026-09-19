@@ -179,6 +179,12 @@ export interface WsTurnPhasePayload {
   label: string | null;
 }
 
+export interface WsCanonPrefetchPayload {
+  threadId: string;
+  scope: "studio" | "workspace";
+  hitCount: number;
+}
+
 /* ── Note analysis pipeline events (Stage 2, worklog Task 2-ctr) ── */
 
 export interface WsNoteAnalyzingPayload {

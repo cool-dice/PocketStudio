@@ -184,7 +184,12 @@ function anthropicUsage(payload: unknown): {
 export async function chatCompletion(
   route: ResolvedRoute,
   messages: ChatMessage[],
-  opts: { jsonMode?: boolean; maxTokens?: number; timeoutMs?: number } = {},
+  opts: {
+    jsonMode?: boolean;
+    maxTokens?: number;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<ChatResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxTokens = opts.maxTokens ?? 4096;
@@ -211,6 +216,7 @@ export async function chatCompletion(
       {
         method: "POST",
         headers,
+        signal: opts.signal,
         body: JSON.stringify({
           model: route.model.modelId,
           max_tokens: maxTokens,
@@ -239,7 +245,7 @@ export async function chatCompletion(
   }
   const res = await fetchWithTimeout(
     url,
-    { method: "POST", headers, body: JSON.stringify(body) },
+    { method: "POST", headers, body: JSON.stringify(body), signal: opts.signal },
     timeoutMs,
   );
   await throwIfNotOk(res);

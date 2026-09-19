@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { formatPrefetchBlock, looksLikeCanonQuestion } from "./prefetch";
+import {
+  formatPrefetchBlock,
+  formatPrefetchHint,
+  looksLikeCanonQuestion,
+} from "./prefetch";
 
 describe("looksLikeCanonQuestion", () => {
   test("skips trivial chitchat and tiny messages", () => {
@@ -40,5 +44,25 @@ describe("formatPrefetchBlock", () => {
     expect(block).toContain("Автоконтекст RAG");
     expect(block).toContain("Тишина");
     expect(block).toContain("карие глаза");
+  });
+
+  test("does not dump a giant excerpt into the block", () => {
+    const block = formatPrefetchBlock([
+      {
+        title: "гл. 2",
+        excerpt: "карие ".repeat(80),
+        path: "гл. 2",
+      },
+    ]);
+    expect(block.length).toBeLessThan(400);
+    expect(block).toContain("…");
+  });
+});
+
+describe("formatPrefetchHint", () => {
+  test("labels studio vs workspace canon", () => {
+    expect(formatPrefetchHint("studio", 3)).toBe("по канону студии");
+    expect(formatPrefetchHint("workspace", 1)).toBe("по канону воркспейса");
+    expect(formatPrefetchHint("studio", 0)).toBe("");
   });
 });

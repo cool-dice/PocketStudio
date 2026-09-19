@@ -29,6 +29,7 @@ export interface GenerateOpts {
   userId: string;
   toolId?: AiToolId;
   jsonMode?: boolean;
+  signal?: AbortSignal;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -60,6 +61,7 @@ export async function generateLLMResponse(
       ];
       const result = await chatCompletion(route, messages, {
         jsonMode: opts.jsonMode,
+        signal: opts.signal,
       });
       if (!result.text) throw new Error("LLM returned empty content");
       return result.text;
@@ -70,6 +72,7 @@ export async function generateLLMResponse(
         err instanceof Error ? err.message : String(err),
       );
       const status = (err as { status?: number })?.status;
+      if (opts.signal?.aborted || status === 499) break;
       if (typeof status === "number" && status < 500) break;
       if (attempt < MAX_ATTEMPTS) await sleep(RETRY_BACKOFF_MS);
     }

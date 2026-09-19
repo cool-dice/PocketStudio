@@ -3,7 +3,8 @@
 //
 // Contract (worklog Tasks 1, 4 & 3-ctr):
 //   Client→server: "thread:join" {threadId}; "thread:leave" {threadId};
-//                  "message:send" {threadId, content}
+//                  "message:send" {threadId, content};
+//                  "turn:abort" {threadId}
 //   Server→client: "message:user" {message}; "agent:thinking" {threadId};
 //                  "message:start" {threadId, messageId};
 //                  "message:delta" {threadId, messageId, delta};
@@ -74,6 +75,7 @@ const PROMPT_COMMITS = 5; // recent commits embedded in the system prompt
 const AUTO_CHECKPOINT_MESSAGE = "Агент: изменения за ход";
 const FALLBACK_REPLY =
   "Я обработал запрос, но что-то пошло не так — попробуйте переформулировать.";
+const ABORT_REPLY = "Генерация остановлена.";
 const TOOL_LOOP_CAP_REPLY =
   "Достигнут лимит шагов инструментов за один ход. Напишите «продолжи», и я закончу с того места, где остановился.";
 const PLAN_MAX_TASKS = 20;
@@ -122,7 +124,17 @@ function serializeMessage(m: MessageRow) {
 }
 
 // Concurrency guard: one agent turn per thread at a time.
-const runningThreads = new Map<string, true>();
+const runningThreads = new Map<string, AbortController>();
+
+function isAbortErr(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { name?: string; status?: number; message?: string };
+  return (
+    e.name === "AbortError" ||
+    e.status === 499 ||
+    e.message === "Генерация остановлена"
+  );
+}
 
 /** Thread fields the turn orchestration needs (subset of the Prisma row;
  *  projectId is mutated in-place when create_project binds the thread so
@@ -547,8 +559,12 @@ async function prefetchCanonContext(
   userId: string,
   thread: ThreadTurnInfo,
   userText: string,
-): Promise<string> {
-  if (!looksLikeCanonQuestion(userText)) return "";
+): Promise<{
+  text: string;
+  scope: "studio" | "workspace";
+  hitCount: number;
+} | null> {
+  if (!looksLikeCanonQuestion(userText)) return null;
   const scope = resolveRetrieveScope({
     userId,
     threadProjectId: thread.projectId,
@@ -559,7 +575,13 @@ async function prefetchCanonContext(
     query: userText.slice(0, 400),
     limit: 6,
   });
-  return formatPrefetchBlock(result.hits);
+  const text = formatPrefetchBlock(result.hits);
+  if (!text) return null;
+  return {
+    text,
+    scope: result.scope === "workspace" ? "workspace" : "studio",
+    hitCount: result.hits.length,
+  };
 }
 
 /**
@@ -775,6 +797,7 @@ async function runAgentTurn(
   threadId: string,
   content: string,
   thread: ThreadTurnInfo,
+  signal: AbortSignal,
 ): Promise<void> {
   const room = `thread:${threadId}`;
   const userRoom = `user:${user.sub}`;
@@ -836,7 +859,14 @@ async function runAgentTurn(
 
     try {
       const prefetch = await prefetchCanonContext(user.sub, thread, content);
-      if (prefetch) systemPrompt += `\n\n${prefetch}`;
+      if (prefetch) {
+        systemPrompt += `\n\n${prefetch.text}`;
+        io.to(room).emit("canon:prefetch", {
+          threadId,
+          scope: prefetch.scope,
+          hitCount: prefetch.hitCount,
+        });
+      }
     } catch (err) {
       console.warn(
         "[agent] canon prefetch failed (ignored):",
@@ -850,16 +880,30 @@ async function runAgentTurn(
     let toolCallsSucceeded = 0;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      if (signal.aborted) {
+        finalText = ABORT_REPLY;
+        break;
+      }
       if (Date.now() - turnStart > TURN_TIMEOUT_MS) break;
 
       // Thinking indicator (before the first LLM call and between iterations).
       io.to(room).emit("agent:thinking", { threadId });
 
       const history = await buildLLMHistory(threadId);
-      const raw = await generateLLMResponse(systemPrompt, history, {
-        userId: user.sub,
-        toolId: "agent",
-      });
+      let raw: string;
+      try {
+        raw = await generateLLMResponse(systemPrompt, history, {
+          userId: user.sub,
+          toolId: "agent",
+          signal,
+        });
+      } catch (err) {
+        if (signal.aborted || isAbortErr(err)) {
+          finalText = ABORT_REPLY;
+          break;
+        }
+        throw err;
+      }
 
       const call = parseToolCall(raw);
       if (!call) {
@@ -900,7 +944,7 @@ async function runAgentTurn(
     // answer before checking off the plan steps it already completed. Give
     // it up to 3 nudged iterations to call complete_task for them — this is
     // what makes the checklist finish and arms the reviewer phase.
-    if (orchestrated && toolCallsSucceeded > 0) {
+    if (orchestrated && toolCallsSucceeded > 0 && !signal.aborted) {
       try {
         let sweepCalls = 0;
         while (sweepCalls < 3 && Date.now() - turnStart < TURN_TIMEOUT_MS - 15000) {
@@ -916,9 +960,14 @@ async function runAgentTurn(
               `Шаги плана: ${pending.map((t) => `#${t.order} «${t.text}»`).join("; ")}. ` +
               "Вызывай complete_task ТОЛЬКО для шагов, которые ты реально уже выполнил в этом диалоге. Если ни один не выполнен — просто ответь текстом.",
           });
+          if (signal.aborted) {
+            finalText = ABORT_REPLY;
+            break;
+          }
           const raw = await generateLLMResponse(systemPrompt, sweepHistory, {
             userId: user.sub,
             toolId: "agent",
+            signal,
           });
           const call = parseToolCall(raw);
           if (!call) break; // model answered with text — accept it
@@ -946,7 +995,7 @@ async function runAgentTurn(
 
     // 4. Auto-checkpoint a dirty act-mode turn (contract 3-ctr §5) — BEFORE
     // the final answer streams. Failure must never break the turn.
-    if (turnDirty && thread.mode === "act" && thread.projectId) {
+    if (turnDirty && thread.mode === "act" && thread.projectId && !signal.aborted) {
       try {
         const cp = await checkpointProject(
           projectRoot(thread.projectId),
@@ -971,8 +1020,10 @@ async function runAgentTurn(
     //    Plan-mode answers may carry a ```план fence → save as Task rows.
     //    Done BEFORE streaming so the card appears with the answer.
     let answerText =
-      finalText ??
-      (toolCallsSucceeded > 0 ? TOOL_LOOP_CAP_REPLY : FALLBACK_REPLY);
+      signal.aborted
+        ? ABORT_REPLY
+        : (finalText ??
+          (toolCallsSucceeded > 0 ? TOOL_LOOP_CAP_REPLY : FALLBACK_REPLY));
     if (thread.mode === "plan" && finalText) {
       const plan = parsePlanFence(answerText);
       if (plan) {
@@ -992,12 +1043,12 @@ async function runAgentTurn(
     // one completed task get a grounded step-by-step report instead of the
     // coder's (often terse) final line. Budget-checked so big turns skip
     // it gracefully.
-    if (orchestrated) {
+    if (orchestrated && !signal.aborted) {
       try {
         const tasksNow = await threadTasks(threadId);
         const doneCount = tasksNow.filter((t) => t.done).length;
         const remaining = TURN_TIMEOUT_MS - (Date.now() - turnStart);
-        if (doneCount >= 1 && remaining >= REVIEWER_BUDGET_MS) {
+        if (doneCount >= 1 && remaining >= REVIEWER_BUDGET_MS && !signal.aborted) {
           emitPhase(room, threadId, "review", "Проверяю результат…");
           const reviewerPrompt = buildReviewerPrompt(
             tasksNow.map((t) => ({ text: t.text, done: t.done })),
@@ -1006,12 +1057,14 @@ async function runAgentTurn(
           const reviewRaw = await generateLLMResponse(reviewerPrompt, reviewerHistory, {
             userId: user.sub,
             toolId: "agent",
+            signal,
           });
           const reviewClean = sanitizeTextAnswer(reviewRaw);
           if (reviewClean && reviewClean.length >= 20) {
             answerText = reviewClean;
           }
         }
+        if (signal.aborted) answerText = ABORT_REPLY;
       } catch (err) {
         console.warn(
           "[agent] reviewer failed (keeping coder answer):",
@@ -1029,6 +1082,15 @@ async function runAgentTurn(
     // race into "Агент ещё отвечает…". Auto-title moved to the turn start,
     // the auto-checkpoint runs before the answer streams.
   } catch (err) {
+    if (signal.aborted || isAbortErr(err)) {
+      try {
+        await streamFinalResponse(room, threadId, ABORT_REPLY);
+        emitPhase(room, threadId, "idle");
+      } catch {
+        socket.emit("error", { message: ABORT_REPLY });
+      }
+      return;
+    }
     console.error(
       `[agent] turn failed (thread ${threadId}):`,
       err instanceof Error ? err.message : String(err),
@@ -1147,12 +1209,13 @@ io.on("connection", async (socket: Socket) => {
         return;
       }
 
-      runningThreads.set(threadId, true);
+      const ac = new AbortController();
+      runningThreads.set(threadId, ac);
       try {
         // Make sure the sender receives thread room events even if they
         // skipped an explicit thread:join.
         socket.join(`thread:${threadId}`);
-        await runAgentTurn(socket, user, threadId, text, thread);
+        await runAgentTurn(socket, user, threadId, text, thread, ac.signal);
       } finally {
         runningThreads.delete(threadId);
       }
@@ -1160,6 +1223,21 @@ io.on("connection", async (socket: Socket) => {
       console.error("[ws] message:send failed:", err instanceof Error ? err.message : String(err));
       socket.emit("error", { message: "Не удалось отправить сообщение" });
     }
+  });
+
+  // ── turn:abort {threadId} ──
+  socket.on("turn:abort", async (payload: unknown) => {
+    const { threadId } = (payload ?? {}) as { threadId?: unknown };
+    if (typeof threadId !== "string" || !threadId) {
+      socket.emit("error", { message: "Некорректный запрос" });
+      return;
+    }
+    const thread = await db.thread.findUnique({ where: { id: threadId } });
+    if (!thread || thread.userId !== user.sub) {
+      socket.emit("error", { message: "Диалог не найден" });
+      return;
+    }
+    runningThreads.get(threadId)?.abort();
   });
 
   socket.on("disconnect", () => {

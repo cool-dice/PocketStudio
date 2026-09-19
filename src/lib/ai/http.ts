@@ -55,16 +55,24 @@ export async function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const external = init.signal;
+  const onExternal = () => controller.abort();
+  if (external?.aborted) controller.abort();
+  else external?.addEventListener("abort", onExternal);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
+      if (external?.aborted) {
+        throw new GatewayError("Генерация остановлена", 499);
+      }
       throw new GatewayError("Провайдер не ответил вовремя", 504);
     }
     const msg = err instanceof Error ? redactSecrets(err.message) : "сеть";
     throw new GatewayError(`Не удалось связаться с провайдером (${msg})`, 502);
   } finally {
     clearTimeout(timer);
+    external?.removeEventListener("abort", onExternal);
   }
 }
 

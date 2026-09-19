@@ -44,6 +44,7 @@ import type {
   WsToolEndPayload,
   WsToolStartPayload,
   WsTurnPhasePayload,
+  WsCanonPrefetchPayload,
 } from "@/lib/types";
 import { useSocket } from "@/hooks/use-socket";
 
@@ -72,8 +73,11 @@ interface ThreadsContextValue {
    * Create a new thread bound to a project («Обсудить проект») and make it
    * active. Returns the thread or null on failure.
    */
-  startProjectThread: (projectId: string, title: string) => Promise<void>;
+  startProjectThread: (projectId: string, title: string) => Promise<boolean>;
   sendMessage: (content: string) => Promise<void>;
+  abortTurn: () => void;
+  /** Short RAG hint after prefetch (not the chunks themselves). */
+  canonHint: { scope: "studio" | "workspace"; hitCount: number } | null;
 }
 
 const ThreadsContext = createContext<ThreadsContextValue | null>(null);
@@ -145,6 +149,10 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const [streaming, setStreaming] = useState<{
     threadId: string;
     messageId: string;
+  } | null>(null);
+  const [canonHint, setCanonHint] = useState<{
+    scope: "studio" | "workspace";
+    hitCount: number;
   } | null>(null);
 
   // Refs mirror state so WS handlers and callbacks always see fresh values.
@@ -250,6 +258,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         loadedRef.current = id;
         setMessages(loaded.map((m) => ({ ...m })));
         setTasks(tasksRes.tasks);
+        setCanonHint(null);
         const s = socketRef.current;
         if (s && s.connected) s.emit("thread:join", { threadId: id });
       } catch {
@@ -316,6 +325,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       setMessages([]);
       setTasks([]);
       setPhase(null);
+      setCanonHint(null);
       setMessagesLoading(false);
       const s = socketRef.current;
       if (s && s.connected) s.emit("thread:join", { threadId: thread.id });
@@ -342,11 +352,14 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         setMessages([]);
         setTasks([]);
         setPhase(null);
+        setCanonHint(null);
         setMessagesLoading(false);
         const s = socketRef.current;
         if (s && s.connected) s.emit("thread:join", { threadId: thread.id });
+        return true;
       } catch {
         toast.error("Не удалось создать диалог с проектом");
+        return false;
       }
     },
     [emitLeave, maybeDeleteEmptyThread],
@@ -443,6 +456,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
 
       const id = tempId();
       const now = new Date().toISOString();
+      setCanonHint(null);
       setMessages((prev) => [
         ...prev,
         {
@@ -475,6 +489,18 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     },
     [bumpThread, ensureConnected],
   );
+
+  const abortTurn = useCallback(() => {
+    const id = activeIdRef.current;
+    const s = socketRef.current;
+    if (id && s?.connected) s.emit("turn:abort", { threadId: id });
+    setThinkingThreadId(null);
+    setStreaming(null);
+    setPhase(null);
+    setMessages((prev) =>
+      prev.map((m) => (m.toolPending ? { ...m, toolPending: false } : m)),
+    );
+  }, []);
 
   // Re-join the active thread room after every (re)connect.
   useEffect(() => {
@@ -534,6 +560,19 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       setPhase({ threadId, phase: p, label });
       // A phase event implies the agent is working (keep the indicator up).
       setThinkingThreadId(threadId);
+    };
+
+    const onCanonPrefetch = ({
+      threadId,
+      scope,
+      hitCount,
+    }: WsCanonPrefetchPayload) => {
+      if (threadId !== activeIdRef.current) return;
+      if (hitCount <= 0) return;
+      setCanonHint({
+        scope: scope === "workspace" ? "workspace" : "studio",
+        hitCount,
+      });
     };
 
     const onToolStart = ({
@@ -713,6 +752,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     socket.on("tool:end", onToolEnd);
     socket.on("tasks:updated", onTasksUpdated);
     socket.on("turn:phase", onTurnPhase);
+    socket.on("canon:prefetch", onCanonPrefetch);
     socket.on("error", onError);
 
     return () => {
@@ -726,6 +766,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       socket.off("tool:end", onToolEnd);
       socket.off("tasks:updated", onTasksUpdated);
       socket.off("turn:phase", onTurnPhase);
+      socket.off("canon:prefetch", onCanonPrefetch);
       socket.off("error", onError);
     };
   }, [socket, bumpThread]);
@@ -742,6 +783,18 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     (m) => m.role === "tool" && m.toolPending === true,
   );
 
+  const activeBusy =
+    thinking || streaming?.threadId === activeThreadId || toolBusy;
+
+  useEffect(() => {
+    if (!activeBusy) return;
+    const t = window.setTimeout(() => {
+      toast.error("Агент завис — остановите генерацию или отправьте снова");
+      abortTurn();
+    }, 130_000);
+    return () => window.clearTimeout(t);
+  }, [activeBusy, abortTurn]);
+
   const activePhase =
     phase && phase.threadId === activeThreadId
       ? { phase: phase.phase, label: phase.label }
@@ -755,8 +808,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       activeThread,
       messages,
       messagesLoading,
-      busy:
-        thinking || streaming?.threadId === activeThreadId || toolBusy,
+      busy: activeBusy,
       thinking,
       phase: activePhase,
       tasks,
@@ -767,6 +819,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       updateThreadMode,
       startProjectThread,
       sendMessage,
+      abortTurn,
+      canonHint,
     }),
     [
       threads,
@@ -777,7 +831,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       messagesLoading,
       thinking,
       streaming,
-      toolBusy,
+      activeBusy,
       activePhase,
       tasks,
       selectThread,
@@ -787,6 +841,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       updateThreadMode,
       startProjectThread,
       sendMessage,
+      abortTurn,
+      canonHint,
     ],
   );
 

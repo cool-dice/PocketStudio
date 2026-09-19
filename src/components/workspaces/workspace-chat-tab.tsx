@@ -25,6 +25,7 @@ import { RagScopeBadge } from "@/components/app/rag-scope-badge";
 import { StageBadge } from "@/components/studio/shared/module-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useThreads } from "@/hooks/use-threads";
+import { formatPrefetchHint } from "@/lib/rag/prefetch";
 import { useAppUi } from "@/lib/store";
 import type { TurnPhase } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -139,32 +140,29 @@ export function WorkspaceChatTab({
     selectThread,
     startProjectThread,
     sendMessage,
+    canonHint,
   } = useThreads();
 
-  /* Один запуск привязки на монтирование вкладки (key={workspace.id}
-     в роутере вкладок пересоздаёт компонент при смене воркспейса). */
-  const scopedRef = useRef(false);
+  /* Не плодим треды, если предыдущий start ещё в полёте. */
+  const bindingRef = useRef(false);
 
   useEffect(() => {
-    if (scopedRef.current || threadsLoading) return;
-
-    /* Уже в контексте этого воркспейса — ничего не делаем. */
-    if (activeThread?.projectId === workspace.id) {
-      scopedRef.current = true;
-      return;
-    }
+    if (threadsLoading || bindingRef.current) return;
+    if (activeThread?.projectId === workspace.id) return;
 
     const existing = threads.find((t) => t.projectId === workspace.id);
-    scopedRef.current = true;
     if (existing) {
       void selectThread(existing.id);
-    } else {
-      void startProjectThread(workspace.id, `Чат · ${workspace.title}`);
+      return;
     }
+    bindingRef.current = true;
+    void startProjectThread(workspace.id, `Чат · ${workspace.title}`).finally(() => {
+      bindingRef.current = false;
+    });
   }, [
     threads,
     threadsLoading,
-    activeThread,
+    activeThread?.projectId,
     workspace.id,
     workspace.title,
     selectThread,
@@ -192,6 +190,11 @@ export function WorkspaceChatTab({
                 Оркестратор воркспейса «{workspace.title}»
               </h2>
               <RagScopeBadge scope="workspace" />
+              {canonHint && isScoped && (
+                <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                  {formatPrefetchHint(canonHint.scope, canonHint.hitCount)}
+                </span>
+              )}
               <StageBadge stage="beta" />
             </div>
             <p className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -284,7 +287,7 @@ export function WorkspaceChatTab({
 
       {/* ── Живой план + композер ── */}
       <PlanCard tasks={isScoped ? tasks : []} busy={busy} phase={isScoped ? phase : null} />
-      <Composer locked={!isScoped} />
+      <Composer locked={!isScoped} scopeProjectId={workspace.id} />
 
       <span aria-live="polite" className="sr-only">
         {busy ? "Оркестратор печатает" : ""}

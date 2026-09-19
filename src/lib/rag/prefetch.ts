@@ -18,6 +18,21 @@ export function looksLikeCanonQuestion(text: string): boolean {
   return CANON_HINT.test(t);
 }
 
+const EXCERPT_CAP = 220;
+
+function clipExcerpt(text: string): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length <= EXCERPT_CAP ? t : `${t.slice(0, EXCERPT_CAP).trimEnd()}…`;
+}
+
+export function formatPrefetchHint(
+  scope: "studio" | "workspace",
+  hitCount: number,
+): string {
+  if (hitCount <= 0) return "";
+  return scope === "workspace" ? "по канону воркспейса" : "по канону студии";
+}
+
 export function formatPrefetchBlock(
   hits: Array<{
     title: string;
@@ -29,7 +44,7 @@ export function formatPrefetchBlock(
   if (hits.length === 0) return "";
   const lines = hits.slice(0, 6).map((h, i) => {
     const loc = [h.workspaceName, h.path ?? h.title].filter(Boolean).join(" · ");
-    return `${i + 1}. ${loc}\n${h.excerpt}`;
+    return `${i + 1}. ${loc}\n${clipExcerpt(h.excerpt)}`;
   });
   return (
     "Автоконтекст RAG (извлечён до первого ответа; при необходимости вызови retrieve_canon повторно):\n" +

@@ -46,8 +46,15 @@ import { useAppUi } from "@/lib/store";
 
 const MAX_HEIGHT = 200;
 
-export function Composer({ locked = false }: { locked?: boolean }) {
-  const { busy, sendMessage, activeThread, updateThreadMode } = useThreads();
+export function Composer({
+  locked = false,
+  scopeProjectId,
+}: {
+  locked?: boolean;
+  /** When set, chip/send stay on this workspace — never the previous one. */
+  scopeProjectId?: string | null;
+}) {
+  const { busy, sendMessage, abortTurn, activeThread, updateThreadMode } = useThreads();
   const { getById } = useProjects();
   const openProject = useAppUi((s) => s.openProject);
   const setMainArea = useAppUi((s) => s.setMainArea);
@@ -86,7 +93,10 @@ export function Composer({ locked = false }: { locked?: boolean }) {
     void sendMessage(pending.text);
   }, [activeThread, busy, locked, sendMessage]);
 
-  const boundProject = getById(activeThread?.projectId ?? null);
+  const threadProjectId = activeThread?.projectId ?? null;
+  const scoped =
+    scopeProjectId === undefined || threadProjectId === scopeProjectId;
+  const boundProject = scoped ? getById(threadProjectId) : null;
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
@@ -299,7 +309,7 @@ export function Composer({ locked = false }: { locked?: boolean }) {
     ta.style.height = `${Math.min(ta.scrollHeight, MAX_HEIGHT)}px`;
   }, [value]);
 
-  const blocked = busy || locked;
+  const blocked = busy || locked || !scoped;
   const canSend = !blocked && !isRecording && value.trim().length > 0;
 
   const submit = async () => {
@@ -347,7 +357,7 @@ export function Composer({ locked = false }: { locked?: boolean }) {
   return (
     <div className="border-t bg-background">
       <form
-        className="relative mx-auto w-full max-w-3xl px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        className="relative mx-auto w-full min-w-0 max-w-3xl px-3 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-4"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
@@ -372,7 +382,7 @@ export function Composer({ locked = false }: { locked?: boolean }) {
             <span className="truncate">Проект: {boundProject.name}</span>
           </button>
         )}
-        <div className="flex items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
+        <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
           <label htmlFor="composer" className="sr-only">
             Сообщение
           </label>
@@ -395,7 +405,7 @@ export function Composer({ locked = false }: { locked?: boolean }) {
             }
             disabled={blocked || isRecording}
             maxLength={MAX_MESSAGE_LENGTH}
-            className="vf-scroll max-h-[200px] min-h-11 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            className="vf-scroll max-h-[200px] min-h-11 min-w-0 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
 
           {supported && voiceState === "idle" && (
@@ -464,6 +474,18 @@ export function Composer({ locked = false }: { locked?: boolean }) {
             </span>
           )}
 
+          {busy ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="secondary"
+              aria-label="Остановить генерацию"
+              onClick={() => abortTurn()}
+              className="size-11 shrink-0 rounded-xl"
+            >
+              <Square className="size-3.5 fill-current" aria-hidden="true" />
+            </Button>
+          ) : (
           <Button
             type="submit"
             size="icon"
@@ -473,6 +495,7 @@ export function Composer({ locked = false }: { locked?: boolean }) {
           >
             <ArrowUp className="size-4" aria-hidden="true" />
           </Button>
+          )}
         </div>
         <p id="composer-hint" className="mt-2 px-1 text-center text-xs text-muted-foreground">
           {isRecording
@@ -481,6 +504,8 @@ export function Composer({ locked = false }: { locked?: boolean }) {
               ? "Распознаём голос…"
               : locked && !busy
                 ? "Подключаем чат воркспейса…"
+                : busy
+                ? "Стоп — прервать ответ агента"
                 : blocked
                 ? "Агент отвечает — подождите немного"
                 : "Enter — отправить · Shift+Enter — новая строка · / — команды"}
