@@ -1,174 +1,87 @@
 /**
- * MCP module — curated mock catalog (pure visual, no fetch).
+ * MCP module — UI-хелперы над реестром (Фаза D).
+ *
+ * Данные приходят из REST /api/mcp (строки McpServer пользователя,
+ * DTO McpServerDto). Здесь только презентационные словари: иконки по
+ * ключу каталога, подписи категорий/фильтров и фильтрующий предикат.
  */
 
 import type { LucideIcon } from "lucide-react";
 import {
   AppWindow,
   BookOpen,
+  Boxes,
   Database,
   FolderOpen,
   Frame,
   Github,
+  Globe,
   Hash,
   NotebookPen,
   ShieldAlert,
   Terminal,
 } from "lucide-react";
 
-export type McpCategory = "dev" | "content" | "data";
-export type McpStatus = "connected" | "available" | "soon";
+import type { McpServerDto } from "@/lib/workspace-types";
+
 export type McpFilter = "all" | "connected" | "dev" | "content" | "data";
 
-export const CATEGORY_LABEL: Record<McpCategory, string> = {
-  dev: "Разработка",
-  content: "Контент",
-  data: "Данные",
-};
+export const FILTERS: McpFilter[] = ["all", "connected", "dev", "content", "data"];
 
 export const FILTER_LABEL: Record<McpFilter, string> = {
   all: "Все",
-  connected: "Подключённые",
+  connected: "Включённые",
   dev: "Разработка",
   content: "Контент",
   data: "Данные",
 };
 
-export interface McpServer {
-  id: string;
-  name: string;
-  icon: LucideIcon;
-  category: McpCategory;
-  /** Базовый статус из каталога; «Подключить» переключает локально. */
-  status: McpStatus;
-  description: string;
-  tools: number;
-  /** Строка для блока «Настроить» (stdio-команда сервера). */
-  config: string;
-  /** Пользовательский сервер (не из каталога). */
-  own?: boolean;
-}
-
-export const SERVERS: McpServer[] = [
-  {
-    id: "github",
-    name: "GitHub",
-    icon: Github,
-    category: "dev",
-    status: "connected",
-    description: "Проверка PR и Issues, поиск по репозиториям",
-    tools: 18,
-    config: '"github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }',
-  },
-  {
-    id: "playwright",
-    name: "Playwright",
-    icon: AppWindow,
-    category: "dev",
-    status: "connected",
-    description: "Управление браузером, скриншоты и e2e-тесты",
-    tools: 12,
-    config: '"playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@latest"] }',
-  },
-  {
-    id: "filesystem",
-    name: "Filesystem",
-    icon: FolderOpen,
-    category: "data",
-    status: "connected",
-    description: "Файлы воркспейса: чтение, запись, поиск",
-    tools: 8,
-    config: '"filesystem": { "command": "bunx", "args": ["mcp-filesystem", "--root", "./workspace"] }',
-  },
-  {
-    id: "pocket-utils",
-    name: "pocket-utils",
-    icon: Terminal,
-    category: "dev",
-    status: "connected",
-    description: "Ваш stdio-сервер: счётчик слов, YAML-валидатор",
-    tools: 5,
-    config: '"pocket-utils": { "command": "bun", "args": ["./tools/mcp-server.js"] }',
-    own: true,
-  },
-  {
-    id: "postgresql",
-    name: "PostgreSQL",
-    icon: Database,
-    category: "data",
-    status: "available",
-    description: "Запросы к базе данных, схема и миграции",
-    tools: 11,
-    config: '"postgres": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-postgres", "postgres://localhost/studio"] }',
-  },
-  {
-    id: "context7",
-    name: "Context7",
-    icon: BookOpen,
-    category: "content",
-    status: "available",
-    description: "Актуальная документация библиотек для промптов",
-    tools: 6,
-    config: '"context7": { "command": "npx", "args": ["-y", "@upstash/context7-mcp"] }',
-  },
-  {
-    id: "figma",
-    name: "Figma",
-    icon: Frame,
-    category: "dev",
-    status: "available",
-    description: "Макеты, токены и экспорт ассетов",
-    tools: 9,
-    config: '"figma": { "command": "npx", "args": ["-y", "figma-developer-mcp", "--figma-api-key=••••"] }',
-  },
-  {
-    id: "notion",
-    name: "Notion",
-    icon: NotebookPen,
-    category: "content",
-    status: "soon",
-    description: "Страницы и базы заметок Notion",
-    tools: 15,
-    config: '"notion": { "command": "npx", "args": ["-y", "@notionhq/notion-mcp-server"] }',
-  },
-  {
-    id: "slack",
-    name: "Slack",
-    icon: Hash,
-    category: "content",
-    status: "soon",
-    description: "Сообщения и каналы команды",
-    tools: 22,
-    config: '"slack": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-slack"] }',
-  },
-  {
-    id: "sentry",
-    name: "Sentry",
-    icon: ShieldAlert,
-    category: "dev",
-    status: "soon",
-    description: "Ошибки продакшена и тренды релизов",
-    tools: 7,
-    config: '"sentry": { "command": "npx", "args": ["-y", "@sentry/mcp-server"] }',
-  },
-];
-
-/** Сервер, который пользователь добавляет кнопкой «Добавить свой». */
-export const CUSTOM_SERVER: McpServer = {
-  id: "my-mcp-server",
-  name: "my-mcp-server",
-  icon: Terminal,
-  category: "dev",
-  status: "connected",
-  description: "Ваш сервер: node ./mcp-server.js",
-  tools: 3,
-  config: '"my-mcp-server": { "command": "node", "args": ["./mcp-server.js"] }',
-  own: true,
+export const CATEGORY_LABEL: Record<McpServerDto["category"], string> = {
+  dev: "Разработка",
+  content: "Контент",
+  data: "Данные",
 };
 
-export const MCP_CONFIG_JSON = `{
-  "mcpServers": {
-    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
-    "playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@latest"] }
+/** Иконки по ключу каталога (свои серверы — терминал). Статический
+ *  lookup, чтобы не создавать компоненты во время рендера. */
+export const MCP_ICON_BY_KEY: Record<string, LucideIcon> = {
+  fetch: Globe,
+  filesystem: FolderOpen,
+  playwright: AppWindow,
+  github: Github,
+  postgresql: Database,
+  context7: BookOpen,
+  figma: Frame,
+  notion: NotebookPen,
+  slack: Hash,
+  sentry: ShieldAlert,
+};
+
+/** Иконка-фолбэк для своих серверов. */
+export const MCP_OWN_ICON: LucideIcon = Terminal;
+export const MCP_FALLBACK_ICON: LucideIcon = Boxes;
+
+/** Человекочитаемый конфиг для свёрнутой карточки. */
+export function configPreview(server: McpServerDto): string {
+  if (server.transport === "builtin") {
+    return JSON.stringify({ transport: "builtin", adapter: server.adapter });
   }
-}`;
+  return JSON.stringify(server.config);
+}
+
+/** Применить активный фильтр к списку серверов. */
+export function applyFilter(
+  servers: McpServerDto[],
+  filter: McpFilter,
+): McpServerDto[] {
+  switch (filter) {
+    case "connected":
+      return servers.filter((s) => s.enabled);
+    case "dev":
+    case "content":
+    case "data":
+      return servers.filter((s) => s.category === filter);
+    default:
+      return servers;
+  }
+}

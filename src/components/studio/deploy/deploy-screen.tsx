@@ -32,7 +32,10 @@ import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import type { WorkspaceDto } from "@/lib/workspace-types";
+import type { ProjectListItem } from "@/lib/types";
+import { DockerfileCard } from "./dockerfile-card";
 import { ReadinessCard } from "./readiness-card";
+import { FileCode2 } from "lucide-react";
 
 /** Транслитерация RU → lat для имени скачиваемого файла. */
 const RU_MAP: Record<string, string> = {
@@ -58,8 +61,9 @@ export function DeployScreen({
   onOpenMobileNav,
   workspaceId,
 }: ModuleScreenProps & { workspaceId?: string }) {
-  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
+  /* Глобальный экран без воркспейса: список воркспейсов + код-проектов. */
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const [codeProjects, setCodeProjects] = useState<ProjectListItem[]>([]);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
 
@@ -73,7 +77,7 @@ export function DeployScreen({
 
   const setMainArea = useAppUi((s) => s.setMainArea);
 
-  /* Загрузка списка воркспейсов для глобального экрана. */
+  /* Загрузка списка воркспейсов и код-проектов для глобального экрана. */
   useEffect(() => {
     if (workspaceId) return;
     let cancelled = false;
@@ -84,6 +88,20 @@ export function DeployScreen({
       })
       .catch(() => {
         if (!cancelled) setWorkspaces([]);
+      });
+    api
+      .listProjects()
+      .then((projects) => {
+        if (!cancelled) {
+          // Тип ProjectOrigin не знает origin «workspace» (контентные
+          // воркспейсы), но API их возвращает — фильтруем по строке.
+          setCodeProjects(
+            projects.filter((p) => String(p.origin) !== "workspace"),
+          );
+        }
+      })
+      .catch(() => {
+        // код-проекты — необязательная часть списка
       });
     return () => {
       cancelled = true;
@@ -209,7 +227,7 @@ export function DeployScreen({
                   <Skeleton key={i} className="h-8 w-36 rounded-full" />
                 ))}
               </div>
-            ) : workspaces.length === 0 ? (
+            ) : workspaces.length === 0 && codeProjects.length === 0 ? (
               <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
                 <p className="text-sm text-muted-foreground">
                   Пока нет ни одного воркспейса — сначала создайте его.
@@ -238,6 +256,18 @@ export function DeployScreen({
                     />
                   );
                 })}
+                {codeProjects.map((p) => (
+                  <SelectableChip
+                    key={p.id}
+                    label={p.name}
+                    icon={FileCode2}
+                    selected={pickedId === p.id}
+                    onClick={() =>
+                      setPickedId(pickedId === p.id ? null : p.id)
+                    }
+                    className="max-w-full"
+                  />
+                ))}
               </div>
             )}
           </section>
@@ -268,6 +298,11 @@ export function DeployScreen({
               openFindings={openFindings}
               loading={loading}
             />
+
+            {/* Dockerfile для воркспейсов с кодом (Фаза D). */}
+            {workspace && workspace.origin !== "workspace" ? (
+              <DockerfileCard workspace={workspace} />
+            ) : null}
 
             {/* Главный экран действия: экспорт ZIP. */}
             <section

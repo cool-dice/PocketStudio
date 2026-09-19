@@ -92,6 +92,10 @@ export function buildAgentSystemPrompt(opts: {
   projectTree?: string[];
   recentCommits?: string[];
   planTasks?: { text: string; done: boolean }[];
+  /** Строки документации включённых MCP-инструментов (Фаза D). */
+  mcpToolDocs?: string[];
+  /** Замечание про отключённый Filesystem (гейтинг файловых инструментов). */
+  filesystemOff?: boolean;
 }): string {
   const modeName: ThreadModeName =
     opts.mode === "plan" || opts.mode === "act" || opts.mode === "review"
@@ -125,6 +129,18 @@ export function buildAgentSystemPrompt(opts: {
     prompt += `\n\nПлан работ диалога (пользователь видит его как чек-лист):\n${tasks
       .map((t, i) => `${i + 1}. ${t.text}${t.done ? " [выполнено]" : ""}`)
       .join("\n")}`;
+  }
+
+  // MCP integrations (Фаза D): документация включённых адаптеров.
+  const docs = (opts.mcpToolDocs ?? []).filter((d) => d.trim().length > 0);
+  if (docs.length > 0) {
+    prompt += `\n\nИнтеграции MCP (подключены пользователем в «Инструментах → Интеграции»):\n${docs
+      .map((d) => `- ${d}`)
+      .join("\n")}\nЭтими инструментами можно пользоваться без ограничений режима (в т.ч. в режиме «Спросить»). Ссылка от пользователя — по умолчанию fetch_url; browser_read — если пользователь явно просит живой браузер или страница не читается обычным способом.`;
+  }
+  if (opts.filesystemOff) {
+    prompt +=
+      "\n\nВНИМАНИЕ: пользователь отключил MCP-сервер Filesystem — инструменты list_files, read_file, write_file, delete_file и checkpoint в этом диалоге НЕДОСТУПНЫ.";
   }
 
   return prompt;

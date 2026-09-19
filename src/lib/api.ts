@@ -43,6 +43,7 @@ import type {
   EntityKind,
   FindingDto,
   FindingStatus,
+  McpServerDto,
   SectionRevisionDto,
   WorkspaceDto,
   WorkspaceKind,
@@ -636,6 +637,67 @@ export const api = {
       );
     }
     return res.blob();
+  },
+
+  /* ── MCP-интеграции (Фаза D) ── */
+
+  listMcpServers(): Promise<McpServerDto[]> {
+    return request<{ servers: McpServerDto[] }>("/api/mcp").then(
+      (r) => r.servers,
+    );
+  },
+
+  createMcpServer(body: {
+    name: string;
+    description?: string;
+    transport: "stdio" | "sse";
+    config: Record<string, unknown>;
+  }): Promise<McpServerDto> {
+    return request<{ server: McpServerDto }>("/api/mcp", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.server);
+  },
+
+  updateMcpServer(
+    id: string,
+    body: {
+      enabled?: boolean;
+      name?: string;
+      description?: string;
+      config?: Record<string, unknown>;
+    },
+  ): Promise<McpServerDto> {
+    return request<{ server: McpServerDto }>(
+      `/api/mcp/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.server);
+  },
+
+  async deleteMcpServer(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/mcp/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  getMcpConfig(): Promise<{ config: string; count: number }> {
+    return request<{ config: string; count: number }>("/api/mcp/config");
+  },
+
+  /** Dockerfile-генератор (Фаза D): пишет файлы в проект, возвращает текст. */
+  generateDockerfile(
+    projectId: string,
+    overwrite = false,
+  ): Promise<{
+    kind: string;
+    dockerfile: string;
+    dockerignore: string;
+    workspace: { id: string; name: string };
+  }> {
+    return request(`/api/workspaces/${encodeURIComponent(projectId)}/dockerfile`, {
+      method: "POST",
+      body: JSON.stringify({ overwrite }),
+    });
   },
 
   /* ── DAW-студия (Фаза C) ── */

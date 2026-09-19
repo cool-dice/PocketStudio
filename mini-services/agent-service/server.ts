@@ -141,6 +141,7 @@ function resultObject(result: unknown): Record<string, unknown> | null {
 async function buildTurnSystemPrompt(
   userId: string,
   thread: ThreadTurnInfo,
+  mcp: TurnMcpState,
 ): Promise<string> {
   try {
     // Active plan (any mode — act works through it, plan replaces it).
@@ -148,14 +149,23 @@ async function buildTurnSystemPrompt(
     const planTasks = tasks.map((t) => ({ text: t.text, done: t.done }));
 
     if (!thread.projectId) {
-      return buildAgentSystemPrompt({ mode: thread.mode, planTasks });
+      return buildAgentSystemPrompt({
+        mode: thread.mode,
+        planTasks,
+        mcpToolDocs: mcp.docs,
+        filesystemOff: mcp.filesystemOff,
+      });
     }
     const project = await db.project.findFirst({
       where: { id: thread.projectId, userId },
       select: { id: true, name: true, origin: true },
     });
     if (!project) {
-      return buildAgentSystemPrompt({ mode: thread.mode });
+      return buildAgentSystemPrompt({
+        mode: thread.mode,
+        mcpToolDocs: mcp.docs,
+        filesystemOff: mcp.filesystemOff,
+      });
     }
     const root = projectRoot(project.id);
     const [tree, commits] = await Promise.all([
@@ -172,6 +182,8 @@ async function buildTurnSystemPrompt(
         .slice(0, PROMPT_TREE_PATHS),
       recentCommits: commits.map((c) => `${c.short} ${c.message}`),
       planTasks,
+      mcpToolDocs: mcp.docs,
+      filesystemOff: mcp.filesystemOff,
     });
   } catch (err) {
     console.warn(
@@ -179,6 +191,74 @@ async function buildTurnSystemPrompt(
       err instanceof Error ? err.message : String(err),
     );
     return buildAgentSystemPrompt({ mode: thread.mode });
+  }
+}
+
+// ─────────────────────────── MCP state (Фаза D) ───────────────────────────
+
+/** Состояние реестра интеграций на ход: включённые адаптеры + доки промпта.
+ *
+ * Семантика: если у пользователя НЕТ строк McpServer (не открывал
+ * «Интеграции») — применяются дефолты каталога (builtin-адаптеры включены).
+ * Иначе — включены ровно те адаптеры, чьи строки enabled. Внешние
+ * (stdio/sse) строки инструментов не дают — только конфиг на будущее. */
+interface TurnMcpState {
+  adapters: Set<string>;
+  docs: string[];
+  filesystemOff: boolean;
+}
+
+const MCP_DEFAULT_ADAPTERS = new Set(["fetch", "filesystem", "browser"]);
+
+const MCP_ADAPTER_DOCS: Record<string, string[]> = {
+  fetch: [
+    "fetch_url — прочитать веб-страницу по ссылке (текст, статья, документация). args: {\"url\":\"https://…\"}",
+    "web_search — поиск в интернете. args: {\"query\":\"…\",\"num\":5}",
+  ],
+  browser: [
+    "browser_read — открыть страницу в живом браузере (для JS-сайтов). args: {\"url\":\"https://…\"}",
+  ],
+  filesystem: [], // файловые инструменты уже описаны в базовом промпте
+};
+
+async function loadMcpState(userId: string): Promise<TurnMcpState> {
+  try {
+    const rows = await db.mcpServer.findMany({
+      where: { userId },
+      select: { adapter: true, enabled: true, external: true },
+    });
+    if (rows.length === 0) {
+      return {
+        adapters: new Set(MCP_DEFAULT_ADAPTERS),
+        docs: [...(MCP_ADAPTER_DOCS.fetch ?? []), ...(MCP_ADAPTER_DOCS.browser ?? [])],
+        filesystemOff: false,
+      };
+    }
+    const adapters = new Set<string>();
+    for (const row of rows) {
+      if (row.enabled && !row.external && row.adapter) adapters.add(row.adapter);
+    }
+    const docs: string[] = [];
+    for (const adapter of adapters) {
+      docs.push(...(MCP_ADAPTER_DOCS[adapter] ?? []));
+    }
+    const filesystemRow = rows.find((r) => r.adapter === "filesystem");
+    return {
+      adapters,
+      docs,
+      filesystemOff: Boolean(filesystemRow) && !filesystemRow!.enabled,
+    };
+  } catch (err) {
+    // Реестр недоступен (миграция/сбой) — дефолты, ход не ломаем.
+    console.warn(
+      "[agent] mcp state load failed (defaults):",
+      err instanceof Error ? err.message : String(err),
+    );
+    return {
+      adapters: new Set(MCP_DEFAULT_ADAPTERS),
+      docs: [...(MCP_ADAPTER_DOCS.fetch ?? []), ...(MCP_ADAPTER_DOCS.browser ?? [])],
+      filesystemOff: false,
+    };
   }
 }
 
@@ -466,8 +546,9 @@ async function executeToolCall(opts: {
   userId: string;
   thread: ThreadTurnInfo;
   call: { tool: string; args: Record<string, unknown> };
+  mcp: TurnMcpState;
 }): Promise<unknown> {
-  const { room, userRoom, threadId, userId, thread, call } = opts;
+  const { room, userRoom, threadId, userId, thread, call, mcp } = opts;
 
   // Tool call → persist a "pending" tool row first (it becomes the
   // message id reported to the client).
@@ -499,9 +580,20 @@ async function executeToolCall(opts: {
   let result: unknown;
   try {
     const tool = getTool(call.tool);
-    result = tool
-      ? await tool.execute(call.args, userId, ctx)
-      : { error: `Неизвестный инструмент: ${call.tool}` };
+    // MCP-гейтинг (Фаза D): инструмент с адаптером виден только при
+    // включённом сервере реестра интеграций.
+    if (tool?.mcpAdapter && !mcp.adapters.has(tool.mcpAdapter)) {
+      result = {
+        error:
+          `Инструмент ${call.tool} недоступен: MCP-сервер «` +
+          (tool.mcpAdapter === "filesystem" ? "Filesystem" : tool.mcpAdapter === "fetch" ? "Fetch" : "Playwright") +
+          "» отключён в Инструментах → Интеграции",
+      };
+    } else {
+      result = tool
+        ? await tool.execute(call.args, userId, ctx)
+        : { error: `Неизвестный инструмент: ${call.tool}` };
+    }
   } catch (err) {
     result = { error: err instanceof Error ? err.message : String(err) };
   }
@@ -617,8 +709,10 @@ async function runAgentTurn(
     await maybeAutoTitle(threadId, user.sub);
 
     // 2. Mode + project context for the whole turn (built once; rebuilt
-    // after orchestration when a plan was saved).
-    let systemPrompt = await buildTurnSystemPrompt(user.sub, thread);
+    // after orchestration when a plan was saved). MCP-состояние реестра
+    // интеграций грузится тем же запросом (Фаза D).
+    const mcp = await loadMcpState(user.sub);
+    let systemPrompt = await buildTurnSystemPrompt(user.sub, thread, mcp);
 
     // 2b. Orchestrator (Stage 4c): act-mode work requests without an active
     // plan go through the Planner sub-agent first — the task list becomes a
@@ -648,7 +742,7 @@ async function runAgentTurn(
         orchestrated = true;
         await savePlanTasks(threadId, user.sub, steps);
         // Rebuild so the coder prompt includes the fresh plan block.
-        systemPrompt = await buildTurnSystemPrompt(user.sub, thread);
+        systemPrompt = await buildTurnSystemPrompt(user.sub, thread, mcp);
         emitPhase(room, threadId, "act", "Выполняю план…");
       } else {
         emitPhase(room, threadId, "act", "Работаю над запросом…");
@@ -689,6 +783,7 @@ async function runAgentTurn(
         userId: user.sub,
         thread,
         call,
+        mcp,
       });
       const r = resultObject(result);
       if (r && r.error === undefined) {
@@ -734,6 +829,7 @@ async function runAgentTurn(
             userId: user.sub,
             thread,
             call,
+            mcp,
           });
           if (call.tool !== "complete_task") break; // unexpected tool — stop sweeping
         }

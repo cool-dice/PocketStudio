@@ -1,0 +1,130 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+
+import { db } from "@/lib/db";
+import { getUserFromRequest } from "@/lib/auth";
+import {
+  MCP_CATALOG,
+  catalogOrder,
+  validateMcpConfig,
+} from "@/lib/mcp-catalog";
+import { mcpDto } from "@/lib/mcp-shapes";
+
+export const dynamic = "force-dynamic";
+
+/** Ленивый посев каталога: строки каталога создаются при первом запросе. */
+async function ensureCatalog(userId: string): Promise<void> {
+  const existing = await db.mcpServer.findMany({
+    where: { userId, own: false },
+    select: { catalogKey: true },
+  });
+  const have = new Set(existing.map((r) => r.catalogKey));
+  for (const item of MCP_CATALOG) {
+    if (have.has(item.key)) continue;
+    await db.mcpServer.create({
+      data: {
+        userId,
+        catalogKey: item.key,
+        name: item.name,
+        description: item.description,
+        category: item.category,
+        transport: item.transport,
+        config: JSON.stringify(item.config),
+        adapter: item.adapter,
+        external: item.external,
+        toolsCount: item.toolsCount,
+        enabled: item.defaultEnabled,
+        own: false,
+      },
+    });
+  }
+}
+
+/* ── GET /api/mcp — список серверов (каталог + свои) ── */
+
+export async function GET(req: Request) {
+  const session = await getUserFromRequest(req);
+  if (!session) {
+    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
+  }
+
+  await ensureCatalog(session.sub);
+  const rows = await db.mcpServer.findMany({
+    where: { userId: session.sub },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const sorted = rows.sort((a, b) => {
+    const ownDiff = Number(a.own) - Number(b.own);
+    if (ownDiff !== 0) return ownDiff;
+    const orderDiff = catalogOrder(a.catalogKey) - catalogOrder(b.catalogKey);
+    if (orderDiff !== 0) return orderDiff;
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+
+  return NextResponse.json({ servers: sorted.map(mcpDto) });
+}
+
+/* ── POST /api/mcp — добавить свой сервер ── */
+
+const createSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Название не может быть пустым")
+    .max(60, "Максимум 60 символов"),
+  description: z.string().trim().max(200).optional(),
+  transport: z.enum(["stdio", "sse"]),
+  config: z.record(z.string(), z.unknown()),
+});
+
+export async function POST(req: Request) {
+  const session = await getUserFromRequest(req);
+  if (!session) {
+    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
+  }
+
+  const parsed = createSchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
+      { status: 400 },
+    );
+  }
+  const { name, description, transport, config } = parsed.data;
+
+  const validated = validateMcpConfig(transport, config);
+  if (!validated.ok) {
+    return NextResponse.json({ error: validated.error }, { status: 400 });
+  }
+
+  const duplicate = await db.mcpServer.findFirst({
+    where: { userId: session.sub, own: true, name },
+    select: { id: true },
+  });
+  if (duplicate) {
+    return NextResponse.json(
+      { error: "Сервер с таким названием уже добавлен" },
+      { status: 409 },
+    );
+  }
+
+  const row = await db.mcpServer.create({
+    data: {
+      userId: session.sub,
+      catalogKey: null,
+      name,
+      description: description ?? "Свой MCP-сервер",
+      category: "dev",
+      transport,
+      config: JSON.stringify(validated.config),
+      adapter: null,
+      external: true,
+      toolsCount: 0,
+      enabled: true,
+      own: true,
+    },
+  });
+
+  return NextResponse.json({ server: mcpDto(row) }, { status: 201 });
+}

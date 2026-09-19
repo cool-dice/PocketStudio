@@ -177,3 +177,24 @@ export interface DashboardDto {
   };
   activity: DashboardActivityItem[];
 }
+
+// ─────────────────────────── MCP integrations (Фаза D) ───────────────────────────
+
+export type McpCategory = "dev" | "content" | "data";
+export type McpTransport = "builtin" | "stdio" | "sse";
+
+export interface McpServerDto {
+  id: string;
+  catalogKey: string | null;
+  name: string;
+  description: string;
+  category: McpCategory;
+  transport: McpTransport;
+  adapter: string | null;
+  external: boolean;
+  toolsCount: number;
+  enabled: boolean;
+  own: boolean;
+  config: Record<string, unknown>;
+  createdAt: string;
+}

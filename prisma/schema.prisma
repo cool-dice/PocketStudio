@@ -30,6 +30,7 @@ model User {
   threads       Thread[]
   notifications Notification[]
   auditLogs     AuditLog[]
+  mcpServers    McpServer[]
 }
 
 // ─────────────────────────── Notebook ───────────────────────────
@@ -306,6 +307,40 @@ model DawProject {
   tracks       String  @default("[]")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// ─────────────────────────── MCP integrations (Фаза D) ───────────────────────────
+
+/// Реестр MCP-серверов пользователя: каталог (лениво засеивается) + свои серверы.
+/// builtin-строки (adapter) дают РЕАЛЬНЫЕ инструменты оркестратору в песочнице;
+/// внешние (stdio/sse) — сохранённый конфиг для полной версии.
+model McpServer {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Ключ каталога ('filesystem', 'fetch', 'playwright', 'github'…) или null для своего.
+  catalogKey  String?
+  name        String
+  description String
+  // 'dev' | 'content' | 'data'
+  category    String   @default("dev")
+  /// 'builtin' — адаптер песочницы | 'stdio' | 'sse'.
+  transport   String   @default("stdio")
+  /// JSON {command, args: string[], env: {}} для stdio | {url} для sse | {} для builtin.
+  config      String   @default("{}")
+  /// Ключ builtin-адаптера: 'filesystem' | 'fetch' | 'browser' (null для внешних).
+  adapter     String?
+  /// Внешний сервер: в песочнице конфиг сохраняется, инструменты недоступны.
+  external    Boolean  @default(true)
+  toolsCount  Int      @default(0)
+  enabled     Boolean  @default(false)
+  /// Пользовательский (не из каталога).
+  own         Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, catalogKey])
+  @@index([userId])
 }
 
 // ─────────────────── Findings — Аналитик (PS-3.2) ───────────────────

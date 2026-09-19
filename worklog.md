@@ -1379,3 +1379,32 @@ Stage Summary:
 - Фаза C по роадмапу закрыта (кроме осознанно отложенного: разложение на стемы — нет движка в песочнице; ffmpeg-видеомикс заменён MediaRecorder-сборкой — работает).
 - ДОЛГИ: тестовый юзер dev-БД; медленная загрузка сцен в фоне браузера (img.decode деприоритизируется — на живой вкладке быстро); Durationsandbox MediaRecorder ~1.6Мбит/с (HD).
 - NEXT (по роадмапу): Фаза D — MCP-реестр в БД (Интеграции: каталог → реальные конфиги, старт с GitHub/Fetch/Playwright); Фаза E — Скиллы (импорт SKILL.md), курсор-стиль правки превью; из PS-6 NEXT: ИИ-написание глав; портреты в EntitySheet уже сделаны; применение палитры к UI воркспейса.
+
+---
+Task ID: PS-8
+Agent: main
+Task: «Идем дальше по роадмапу» — Фаза D (Деплой + MCP) по docs/ROADMAP.md
+
+Work Log:
+- Аудит: Фазы A/B/C закрыты (PS-5…PS-7); docker CLI в песочнице ОТСУТСТВУЕТ, прямой GitHub 403, но z-ai SDK page_reader/web_search РАБОТАЮТ из песочницы, agent-browser CLI v0.35 доступен → план Фазы D в рамках возможного.
+- БД: Prisma `McpServer` (userId, catalogKey unique с пользователем, name/description/category, transport builtin|stdio|sse, config JSON, adapter, external, toolsCount, enabled, own) + связь User.mcpServers; db:push; mcu-тип McpServerDto в workspace-types.
+- Каталог: src/lib/mcp-catalog.ts — 10 серверов (fetch/filesystem/playwright = builtin-адаптеры defaultEnabled; github/postgresql/context7/figma/notion/slack/sentry = external stdio-конфиги) + validateMcpConfig по транспорту (stdio: command+args+env; sse: url http/https).
+- REST: GET /api/mcp (ленивый посев каталога per-user, сортировка каталог→свои), POST /api/mcp (свой сервер, дубликаты 409), PATCH/DELETE /api/mcp/[id] (каталожные — только toggle/конфиг, свои — удаляемы), GET /api/mcp/config (реальный mcp.json из включённых: builtin-адаптеры + stdio-команды + sse-url). mcpDto вынесен в src/lib/mcp-shapes.ts (импорт из route.ts в [id] не резолвится tsc).
+- api.ts: listMcpServers/createMcpServer/updateMcpServer/deleteMcpServer/getMcpConfig/generateDockerfile.
+- agent-service: mcp-tools.ts — fetch_url (SDK page_reader, html→text, cap 6000), web_search (SDK, 1–10 результатов), browser_read (agent-browser CLI open→read→close, cap 8000, ИЗОЛИРОВАННАЯ именованная сессия AGENT_BROWSER_SESSION=pocketstudio-agent — иначе общий CLI-браузер убивает чужие сессии close'ом). ToolDef получил mcpAdapter; файловые инструменты (list/read/write/delete/checkpoint) тегированы 'filesystem'.
+- server.ts: loadMcpState(userId) на каждый ход (нет строк у юзера → дефолты каталога; иначе enabled && !external && adapter); гейтинг в executeToolCall (отключённый сервер → error «отключён в Инструментах → Интеграции»); docs адаптеров в buildAgentSystemPrompt (mcpToolDocs + filesystemOff-предупреждение). prompts.ts: MCP-блок «можно без ограничений режима, в т.ч. Спросить»; ссылка от пользователя → по умолчанию fetch_url, browser_read — по явной просьбе/если не читается.
+- Фронт MCP: mcp-screen переписан на реестр (скелетоны, статистика, фильтры, оптимистичный toggle с откатом, configVersion → обновление превью конфига); server-card (бейджи «Работает»/«Конфиг сохранён»/«Доступно», инлайн-редактор JSON-конфига с валидацией, корзина для своих, честные подписи builtin/external); add-server-dialog (название/описание/транспорт/JSON с шаблонами по транспорту); config-preview-card (реальный GET /api/mcp/config + копирование); mcp-data.ts → иконки MCP_ICON_BY_KEY (Record-lookup: eslint react-hooks/static-components запрещает функцию, возвращающую компонент, в рендере).
+- Деплой: POST /api/workspaces/[id]/dockerfile — анализ реальных файлов (package.json deps/markers → Next.js multi-stage standalone/Vite/Node/Python/статика/универсальный), пишет Dockerfile + .dockerignore в корень проекта (rootPath обязателен, 409 без overwrite); dockerfile-card.tsx (превью, бейдж профиля, честная пометка про отсутствие docker-демона); deploy-screen: чипы выбора теперь включают КОД-проекты (api.listProjects, origin!=workspace — ProjectOrigin не знает 'workspace', фильтр по String()); sidebar: + «Деплой» (Rocket) — глобальный экран был недостижим (mainArea 'deploy' существовал, но пункта навигации не было).
+- Перезапуск Next dev + agent-service (bun --hot держал старый Prisma-клиент без McpServer — урок PS-7).
+
+Stage Summary:
+- БРАУЗЕРНАЯ ВЕРИФИКАЦИЯ (:81, 1280×800 + 390×844, ps2c-audio@vf.io, QA-сессия agent-browser 'ps-qa'):
+  - Интеграции: каталог засеян (Fetch/Filesystem/Playwright «Работает» + 7 внешних «Доступно»), статистика 3/7/0; GitHub «Подключить» → бейдж «Конфиг сохранён» + строка в БД + блок в mcp.json; конфиг-превью — реальный JSON (4→5 серверов), копирование.
+  - Чат: «прочитай https://example.com» → fetch_url выполнен → корректное резюме; «найди что такое MCP» → web_search выполнен → точный ответ (Anthropic, 2024); «открой в живом браузере httpbin.org/html» → browser_read выполнен → «Герман Мелвилл, Моби Дик» (реальный рендер); ГЕЙТИНГ: отключил Playwright → принудительный вызов browser_read → «Ошибка: Инструмент browser_read недоступен: MCP-сервер «Playwright» отключён в Инструментах → Интеграции», агент честно пересказал это юзеру; после включения — снова работает. Сессия QA выживала browser_read (изолированная сессия подтверждена).
+  - Свой сервер: диалог (stdio, JSON) → в реестре + mcp.json; удаление → исчез из БД и конфига.
+  - Деплой: глобальный экран из сайдбара, чип код-проекта PocketLanding-site → карточка Dockerfile → «Сгенерировать» → профиль Next.js (multi-stage), файлы на диске workspace/<id>/Dockerfile+.dockerignore, превью содержимого; toast об успехе.
+  - Мобайл 390: scrollWidth 390 без переполнения (замер DOM: наложения заголовка/кнопки НЕТ — кнопка переносится flex-wrap'ом, y=156; «критичное переполнение» VLM — ложное срабатывание).
+  - VLM: десктоп 9/10, мобайл 7/10 (замер опроверг), Dockerfile 8.5/10. tsc src/=0, lint=0, dev.log 0 ошибок, agent-service чист.
+- Фаза D закрыта в рамках песочницы. Честно отложено: сборка docker build/push/SSH (нет демона и внешней сети), реальный stdio/sse-запуск внешних MCP (конфиги сохраняются), инструменты deploy_project.
+- ДОЛГИ: 4 старых tsc-ошибки (tool-card, use-threads ×2, use-voice-recorder) — в рамках src/ их нет, это prototypes/scripts.
+- NEXT (по роадмапу): Фаза E — Скиллы (импорт SKILL.md, создание из диалога, включение в промпт агента), курсор-стиль правки превью; из PS-6 NEXT: ИИ-написание глав (кнопка «Написать главу»), применение палитры к UI воркспейса.

@@ -1,27 +1,49 @@
 "use client";
 
 /**
- * Config preview — dark monospace JSON example with syntax tints
- * (stone + emerald only) and a copy button.
+ * Config preview (Фаза D) — РЕАЛЬНЫЙ сгенерированный конфиг включённых
+ * серверов: GET /api/mcp/config → {mcpServers: …} с копированием.
+ * Подсветка синтаксиса — тонкая ручная (stone + emerald).
  */
 
-import { FileJson } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { FileJson, Loader2, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
-import { MCP_CONFIG_JSON } from "./mcp-data";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api, ApiError } from "@/lib/api";
 import { CopyButton } from "./mcp-bits";
 
-/** Тонкая подсветка: ключи — emerald, строки — stone. */
-const K = ({ children }: { children: React.ReactNode }) => (
-  <span className="text-emerald-400">{children}</span>
-);
-const S = ({ children }: { children: React.ReactNode }) => (
-  <span className="text-stone-300">{children}</span>
-);
+export function ConfigPreviewCard({ refreshKey = 0 }: { refreshKey?: number }) {
+  const [config, setConfig] = useState<string | null>(null);
+  const [count, setCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-export function ConfigPreviewCard() {
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.getMcpConfig();
+      setConfig(res.config);
+      setCount(res.count);
+    } catch (err) {
+      // Молчаливый дегрейд: карточка остаётся, но показывает ошибку загрузки.
+      setConfig(null);
+      if (err instanceof ApiError && err.status !== 401) {
+        toast.error("Не удалось загрузить конфиг интеграций");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load, refreshKey]);
+
   return (
     <section
-      aria-label="Пример конфигурации MCP"
+      aria-label="Конфигурация MCP"
       className="rounded-2xl border bg-card p-4 shadow-xs sm:p-5"
     >
       <header className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -32,27 +54,53 @@ export function ConfigPreviewCard() {
           <FileJson className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold leading-tight">Пример конфигурации</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">mcp.json · stdio-транспорт</p>
+          <h2 className="text-sm font-semibold leading-tight">
+            Конфигурация оркестратора
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            mcp.json · включено серверов: {count}
+          </p>
         </div>
-        <CopyButton text={MCP_CONFIG_JSON} label="Скопировать конфигурацию" className="shrink-0" />
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0"
+          onClick={() => void load()}
+          aria-label="Обновить конфигурацию"
+          disabled={loading}
+        >
+          <RefreshCw
+            className={loading ? "size-4 animate-spin" : "size-4"}
+            aria-hidden="true"
+          />
+        </Button>
+        {config !== null ? (
+          <CopyButton
+            text={config}
+            label="Скопировать конфигурацию"
+            className="shrink-0"
+          />
+        ) : null}
       </header>
 
-      <pre className="overflow-x-auto vf-scroll rounded-lg bg-stone-950 p-4 font-mono text-xs leading-relaxed text-stone-500 selection:bg-emerald-500/30">
-        <code>
-          {"{\n"}
-          {"  "}<K>&quot;mcpServers&quot;</K>: {"{"}\n
-          {"    "}<K>&quot;github&quot;</K>: {"{ "}<K>&quot;command&quot;</K>: <S>&quot;npx&quot;</S>
-          {", "}<K>&quot;args&quot;</K>: [<S>&quot;-y&quot;</S>, <S>&quot;@modelcontextprotocol/server-github&quot;</S>] {"},"}\n
-          {"    "}<K>&quot;playwright&quot;</K>: {"{ "}<K>&quot;command&quot;</K>: <S>&quot;npx&quot;</S>
-          {", "}<K>&quot;args&quot;</K>: [<S>&quot;-y&quot;</S>, <S>&quot;@playwright/mcp@latest&quot;</S>] {"}"}\n
-          {"  "}{"}\n"}
-          {"}"}
-        </code>
-      </pre>
+      {loading && config === null ? (
+        <Skeleton className="h-40 w-full rounded-lg" />
+      ) : config === null ? (
+        <p className="rounded-lg border border-dashed p-4 text-xs text-muted-foreground">
+          Конфигурация недоступна — попробуйте обновить
+        </p>
+      ) : (
+        <pre className="overflow-x-auto vf-scroll rounded-lg bg-stone-950 p-4 font-mono text-xs leading-relaxed text-stone-500 selection:bg-emerald-500/30">
+          <code>{config}</code>
+        </pre>
+      )}
 
-      <p className="mt-2.5 text-xs text-muted-foreground">
-        Конфигурация хранится в профиле студии
+      <p className="mt-2.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+        {loading ? (
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        ) : null}
+        Собирается из реестра интеграций: builtin-адаптеры и stdio/sse-конфиги
       </p>
     </section>
   );

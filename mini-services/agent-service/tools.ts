@@ -45,6 +45,9 @@ export interface ToolDef {
   description: string;
   /** Human-readable arg descriptions (shown in logs / debugging). */
   argsSchema: Record<string, string>;
+  /** MCP-адаптер (Фаза D): инструмент виден только при включённом сервере
+   *  реестра интеграций ('filesystem' | 'fetch' | 'browser'). */
+  mcpAdapter?: string;
   execute(args: any, userId: string, ctx: ToolContext): Promise<any>;
 }
 
@@ -527,6 +530,7 @@ const listProjects: ToolDef = {
 // ─────────────────────────── tool: list_files ───────────────────────────
 
 const listFiles: ToolDef = {
+  mcpAdapter: "filesystem",
   name: "list_files",
   description:
     "Файлы активного проекта (или его подкаталога): путь, тип, размер. Требуется активный проект в диалоге.",
@@ -581,6 +585,7 @@ const listFiles: ToolDef = {
 // ─────────────────────────── tool: read_file ───────────────────────────
 
 const readFile: ToolDef = {
+  mcpAdapter: "filesystem",
   name: "read_file",
   description: "Прочитать текстовый файл активного проекта (до 200 КБ).",
   argsSchema: {
@@ -610,6 +615,7 @@ const readFile: ToolDef = {
 // ─────────────────────────── tool: write_file ───────────────────────────
 
 const writeFile: ToolDef = {
+  mcpAdapter: "filesystem",
   name: "write_file",
   description:
     "Записать текстовый файл в активный проект (создание или перезапись, до 200 КБ). Доступен только в режиме «Действовать».",
@@ -646,6 +652,7 @@ const writeFile: ToolDef = {
 // ─────────────────────────── tool: delete_file ───────────────────────────
 
 const deleteFile: ToolDef = {
+  mcpAdapter: "filesystem",
   name: "delete_file",
   description:
     "Удалить файл или папку в активном проекте. Доступен только в режиме «Действовать».",
@@ -678,6 +685,7 @@ const deleteFile: ToolDef = {
 // ─────────────────────────── tool: checkpoint ───────────────────────────
 
 const checkpointTool: ToolDef = {
+  mcpAdapter: "filesystem",
   name: "checkpoint",
   description:
     "Сохранить контрольную точку активного проекта (git-коммит всех изменений). Доступен только в режиме «Действовать».",
@@ -771,9 +779,11 @@ const completeTask: ToolDef = {
 
 // ─────────────────────────── registry ───────────────────────────
 
-// Инструменты контента воркспейсов (Фаза A: сущности, Аналитик, генерация)
-// — определены в workspace-tools.ts, регистрируются здесь же, 1:1 с паттерном.
+// Инструменты контента воркспейсов (Фаза A) — определены в workspace-tools.ts.
+// Инструменты MCP-адаптеров (Фаза D) — определены в mcp-tools.ts и гейтятся
+// включёнными серверами реестра интеграций (server.ts).
 import { WORKSPACE_TOOLS } from "./workspace-tools";
+import { MCP_TOOLS } from "./mcp-tools";
 
 export const TOOLS: ToolDef[] = [
   createNote,
@@ -789,6 +799,7 @@ export const TOOLS: ToolDef[] = [
   checkpointTool,
   completeTask,
   ...WORKSPACE_TOOLS,
+  ...MCP_TOOLS,
 ];
 
 export function getTool(name: string): ToolDef | undefined {
