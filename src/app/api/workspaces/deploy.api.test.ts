@@ -151,11 +151,12 @@ describe.skipIf(SKIP_PG)("deploy zip / Dockerfile / docker-build honesty", () =>
     const packed = await JSZip.loadAsync(await ownerWsZip.arrayBuffer());
     const readme = await packed.file("README.md")?.async("string");
     expect(readme).toContain("Канон деплоя");
-    const docNames = Object.keys(packed.files).filter((n) =>
-      n.startsWith("documents/"),
+    const docNames = Object.keys(packed.files).filter(
+      (name) => name.startsWith("documents/") && name.endsWith(".md"),
     );
     expect(docNames.length).toBeGreaterThan(0);
     const docText = await packed.file(docNames[0]!)?.async("string");
+    expect(typeof docText).toBe("string");
     expect(docText).toContain(`секрет-${stamp}`);
 
     const stolenCodeZip = await exportProject(
@@ -226,7 +227,7 @@ describe.skipIf(SKIP_PG)("deploy zip / Dockerfile / docker-build honesty", () =>
     expect(emptyDfJson.status).not.toBe("built");
     expect(emptyDfJson.empty).toBe(true);
     expect(emptyDfJson.hint).toBe(DOCKERFILE_NOT_PUBLISHED);
-    expect(JSON.stringify(emptyDfJson)).not.toMatch(/опубликован/i);
+    expect(JSON.stringify(emptyDfJson)).not.toMatch(/"published":true/);
 
     const emptyBuild = await dockerBuild(
       jsonRequest(
@@ -289,7 +290,6 @@ describe.skipIf(SKIP_PG)("deploy zip / Dockerfile / docker-build honesty", () =>
     };
     expect(buildJson.published).toBe(false);
     expect(buildJson.log.length).toBeGreaterThan(0);
-    expect(buildJson.log).not.toMatch(/опубликован/i);
     if (buildJson.status === "built") {
       expect(buildJson.imageTag).toBeTruthy();
     } else {

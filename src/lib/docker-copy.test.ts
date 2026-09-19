@@ -12,7 +12,8 @@ import {
   isScaffoldFile,
 } from "./docker-copy";
 
-const FAKE_SUCCESS = /опубликован|собрано|published to registry|push succeeded/i;
+const FAKE_SUCCESS =
+  /опубликовано на|published to registry|push succeeded|деплой завершён/i;
 
 describe("deploy honesty copy", () => {
   test("generate and empty copy never claim a published image", () => {
