@@ -323,5 +323,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Reminder bell + inspect send | Тип `reminder` в колоколе (иконка, клик → заметка). Бейдж RAG = `Thread.projectId`. «Попросить агента» отправляет контекст в чат. Tool JSON: trailing commas + name/arguments. Login `useState` (крэш входа). |
 | 2026-09-19 | Design/NLE/DAW persist | PUT→GET round-trip; invalid JSON 400 without wipe; empty timeline/DAW export honest; empty canvas save OK; `?doc=` restores last manuscript |
 | 2026-09-19 | Documents + Code holes | Откат главы возвращает текст и переиндексирует RAG; история — строки API; `?doc=` / missing id → 404 не 500; write vs rewrite; чекпоинты list/create/restore только этого Project.id; zip владельца; iframe `running: false`; Monaco save → RAG |
+| 2026-09-19 | Restore + file RAG | `git reset --hard` ставит в очередь переиндекс файлов проекта и чистит чанки удалённых путей; чекпоинт эмбеддинги не снапшотит; вкладка картинок отличает пустую галерею от ошибки загрузки |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

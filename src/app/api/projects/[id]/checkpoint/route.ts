@@ -60,6 +60,7 @@ export async function POST(
       where: { id: project.id },
       data: { updatedAt: new Date() },
     });
+    // Git commit is the snapshot. File embeddings stay live on disk — no-op.
     return NextResponse.json({ checkpoint });
   } catch (err) {
     if (err instanceof WorkspaceError) {

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { scheduleReindexProjectFiles } from "@/lib/rag";
 import {
   WorkspaceError,
   projectRoot,
@@ -54,6 +55,8 @@ export async function POST(
       where: { id: project.id },
       data: { updatedAt: new Date() },
     });
+    // Working tree changed under git; file chunks stay stale until reindex.
+    scheduleReindexProjectFiles(db, session.sub, project.id);
     return NextResponse.json({ restored });
   } catch (err) {
     if (err instanceof WorkspaceError) {

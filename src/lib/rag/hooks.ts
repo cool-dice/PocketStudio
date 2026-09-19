@@ -33,6 +33,11 @@ function enqueue(run: QueueJob["run"]): void {
   void pump();
 }
 
+/** Restore / full reindex: same in-process queue as index-on-write. */
+export function scheduleRagJob(run: QueueJob["run"]): void {
+  enqueue(run);
+}
+
 async function pump(): Promise<void> {
   if (pumping) return;
   pumping = true;

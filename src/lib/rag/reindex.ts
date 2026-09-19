@@ -17,12 +17,13 @@ import {
   indexNoteById,
   indexSectionById,
   indexSkillById,
+  scheduleRagJob,
 } from "./hooks";
 import { indexDocument } from "./indexer";
 import { isProbablyBinary, shouldSkipFileBytes, shouldSkipPath } from "./skip";
 import { deleteSourceChunks } from "./store";
 import { EMBEDDING_DIM_MISMATCH_MESSAGE, UNCONFIGURED_EMBEDDINGS_MESSAGE } from "./types";
-import { projectRoot } from "../workspace";
+import { projectRoot, safeJoin, WorkspaceError } from "../workspace";
 
 export interface ReindexReport {
   notes: number;
@@ -264,10 +265,78 @@ export async function reindexUserData(
     select: { id: true },
   });
   for (const p of projects) {
-    report.files += await indexProjectFiles(db, opts.targetUserId, p.id);
+    report.files += (await reindexProjectFiles(db, opts.targetUserId, p.id)).files;
   }
 
   return report;
+}
+
+/**
+ * After git restore: drop chunks for deleted paths, then re-embed files
+ * that still exist (content may have rolled back).
+ */
+export async function reindexProjectFiles(
+  db: PrismaClient,
+  userId: string,
+  projectId: string,
+): Promise<{ files: number; purged: number }> {
+  const purged = await purgeMissingFileChunks(db, userId, projectId);
+  const files = await indexProjectFiles(db, userId, projectId);
+  return { files, purged };
+}
+
+export function scheduleReindexProjectFiles(
+  db: PrismaClient,
+  userId: string,
+  projectId: string,
+): void {
+  scheduleRagJob(async () => {
+    await reindexProjectFiles(db, userId, projectId);
+  });
+}
+
+/** Drop file chunks whose path is gone from the working tree. */
+export async function purgeMissingFileChunks(
+  db: PrismaClient,
+  userId: string,
+  projectId: string,
+): Promise<number> {
+  const root = projectRoot(projectId);
+  try {
+    await fsp.stat(root);
+  } catch {
+    return 0;
+  }
+
+  const rows = await db.ragChunk.findMany({
+    where: { userId, projectId, sourceType: "file" },
+    select: { sourceId: true, path: true },
+  });
+  const unique = new Map<string, string | null>();
+  for (const row of rows) {
+    unique.set(row.sourceId, row.path);
+  }
+
+  let removed = 0;
+  for (const [sourceId, storedPath] of unique) {
+    const relPath = storedPath || sourceId.slice(projectId.length + 1);
+    const live = relPath ? await fileStillOnDisk(root, relPath) : false;
+    if (live) continue;
+    await deleteSourceChunks(db, userId, "file", sourceId);
+    removed += 1;
+  }
+  return removed;
+}
+
+async function fileStillOnDisk(root: string, relPath: string): Promise<boolean> {
+  try {
+    const abs = safeJoin(root, relPath);
+    const st = await fsp.stat(abs);
+    return st.isFile();
+  } catch (err) {
+    if (err instanceof WorkspaceError) return false;
+    return false;
+  }
 }
 
 async function indexProjectFiles(

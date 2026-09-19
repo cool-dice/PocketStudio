@@ -294,15 +294,22 @@ export function ImagesScreen({
                 count={visibleTiles.length}
                 disabled={loading}
               />
-              <GalleryGrid
-                tiles={visibleTiles}
-                loading={loading}
-                emptyLabel={galleryEmpty}
-                onOpen={openTile}
-                onVariations={makeVariations}
-                onToggleFavorite={(id) => void toggleFavorite(id)}
-                onDelete={(id) => void removeTile(id)}
-              />
+              {loadError ? (
+                <GalleryLoadError
+                  message={loadError}
+                  onRetry={() => void loadGallery()}
+                />
+              ) : (
+                <GalleryGrid
+                  tiles={visibleTiles}
+                  loading={loading}
+                  emptyLabel={galleryEmpty}
+                  onOpen={openTile}
+                  onVariations={makeVariations}
+                  onToggleFavorite={(id) => void toggleFavorite(id)}
+                  onDelete={(id) => void removeTile(id)}
+                />
+              )}
             </>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center">
@@ -360,13 +367,10 @@ export function ImagesScreen({
           disabled={loading}
         />
         {loadError ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
-            <p className="text-sm text-muted-foreground">{loadError}</p>
-            <Button size="sm" variant="outline" onClick={() => void loadGallery()}>
-              <RefreshCw className="size-4" aria-hidden="true" />
-              Повторить
-            </Button>
-          </div>
+          <GalleryLoadError
+            message={loadError}
+            onRetry={() => void loadGallery()}
+          />
         ) : (
           <GalleryGrid
             tiles={visibleTiles}
@@ -389,6 +393,24 @@ export function ImagesScreen({
         onDelete={(id) => void removeTile(id)}
       />
     </section>
+  );
+}
+
+function GalleryLoadError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
+      <p className="text-sm text-muted-foreground">{message}</p>
+      <Button size="sm" variant="outline" onClick={onRetry}>
+        <RefreshCw className="size-4" aria-hidden="true" />
+        Повторить
+      </Button>
+    </div>
   );
 }
 

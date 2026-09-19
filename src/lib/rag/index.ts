@@ -28,6 +28,13 @@ export {
   indexSectionById,
   flushRagQueue,
 } from "./hooks";
-export { reindexUserData, reindexAllUsers, purgeStaleChunks } from "./reindex";
+export {
+  reindexUserData,
+  reindexAllUsers,
+  purgeStaleChunks,
+  purgeMissingFileChunks,
+  reindexProjectFiles,
+  scheduleReindexProjectFiles,
+} from "./reindex";
 export { shouldSkipPath } from "./skip";
 export { embeddingsConfigured } from "./embed";
