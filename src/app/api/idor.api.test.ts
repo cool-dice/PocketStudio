@@ -142,6 +142,17 @@ describe.skipIf(SKIP_PG)("IDOR: other user's ids are 404", () => {
     );
     expect(patched.status).toBe(404);
 
+    const archived = await patchThread(
+      jsonRequest(
+        `http://localhost/api/threads/${thread.id}`,
+        "PATCH",
+        { archived: true },
+        attackerToken!,
+      ),
+      params,
+    );
+    expect(archived.status).toBe(404);
+
     const deleted = await deleteThread(
       jsonRequest(
         `http://localhost/api/threads/${thread.id}`,
@@ -155,6 +166,7 @@ describe.skipIf(SKIP_PG)("IDOR: other user's ids are 404", () => {
 
     const still = await db.thread.findUnique({ where: { id: thread.id } });
     expect(still?.title).toBe("Секретный диалог");
+    expect(still?.archived).toBe(false);
   });
 
   test("document/section GET/PATCH/DELETE are 404 for another user", async () => {

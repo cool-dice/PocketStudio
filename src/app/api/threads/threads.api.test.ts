@@ -154,6 +154,21 @@ describe.skipIf(SKIP_PG)("threads API: IDOR delete, persist rename/delete, empty
     const patchedJson = (await patched.json()) as { thread?: unknown };
     expect(patchedJson.thread).toBeUndefined();
 
+    const archivedByAttacker = await patchThread(
+      jsonRequest(
+        `http://localhost/api/threads/${thread.id}`,
+        "PATCH",
+        { archived: true },
+        attackerToken,
+      ),
+      params,
+    );
+    expect(archivedByAttacker.status).toBe(404);
+    const archivedByAttackerJson = (await archivedByAttacker.json()) as {
+      thread?: unknown;
+    };
+    expect(archivedByAttackerJson.thread).toBeUndefined();
+
     const deleted = await deleteThread(
       jsonRequest(
         `http://localhost/api/threads/${thread.id}`,
@@ -170,6 +185,7 @@ describe.skipIf(SKIP_PG)("threads API: IDOR delete, persist rename/delete, empty
     const still = await db.thread.findUnique({ where: { id: thread.id } });
     expect(still?.title).toBe("Секретный диалог");
     expect(still?.userId).toBe(owner.id);
+    expect(still?.archived).toBe(false);
 
     const ownerList = await listThreads(
       jsonRequest("http://localhost/api/threads", "GET", undefined, ownerToken),
@@ -270,5 +286,128 @@ describe.skipIf(SKIP_PG)("threads API: IDOR delete, persist rename/delete, empty
       where: { threadId: thread.id },
     });
     expect(leftoverMessages).toBe(0);
+  });
+
+  test("default list hides archived; owner PATCH archive/unarchive; empty archive is []", async () => {
+    const { user, token } = await seedUser("archive");
+    const live = await db.thread.create({
+      data: { userId: user.id, title: "Живой диалог", mode: "ask" },
+    });
+    const hidden = await db.thread.create({
+      data: {
+        userId: user.id,
+        title: "Скрытый диалог",
+        mode: "ask",
+        archived: true,
+      },
+    });
+    const paramsLive = { params: Promise.resolve({ id: live.id }) };
+
+    const listed = await listThreads(
+      jsonRequest("http://localhost/api/threads", "GET", undefined, token),
+    );
+    expect(listed.status).toBe(200);
+    const listedJson = (await listed.json()) as {
+      threads: { id: string; title: string; archived: boolean }[];
+      error?: string;
+    };
+    expect(listedJson.error).toBeUndefined();
+    expect(listedJson.threads.some((t) => t.id === live.id)).toBe(true);
+    expect(listedJson.threads.some((t) => t.id === hidden.id)).toBe(false);
+    expect(JSON.stringify(listedJson)).not.toContain("Скрытый диалог");
+
+    const archivedList = await listThreads(
+      jsonRequest(
+        "http://localhost/api/threads?archived=1",
+        "GET",
+        undefined,
+        token,
+      ),
+    );
+    expect(archivedList.status).toBe(200);
+    const archivedJson = (await archivedList.json()) as {
+      threads: { id: string; title: string; archived: boolean }[];
+    };
+    expect(archivedJson.threads.some((t) => t.id === hidden.id)).toBe(true);
+    expect(archivedJson.threads.every((t) => t.archived)).toBe(true);
+    expect(archivedJson.threads.some((t) => t.id === live.id)).toBe(false);
+
+    const archived = await patchThread(
+      jsonRequest(
+        `http://localhost/api/threads/${live.id}`,
+        "PATCH",
+        { archived: true },
+        token,
+      ),
+      paramsLive,
+    );
+    expect(archived.status).toBe(200);
+    const archivedBody = (await archived.json()) as {
+      thread: { archived: boolean };
+    };
+    expect(archivedBody.thread.archived).toBe(true);
+
+    const afterArchive = await listThreads(
+      jsonRequest("http://localhost/api/threads", "GET", undefined, token),
+    );
+    const afterArchiveJson = (await afterArchive.json()) as {
+      threads: { id: string }[];
+      error?: string;
+    };
+    expect(afterArchiveJson.error).toBeUndefined();
+    expect(afterArchiveJson.threads).toEqual([]);
+    expect(JSON.stringify(afterArchiveJson)).not.toMatch(/пока нет|не удалось/i);
+
+    const archiveAfter = await listThreads(
+      jsonRequest(
+        "http://localhost/api/threads?archived=1",
+        "GET",
+        undefined,
+        token,
+      ),
+    );
+    const archiveAfterJson = (await archiveAfter.json()) as {
+      threads: { id: string }[];
+    };
+    expect(archiveAfterJson.threads.some((t) => t.id === live.id)).toBe(true);
+
+    const restored = await patchThread(
+      jsonRequest(
+        `http://localhost/api/threads/${live.id}`,
+        "PATCH",
+        { archived: false },
+        token,
+      ),
+      paramsLive,
+    );
+    expect(restored.status).toBe(200);
+    const restoredBody = (await restored.json()) as {
+      thread: { archived: boolean };
+    };
+    expect(restoredBody.thread.archived).toBe(false);
+
+    const back = await listThreads(
+      jsonRequest("http://localhost/api/threads", "GET", undefined, token),
+    );
+    const backJson = (await back.json()) as { threads: { id: string }[] };
+    expect(backJson.threads.some((t) => t.id === live.id)).toBe(true);
+
+    const { token: emptyToken } = await seedUser("archive-empty");
+    const emptyArchive = await listThreads(
+      jsonRequest(
+        "http://localhost/api/threads?archived=1",
+        "GET",
+        undefined,
+        emptyToken,
+      ),
+    );
+    expect(emptyArchive.status).toBe(200);
+    const emptyArchiveJson = (await emptyArchive.json()) as {
+      threads: unknown[];
+      error?: string;
+    };
+    expect(emptyArchiveJson.error).toBeUndefined();
+    expect(emptyArchiveJson.threads).toEqual([]);
+    expect(JSON.stringify(emptyArchiveJson)).not.toMatch(/пока нет|не удалось/i);
   });
 });

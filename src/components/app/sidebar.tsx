@@ -2,13 +2,16 @@
 
 /**
  * SidebarContent — logo + notifications bell, «Новый диалог», thread list
- * (rename inline / delete with confirm), collections (soon), profile menu
+ * (rename inline / archive / delete with confirm), collections (soon), profile menu
  * (theme toggle, admin panel for admins, logout) with a WS status dot.
  * Rendered inside the desktop <aside> and the mobile <Sheet>.
+ * Default list hides archived threads; «Показать архив» loads `?archived=1`.
  */
 
 import { useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   Check,
   FolderKanban,
   House,
@@ -68,11 +71,14 @@ import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
 import { useAppUi, type MainArea } from "@/lib/store";
 import {
-  THREADS_EMPTY,
-  THREADS_EMPTY_HINT,
+  THREADS_ARCHIVE_ACTION,
+  THREADS_HIDE_ARCHIVE,
   THREADS_LOAD_ERROR,
   THREADS_LOAD_ERROR_HINT,
   THREADS_RETRY,
+  THREADS_SHOW_ARCHIVE,
+  THREADS_UNARCHIVE_ACTION,
+  threadsEmptyCopy,
   threadsListView,
 } from "@/lib/thread-copy";
 import type { ThreadListItem } from "@/lib/types";
@@ -139,11 +145,14 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
     threadsLoading,
     threadsError,
     refreshThreads,
+    showArchived,
+    toggleShowArchived,
     activeThreadId,
     selectThread,
     newThread,
     deleteThread,
     renameThread,
+    archiveThread,
   } = useThreads();
   const mainArea = useAppUi((s) => s.mainArea);
   const setMainArea = useAppUi((s) => s.setMainArea);
@@ -154,6 +163,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ThreadListItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const initials = (user?.name ?? "U")
     .trim()
@@ -221,11 +231,22 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
     onNavigate?.();
   };
 
+  const handleArchive = async (thread: ThreadListItem) => {
+    if (archivingId) return;
+    setArchivingId(thread.id);
+    try {
+      await archiveThread(thread.id, !thread.archived);
+    } finally {
+      setArchivingId(null);
+    }
+  };
+
   const listView = threadsListView(
     threadsLoading,
     threadsError,
     threads.length,
   );
+  const emptyCopy = threadsEmptyCopy(showArchived);
 
   return (
     <>
@@ -284,9 +305,19 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
 
       {/* ── Threads ── */}
       <nav aria-label="Диалоги" className="flex min-h-0 flex-1 flex-col px-3">
-        <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Диалоги
-        </h3>
+        <div className="flex items-center justify-between gap-2 px-1 pb-1.5">
+          <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            {showArchived ? "Архив" : "Диалоги"}
+          </h3>
+          <button
+            type="button"
+            aria-pressed={showArchived}
+            onClick={() => void toggleShowArchived()}
+            className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            {showArchived ? THREADS_HIDE_ARCHIVE : THREADS_SHOW_ARCHIVE}
+          </button>
+        </div>
         <div className="vf-scroll min-h-0 flex-1 overflow-y-auto pb-2">
           {listView === "loading" ? (
             <div className="space-y-2 px-1 pt-1">
@@ -314,7 +345,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             </div>
           ) : listView === "empty" ? (
             <p className="px-1 pt-2 text-sm leading-relaxed text-muted-foreground">
-              {THREADS_EMPTY}. {THREADS_EMPTY_HINT}
+              {emptyCopy.title}. {emptyCopy.hint}
             </p>
           ) : (
             <ul className="space-y-1">
@@ -406,6 +437,32 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
                           aria-label={`Переименовать диалог «${thread.title}»`}
                         >
                           <Pencil className="size-3.5" aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          disabled={archivingId === thread.id}
+                          onClick={() => void handleArchive(thread)}
+                          aria-label={
+                            thread.archived
+                              ? `Вернуть диалог «${thread.title}» из архива`
+                              : `Архивировать диалог «${thread.title}»`
+                          }
+                          title={
+                            thread.archived
+                              ? THREADS_UNARCHIVE_ACTION
+                              : THREADS_ARCHIVE_ACTION
+                          }
+                        >
+                          {thread.archived ? (
+                            <ArchiveRestore
+                              className="size-3.5"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <Archive className="size-3.5" aria-hidden="true" />
+                          )}
                         </Button>
                         <Button
                           variant="ghost"

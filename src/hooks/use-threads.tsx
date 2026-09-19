@@ -39,10 +39,13 @@ import {
   THREADS_DELETE_FAILED,
   THREADS_LOAD_ERROR,
   THREADS_RENAME_FAILED,
+  composerTargetAfterArchive,
   composerTargetAfterDelete,
   renamedTitle,
   resolveSendThreadId,
+  sidebarThreadsAfterArchive,
   sidebarThreadsAfterDelete,
+  threadArchiveToast,
 } from "@/lib/thread-copy";
 import type {
   ChatMessage,
@@ -74,6 +77,9 @@ interface ThreadsContextValue {
   /** Failed list fetch — never paint this as «пока нет диалогов». */
   threadsError: string | null;
   refreshThreads: () => Promise<void>;
+  /** Sidebar is listing archived threads (`?archived=1`). */
+  showArchived: boolean;
+  toggleShowArchived: () => Promise<void>;
   activeThreadId: string | null;
   activeThread: ThreadListItem | null;
   messages: ChatMessage[];
@@ -90,6 +96,8 @@ interface ThreadsContextValue {
   newThread: () => Promise<void>;
   deleteThread: (id: string) => Promise<boolean>;
   renameThread: (id: string, title: string) => Promise<void>;
+  /** Archive or restore after PATCH — sidebar updates only on success. */
+  archiveThread: (id: string, archived: boolean) => Promise<boolean>;
   /** Switch the thread mode (ask/plan/act/review) — optimistic + PATCH. */
   updateThreadMode: (id: string, mode: ThreadMode) => Promise<void>;
   /**
@@ -169,6 +177,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const [threads, setThreads] = useState<ThreadListItem[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(true);
   const [threadsError, setThreadsError] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -203,6 +212,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const busyRef = useRef(false);
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const threadsErrorRef = useRef<string | null>(null);
+  const showArchivedRef = useRef(false);
 
   useEffect(() => {
     socketRef.current = socket;
@@ -219,6 +229,9 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     threadsErrorRef.current = threadsError;
   }, [threadsError]);
+  useEffect(() => {
+    showArchivedRef.current = showArchived;
+  }, [showArchived]);
   useEffect(() => {
     streamingRef.current = streaming;
   }, [streaming]);
@@ -326,12 +339,15 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     selectRef.current = selectThreadInternal;
   });
 
-  const refreshThreads = useCallback(async () => {
+  const refreshThreads = useCallback(async (): Promise<ThreadListItem[] | null> => {
     setThreadsLoading(true);
     setThreadsError(null);
     try {
-      const list = await api.listThreads();
+      const list = await api.listThreads({
+        archived: showArchivedRef.current,
+      });
       setThreads(list);
+      threadsRef.current = list;
       const stillValid =
         activeIdRef.current !== null &&
         list.some((t) => t.id === activeIdRef.current);
@@ -347,10 +363,48 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         setPhase(null);
         setMessagesLoading(false);
       }
+      return list;
     } catch {
       setThreadsError(THREADS_LOAD_ERROR);
+      return null;
     } finally {
       setThreadsLoading(false);
+    }
+  }, []);
+
+  const toggleShowArchived = useCallback(async () => {
+    const next = !showArchivedRef.current;
+    showArchivedRef.current = next;
+    setShowArchived(next);
+    await refreshThreads();
+  }, [refreshThreads]);
+
+  /** New live threads must not land in the archive list. */
+  const adoptLiveThread = useCallback(async (thread: ThreadListItem) => {
+    const wasArchive = showArchivedRef.current;
+    showArchivedRef.current = false;
+    setShowArchived(false);
+    if (wasArchive) {
+      try {
+        const list = await api.listThreads();
+        const next = [thread, ...list.filter((t) => t.id !== thread.id)];
+        setThreads(next);
+        threadsRef.current = next;
+      } catch {
+        const next = [
+          thread,
+          ...threadsRef.current.filter((t) => t.id !== thread.id && !t.archived),
+        ];
+        setThreads(next);
+        threadsRef.current = next;
+      }
+    } else {
+      const next = [
+        thread,
+        ...threadsRef.current.filter((t) => t.id !== thread.id),
+      ];
+      setThreads(next);
+      threadsRef.current = next;
     }
   }, []);
 
@@ -362,6 +416,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         const list = await api.listThreads();
         if (cancelled) return;
         setThreads(list);
+        threadsRef.current = list;
         setThreadsError(null);
         if (list.length > 0) {
           await selectRef.current(list[0].id, { skipCleanup: true });
@@ -392,8 +447,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     }
     try {
       const thread = await api.createThread();
-      const seq = ++selectSeqRef.current;
-      setThreads((prev) => [{ ...thread, lastMessage: null }, ...prev]);
+      ++selectSeqRef.current;
+      await adoptLiveThread({ ...thread, lastMessage: null });
       loadedRef.current = thread.id;
       activeIdRef.current = thread.id;
       setActiveThreadId(thread.id);
@@ -407,7 +462,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     } catch {
       toast.error("Не удалось создать диалог");
     }
-  }, [emitLeave, maybeDeleteEmptyThread]);
+  }, [adoptLiveThread, emitLeave, maybeDeleteEmptyThread]);
 
   /** New thread pre-bound to a project (project screen «Обсудить проект»). */
   const startProjectThread = useCallback(
@@ -419,8 +474,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       }
       try {
         const thread = await api.createThread({ projectId, title });
-        const seq = ++selectSeqRef.current;
-        setThreads((prev) => [{ ...thread, lastMessage: null }, ...prev]);
+        ++selectSeqRef.current;
+        await adoptLiveThread({ ...thread, lastMessage: null });
         loadedRef.current = thread.id;
         activeIdRef.current = thread.id;
         setActiveThreadId(thread.id);
@@ -437,15 +492,23 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [emitLeave, maybeDeleteEmptyThread],
+    [adoptLiveThread, emitLeave, maybeDeleteEmptyThread],
   );
 
   /** Home/studio chat: never keep a workspace-bound thread as the active one. */
   const ensureStudioThread = useCallback(async () => {
     if (threadsErrorRef.current) return;
+    if (showArchivedRef.current) {
+      showArchivedRef.current = false;
+      setShowArchived(false);
+      const list = await refreshThreads();
+      if (!list) return;
+    }
     const current = threadsRef.current.find((t) => t.id === activeIdRef.current);
-    if (current && current.projectId == null) return;
-    const studio = threadsRef.current.find((t) => t.projectId == null);
+    if (current && !current.archived && current.projectId == null) return;
+    const studio = threadsRef.current.find(
+      (t) => !t.archived && t.projectId == null,
+    );
     if (studio) {
       await selectThreadInternal(studio.id, { skipCleanup: true });
       return;
@@ -453,7 +516,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     try {
       const thread = await api.createThread();
       ++selectSeqRef.current;
-      setThreads((prev) => [{ ...thread, lastMessage: null }, ...prev]);
+      await adoptLiveThread({ ...thread, lastMessage: null });
       loadedRef.current = thread.id;
       activeIdRef.current = thread.id;
       setActiveThreadId(thread.id);
@@ -467,7 +530,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     } catch {
       toast.error("Не удалось открыть диалог студии");
     }
-  }, [selectThreadInternal]);
+  }, [adoptLiveThread, refreshThreads, selectThreadInternal]);
 
   /** Optimistic mode switch; reverts the chip when the PATCH fails. */
   const updateThreadMode = useCallback(
@@ -554,6 +617,61 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const archiveThread = useCallback(
+    async (id: string, archived: boolean) => {
+      let nextArchived = archived;
+      try {
+        const thread = await api.updateThread(id, { archived });
+        nextArchived = thread.archived;
+      } catch {
+        const failed = threadArchiveToast(false, archived);
+        toast.error(failed.message);
+        return false;
+      }
+      const okToast = threadArchiveToast(true, nextArchived);
+      toast.success(okToast.message);
+
+      const showingArchive = showArchivedRef.current;
+      const nextRows = sidebarThreadsAfterArchive(
+        threadsRef.current,
+        id,
+        nextArchived,
+        showingArchive,
+        true,
+      );
+      const droppedFromList = nextRows.length !== threadsRef.current.length;
+      const knownIds = threadsRef.current.map((t) => t.id);
+      const nextId = composerTargetAfterArchive(
+        activeIdRef.current,
+        id,
+        knownIds,
+        droppedFromList,
+      );
+      setThreads(nextRows);
+      threadsRef.current = nextRows;
+      if (activeIdRef.current !== id || !droppedFromList) return true;
+
+      emitLeave(id);
+      loadedRef.current = null;
+      setMessages([]);
+      setTasks([]);
+      setPhase(null);
+      setStreaming((cur) => (cur?.threadId === id ? null : cur));
+      setThinkingThreadId((cur) => (cur === id ? null : cur));
+      activeIdRef.current = nextId;
+      setActiveThreadId(nextId);
+      setMessagesLoading(Boolean(nextId));
+      if (nextId) {
+        await selectThreadInternal(nextId, { skipCleanup: true });
+      } else {
+        ++selectSeqRef.current;
+        setMessagesLoading(false);
+      }
+      return true;
+    },
+    [emitLeave, selectThreadInternal],
+  );
+
   const sendMessage = useCallback(
     async (content: string) => {
       const trimmed = content.trim();
@@ -581,7 +699,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       if (!threadId) {
         try {
           const thread = await api.createThread();
-          setThreads((prev) => [{ ...thread, lastMessage: null }, ...prev]);
+          await adoptLiveThread({ ...thread, lastMessage: null });
           loadedRef.current = thread.id;
           activeIdRef.current = thread.id;
           setActiveThreadId(thread.id);
@@ -634,7 +752,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       s.emit("message:send", { threadId, content: trimmed });
       sendLockRef.current = false;
     },
-    [bumpThread, ensureConnected],
+    [adoptLiveThread, bumpThread, ensureConnected],
   );
 
   const abortTurn = useCallback(() => {
@@ -971,6 +1089,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       threadsLoading,
       threadsError,
       refreshThreads,
+      showArchived,
+      toggleShowArchived,
       activeThreadId,
       activeThread,
       messages,
@@ -983,6 +1103,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       newThread,
       deleteThread,
       renameThread,
+      archiveThread,
       updateThreadMode,
       startProjectThread,
       ensureStudioThread,
@@ -995,6 +1116,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       threadsLoading,
       threadsError,
       refreshThreads,
+      showArchived,
+      toggleShowArchived,
       activeThreadId,
       activeThread,
       messages,
@@ -1008,6 +1131,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       newThread,
       deleteThread,
       renameThread,
+      archiveThread,
       updateThreadMode,
       startProjectThread,
       ensureStudioThread,

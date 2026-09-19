@@ -277,8 +277,9 @@ export const api = {
     return request<{ token: string; expiresIn: number }>("/api/auth/ws-token");
   },
 
-  listThreads(): Promise<ThreadListItem[]> {
-    return request<{ threads: ThreadListItem[] }>("/api/threads").then(
+  listThreads(opts?: { archived?: boolean }): Promise<ThreadListItem[]> {
+    const qs = opts?.archived ? "?archived=1" : "";
+    return request<{ threads: ThreadListItem[] }>(`/api/threads${qs}`).then(
       (r) => r.threads,
     );
   },
