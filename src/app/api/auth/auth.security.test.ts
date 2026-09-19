@@ -16,8 +16,9 @@ function jsonRequest(
   method: string,
   body?: unknown,
   bearer?: string,
+  extraHeaders?: Record<string, string>,
 ): Request {
-  const headers = new Headers({ accept: "application/json" });
+  const headers = new Headers({ accept: "application/json", ...extraHeaders });
   if (body !== undefined) headers.set("content-type", "application/json");
   if (bearer) headers.set("authorization", `Bearer ${bearer}`);
   return new Request(url, {
@@ -56,6 +57,40 @@ describe.skipIf(SKIP_PG)("auth security: rate limit, invite, admin", () => {
     expect(lastStatus).toBe(429);
   });
 
+  test("register is rate-limited after repeated attempts from the same IP", async () => {
+    const ip = "203.0.113.81";
+    const email = `reg-rate-${stamp}@example.test`;
+    resetRateLimit(`register:${ip}`);
+
+    let lastStatus = 0;
+    let lastError = "";
+    let lastRetryAfter = "";
+    for (let i = 0; i < 9; i++) {
+      const res = await register(
+        jsonRequest(
+          "http://localhost/api/auth/register",
+          "POST",
+          {
+            name: "Рег",
+            email,
+            password: "password-ok",
+          },
+          undefined,
+          { "x-forwarded-for": ip },
+        ),
+      );
+      lastStatus = res.status;
+      lastRetryAfter = res.headers.get("retry-after") ?? "";
+      const json = (await res.json()) as { error?: string; user?: { id: string } };
+      lastError = json.error ?? "";
+      if (json.user?.id) ids.push(json.user.id);
+    }
+    expect(lastStatus).toBe(429);
+    expect(lastError).toMatch(/регистрац/i);
+    expect(lastError).toMatch(/[А-Яа-яЁё]/);
+    expect(Number(lastRetryAfter)).toBeGreaterThan(0);
+  });
+
   test("invite token cannot be reused after a successful register", async () => {
     const admin = await db.user.create({
       data: {
@@ -66,6 +101,7 @@ describe.skipIf(SKIP_PG)("auth security: rate limit, invite, admin", () => {
       },
     });
     ids.push(admin.id);
+    resetRateLimit("register:local");
     const invite = await db.invite.create({
       data: {
         email: `guest-${stamp}@example.test`,

@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
 import { inviteLifecycle, sanitizeInviteRole } from "@/lib/invite-status";
+import { consumeRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,18 @@ export async function POST(req: Request) {
   }
 
   const { name, email, password, invite: inviteToken } = parsed.data;
+
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "local";
+  const gated = consumeRateLimit(`register:${ip}`, 8, 15 * 60 * 1000);
+  if (!gated.ok) {
+    return NextResponse.json(
+      { error: "Слишком много попыток регистрации. Подождите и попробуйте снова." },
+      { status: 429, headers: { "retry-after": String(gated.retryAfterSec) } },
+    );
+  }
 
   // Seed env admin first so it takes priority over "first user becomes admin".
   // GET /api/auth/bootstrap must predict this order (see firstUserBecomesAdminFromState).

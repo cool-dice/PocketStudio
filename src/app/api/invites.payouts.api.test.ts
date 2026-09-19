@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 
 import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { resetRateLimit } from "@/lib/rate-limit";
 
 import { POST as register } from "./auth/register/route";
 import { GET as peekInvite } from "./invites/[token]/route";
@@ -110,6 +111,7 @@ describe.skipIf(SKIP_PG)("invites + payouts API", () => {
     expect(peekOkJson.role).toBe("admin");
     expect(peekOkJson.email).toBe(createdJson.invite.email);
 
+    resetRateLimit("register:local");
     const registered = await register(
       jsonRequest("http://localhost/api/auth/register", "POST", {
         name: "Гость-админ",
