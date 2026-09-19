@@ -1,8 +1,11 @@
 /**
- * Enable pgvector + HNSW after `prisma db push`. Idempotent.
+ * Enable pgvector. `--ext-only` before `prisma db push` so the `vector`
+ * type exists; a full run after push adds RagChunk indexes. Idempotent.
  */
 
 import { PrismaClient } from "@prisma/client";
+
+const extOnly = process.argv.includes("--ext-only");
 
 async function main() {
   const url = process.env.DATABASE_URL ?? "";
@@ -13,6 +16,10 @@ async function main() {
   const db = new PrismaClient();
   try {
     await db.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS vector");
+    if (extOnly) {
+      console.log("pgvector: extension ready.");
+      return;
+    }
     await db.$executeRawUnsafe(`
       DO $$
       BEGIN

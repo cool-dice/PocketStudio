@@ -8,7 +8,7 @@
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
-    "db:push": "prisma db push --accept-data-loss && bun scripts/ensure-pgvector.ts",
+    "db:push": "bun scripts/ensure-pgvector.ts --ext-only && prisma db push --accept-data-loss && bun scripts/ensure-pgvector.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
