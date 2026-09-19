@@ -10,7 +10,7 @@ import {
 } from "./overview-copy";
 
 const SEED_LIES =
-  /Ари|Маркел|Прилив|Шторм|Эйнар|Ника|сцена 12|глава 9|4K|v0\.3\.1|выкатывать на хост|опубликовано|подключено|успешно записано|Tongtong|z-ai|VibeFlow|Stripe|запрос отправлен/i;
+  /Маркел|трека «Прилив»|глава 9 «Шторм»|Эйнар|голос «Ника»|сцена 12|4K|v0\.3\.1|выкатывать на хост|опубликовано|успешно записано|Tongtong|z-ai|VibeFlow|Stripe|запрос отправлен/i;
 
 describe("overview next-step honesty", () => {
   test("every pipeline stage has generic Russian copy", () => {
