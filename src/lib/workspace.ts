@@ -155,7 +155,9 @@ export async function assertInsideRoot(root: string, abs: string): Promise<void>
   try {
     rootReal = await fsp.realpath(root);
   } catch {
-    throw new WorkspaceError("Корень проекта недоступен", 500);
+    // First write: the project dir is not on disk yet. safeJoin already
+    // bound the path lexically; there is no symlink to follow.
+    return;
   }
   const rootWithSep = rootReal.endsWith(path.sep) ? rootReal : rootReal + path.sep;
 

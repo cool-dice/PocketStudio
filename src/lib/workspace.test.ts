@@ -70,4 +70,12 @@ describe("assertInsideRoot / file ops vs symlink", () => {
     expect(deleted.deleted).toBe(true);
     await expect(readWorkspaceFile(root, "src/app.ts")).rejects.toThrow(WorkspaceError);
   });
+
+  test("first write creates a missing project root", async () => {
+    root = path.join(os.tmpdir(), `ps-missing-${Date.now()}`);
+    const written = await writeWorkspaceFile(root, "README.md", "# hi\n");
+    expect(written.created).toBe(true);
+    const read = await readWorkspaceFile(root, "README.md");
+    expect(read.content).toBe("# hi\n");
+  });
 });
