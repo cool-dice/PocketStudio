@@ -32,6 +32,7 @@ export const PREVIEW_LISTING_HINT =
 
 export const PALETTE_UNCONFIGURED_HINT =
   "Откройте Админ → Модели ИИ и назначьте модель для палитры стиля.";
-export const PALETTE_GENERATE_FAILED = "Не удалось собрать палитру";
+export const PALETTE_GENERATE_FAILED =
+  "Не удалось собрать палитру — предыдущая карта на месте";
 export const PALETTE_GENERATE_FAILED_HINT =
-  "Попробуйте ещё раз или уточните бриф.";
+  "Предыдущие цвета сохранены — попробуйте ещё раз или уточните бриф.";

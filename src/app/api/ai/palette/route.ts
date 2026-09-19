@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { aiChatJson, aiErrorResponse } from "@/lib/ai";
+import {
+  aiChatJson,
+  aiErrorResponse,
+  isUnconfiguredToolError,
+  resolveToolRoute,
+  UNCONFIGURED_TOOL_MESSAGE,
+} from "@/lib/ai";
 import { PALETTE_SYSTEM } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
 import {
@@ -15,7 +21,10 @@ import { ensureWorkspace } from "@/lib/workspace-api";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-/* ── POST /api/ai/palette — собрать палитру стиля проекта (LLM) ── */
+/* ── POST /api/ai/palette — собрать палитру стиля проекта (LLM) ──
+ * Unconfigured `palette` fails immediately with UNCONFIGURED_TOOL_MESSAGE
+ * (400) — no fake swatches persist. Failed/unreadable LLM does not create
+ * a new style artifact and never deletes a previous one. */
 
 const schema = z.object({
   projectId: z.string().trim().min(1),
@@ -58,6 +67,22 @@ export async function POST(req: Request) {
   const check = await ensureWorkspace(req, projectId);
   if (!check.ok) return check.response;
 
+  try {
+    await resolveToolRoute(db, check.userId, "palette");
+  } catch (err) {
+    if (isUnconfiguredToolError(err)) {
+      return NextResponse.json(
+        { error: UNCONFIGURED_TOOL_MESSAGE },
+        { status: 400 },
+      );
+    }
+    const mapped = aiErrorResponse(
+      err,
+      "Модель вернула нечитаемую палитру — предыдущая карта на месте",
+    );
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+  }
+
   /* Бриф: данные воркспейса + пожелания пользователя. */
   const workspace = await db.project.findFirst({
     where: { id: projectId, userId: check.userId },
@@ -85,7 +110,7 @@ export async function POST(req: Request) {
   } catch (err) {
     const mapped = aiErrorResponse(
       err,
-      "Модель вернула нечитаемую палитру — попробуйте ещё раз или уточните бриф",
+      "Модель вернула нечитаемую палитру — предыдущая карта на месте",
     );
     if (mapped.status >= 500) {
       console.error(

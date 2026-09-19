@@ -53,8 +53,10 @@ export const ENTITY_PORTRAIT_FAILED_HINT =
 export const ENTITY_PORTRAIT_UNCONFIGURED_HINT =
   "Откройте Админ → Модели ИИ и назначьте модель для изображений.";
 
-export const ENTITY_DESCRIBE_FAILED = "Не удалось сгенерировать описание";
-export const ENTITY_DESCRIBE_FAILED_HINT = "Попробуйте ещё раз через минуту.";
+export const ENTITY_DESCRIBE_FAILED =
+  "Не удалось сгенерировать описание — предыдущий текст на месте.";
+export const ENTITY_DESCRIBE_FAILED_HINT =
+  "Предыдущее описание сохранено — можно попробовать ещё раз.";
 export const ENTITY_DESCRIBE_UNCONFIGURED_HINT =
   "Откройте Админ → Модели ИИ и назначьте модель для описаний.";
 

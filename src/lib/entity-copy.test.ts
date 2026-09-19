@@ -78,6 +78,8 @@ describe("entity sheet empty/error copy", () => {
     expect(ENTITY_PORTRAIT_UNCONFIGURED_HINT).toMatch(/Модели ИИ/);
     expect(ENTITY_DELETE_FAILED).toMatch(/удалить/i);
     expect(ENTITY_DESCRIBE_FAILED).toMatch(/описание/i);
+    expect(ENTITY_DESCRIBE_FAILED).toMatch(/предыдущ/i);
+    expect(ENTITY_DESCRIBE_FAILED_HINT).toMatch(/сохранен/i);
     expect(ENTITY_DESCRIBE_UNCONFIGURED_HINT).toMatch(/Модели ИИ/);
     expect(ENTITY_DESCRIBE_FAILED_HINT).not.toMatch(/Администратор ещё не настроил/);
     expect(ENTITY_DESCRIBE_FAILED).not.toBe(UNCONFIGURED_TOOL_MESSAGE);

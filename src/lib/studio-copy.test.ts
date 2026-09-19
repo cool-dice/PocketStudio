@@ -46,6 +46,7 @@ describe("studio honesty copy", () => {
     expect(PALETTE_UNCONFIGURED_HINT).toMatch(/Модели ИИ/);
     expect(PALETTE_UNCONFIGURED_HINT).toMatch(/палитр/i);
     expect(PALETTE_GENERATE_FAILED).toMatch(/палитр/i);
+    expect(PALETTE_GENERATE_FAILED).toMatch(/предыдущ/i);
     expect(PALETTE_GENERATE_FAILED).not.toMatch(/placeholder|fake|#000000/i);
   });
 });
