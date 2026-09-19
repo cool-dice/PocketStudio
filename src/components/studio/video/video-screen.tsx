@@ -27,7 +27,7 @@ import type { WorkspaceDto } from "@/lib/workspace-types";
 import { StoryboardWorkspace } from "./storyboard-workspace";
 
 const VIDEO_DESCRIPTION =
-  "Раскадровка: сцены с AI-кадрами и озвучкой + плеер сборки";
+  "Раскадровка, озвучка и сборка фильма";
 
 export function VideoScreen({
   onOpenMobileNav,

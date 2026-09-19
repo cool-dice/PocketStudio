@@ -210,7 +210,6 @@ export function DocumentsScreen({
             ? "Рукопись, сущности, альбом и аналитик — всё живьём из базы"
             : "Полки всех воркспейсов: рукописи, сущности, альбомы и аналитика"
         }
-        stage="wip"
         onOpenMobileNav={onOpenMobileNav}
       >
         <Button

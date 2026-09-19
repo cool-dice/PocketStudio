@@ -9,26 +9,28 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Clapperboard,
-  Film,
-  Loader2,
-  Plus,
-  RefreshCw,
-} from "lucide-react";
+import { Film } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { cn } from "@/lib/utils";
 import type {
   ArtifactDto,
   DocumentDto,
   DocumentSectionDto,
 } from "@/lib/workspace-types";
+import { AssembleDialog } from "./assemble-dialog";
+import type { FilmSceneSource } from "./film-compiler";
 import { SceneCard } from "./scene-card";
+import {
+  LoadErrorCard,
+  NoPlayableCard,
+  NoScenesCard,
+  NoScriptCard,
+  ScriptChipsBar,
+} from "./storyboard-panes";
 import { StoryboardPlayer } from "./storyboard-player";
 import {
   SCENE_IMAGE_SIZE,
@@ -53,6 +55,9 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
   /* Плеер сборки. */
   const [playIndex, setPlayIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+
+  /* Диалог «Сборка фильма» (настоящий WebM-рендер). */
+  const [assembleOpen, setAssembleOpen] = useState(false);
 
   const loadWorkspace = useCallback(async () => {
     setLoadError(null);
@@ -123,6 +128,17 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
   const playable = scenes.some((s) => s.imageUrl || s.voiceUrl);
   const clampedIndex =
     scenes.length > 0 ? Math.min(playIndex, scenes.length - 1) : 0;
+  /* Сцены для компилятора фильма (текст = содержимое секции). */
+  const filmScenes = useMemo<FilmSceneSource[]>(
+    () =>
+      scenes.map((s) => ({
+        imageUrl: s.imageUrl,
+        audioUrl: s.voiceUrl,
+        title: s.section.title,
+        text: s.section.content,
+      })),
+    [scenes],
+  );
 
   const handleIndexChange = useCallback((next: number) => {
     setPlayIndex(next);
@@ -293,97 +309,30 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
     [projectId, scenes],
   );
 
+  /* Фильм собран и загружен в библиотеку (AssembleDialog). */
+  const handleAssembled = useCallback((artifact: ArtifactDto) => {
+    setArtifacts((prev) => [artifact, ...prev]);
+    toast.success("Фильм собран и в библиотеке");
+  }, []);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Сценарии раскадровки */}
-      <div className="shrink-0 border-b bg-muted/30 px-4 py-2.5 sm:px-6">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Film className="size-4 shrink-0 text-primary" aria-hidden="true" />
-          {scripts === null ? (
-            <div className="flex flex-1 gap-2">
-              {[0, 1, 2].map((i) => (
-                <Skeleton key={i} className="h-7 w-32 rounded-full" />
-              ))}
-            </div>
-          ) : (
-            <div className="vf-scroll-x flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
-              {scripts.map((doc) => (
-                <button
-                  key={doc.id}
-                  type="button"
-                  onClick={() => selectScript(doc.id)}
-                  aria-current={scriptId === doc.id}
-                  title={doc.title}
-                  className={cn(
-                    "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                    scriptId === doc.id
-                      ? "border-primary/60 bg-primary/10 text-primary"
-                      : "border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground",
-                  )}
-                >
-                  <span className="truncate">{doc.title}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {scriptId ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 shrink-0 gap-1.5 px-2.5 text-xs"
-              onClick={() => void addScene()}
-              disabled={addingScene}
-              aria-label="Добавить сцену в сценарий"
-            >
-              {addingScene ? (
-                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-              ) : (
-                <Plus className="size-3.5" aria-hidden="true" />
-              )}
-              <span className="hidden sm:inline">Добавить сцену</span>
-              <span className="sm:hidden">Сцена</span>
-            </Button>
-          ) : null}
-        </div>
-      </div>
+      <ScriptChipsBar
+        scripts={scripts}
+        scriptId={scriptId}
+        onSelect={selectScript}
+        onAddScene={() => void addScene()}
+        addingScene={addingScene}
+      />
 
       {loadError ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-          <p className="text-sm text-muted-foreground">{loadError}</p>
-          <Button size="sm" variant="outline" onClick={() => void loadWorkspace()}>
-            <RefreshCw className="size-4" aria-hidden="true" />
-            Повторить
-          </Button>
-        </div>
+        <LoadErrorCard message={loadError} onRetry={() => void loadWorkspace()} />
       ) : !scriptId ? (
-        /* Нет сценария раскадровки — создание */
-        <div className="flex flex-1 items-center justify-center p-6">
-          <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border border-dashed p-8 text-center">
-            <span
-              className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary"
-              aria-hidden="true"
-            >
-              <Clapperboard className="size-6" />
-            </span>
-            <div>
-              <h2 className="text-base font-semibold">
-                Создать сценарий раскадровки
-              </h2>
-              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                Сценарий — это список сцен. В каждой сцене: текст для диктора,
-                сгенерированный кадр и озвучка. Из них плеер соберёт фильм.
-              </p>
-            </div>
-            <Button onClick={() => void createScript()} disabled={creatingScript}>
-              {creatingScript ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Plus className="size-4" aria-hidden="true" />
-              )}
-              Создать сценарий
-            </Button>
-          </div>
-        </div>
+        <NoScriptCard
+          creating={creatingScript}
+          onCreate={() => void createScript()}
+        />
       ) : (
         <main
           className="vf-scroll min-h-0 flex-1 overflow-y-auto p-4 sm:p-6"
@@ -396,24 +345,7 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
               ))}
             </div>
           ) : scenes.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed p-8 text-center">
-              <p className="text-sm text-muted-foreground">
-                В сценарии пока нет ни одной сцены
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void addScene()}
-                disabled={addingScene}
-              >
-                {addingScene ? (
-                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Plus className="size-4" aria-hidden="true" />
-                )}
-                Добавить сцену
-              </Button>
-            </div>
+            <NoScenesCard adding={addingScene} onAdd={() => void addScene()} />
           ) : (
             <>
               {/* Плеер сборки + статус — sticky сверху на достаточно высоких
@@ -428,16 +360,7 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
                     onPlayingChange={handlePlayingChange}
                   />
                 ) : (
-                  <div className="flex h-32 w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed bg-card/50 px-6 text-center">
-                    <Clapperboard
-                      className="size-5 text-muted-foreground/50"
-                      aria-hidden="true"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Пока нечего смотреть — сгенерируйте кадр или озвучку любой
-                      сцены
-                    </p>
-                  </div>
+                  <NoPlayableCard />
                 )}
                 <div className="mt-3 flex items-center gap-3 rounded-lg border bg-card px-3 py-2">
                   <span className="shrink-0 text-xs text-muted-foreground" aria-live="polite">
@@ -445,9 +368,18 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
                   </span>
                   <Progress
                     value={scenes.length ? (readyCount / scenes.length) * 100 : 0}
-                    className="h-1.5"
+                    className="h-1.5 min-w-0 flex-1"
                     aria-label="Готовность фильма"
                   />
+                  <Button
+                    size="sm"
+                    className="h-7 shrink-0 gap-1.5 border-emerald-600/50 bg-emerald-500/10 px-2.5 text-xs text-emerald-700 hover:bg-emerald-500/15 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-400"
+                    onClick={() => setAssembleOpen(true)}
+                    aria-label="Собрать фильм из сцен раскадровки"
+                  >
+                    <Film className="size-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Собрать фильм</span>
+                  </Button>
                 </div>
               </div>
 
@@ -473,6 +405,20 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
           )}
         </main>
       )}
+
+      {/* Диалог рендера фильма — только при выбранном сценарии со сценами. */}
+      {scriptId && filmScenes.length > 0 ? (
+        <AssembleDialog
+          open={assembleOpen}
+          onOpenChange={setAssembleOpen}
+          projectId={projectId}
+          scriptTitle={
+            scripts?.find((doc) => doc.id === scriptId)?.title ?? "Раскадровка"
+          }
+          scenes={filmScenes}
+          onAssembled={handleAssembled}
+        />
+      ) : null}
     </div>
   );
 }

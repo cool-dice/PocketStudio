@@ -31,6 +31,7 @@ import type {
   User,
 } from "@/lib/types";
 import type { StylePalette } from "@/lib/palette";
+import type { DawProjectDto, DawState } from "@/lib/daw-model";
 import type {
   ArtifactDto,
   ArtifactType,
@@ -76,6 +77,23 @@ function getAuthToken(): string | null {
 function authHeaders(): Record<string, string> {
   const token = getAuthToken();
   return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+/** Blob → base64 (для загрузки бинарников в /upload).
+ *  ВАЖНО: dataURL mime может содержать запятую («video/webm;codecs=vp9,opus»),
+ *  поэтому режем по ПОСЛЕДНЕЙ запятой — иначе base64 получит мусорный префикс. */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const marker = result.lastIndexOf(";base64,");
+      const start = marker >= 0 ? marker + ";base64,".length : result.lastIndexOf(",") + 1;
+      resolve(result.slice(start));
+    };
+    reader.readAsDataURL(blob);
+  });
 }
 
 export class ApiError extends Error {
@@ -618,6 +636,52 @@ export const api = {
       );
     }
     return res.blob();
+  },
+
+  /* ── DAW-студия (Фаза C) ── */
+
+  getDawState(projectId: string): Promise<DawProjectDto> {
+    return request<{ project: DawProjectDto }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/daw`,
+    ).then((r) => r.project);
+  },
+
+  saveDawState(projectId: string, state: DawState): Promise<DawProjectDto> {
+    return request<{ project: DawProjectDto }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/daw`,
+      { method: "PUT", body: JSON.stringify(state) },
+    ).then((r) => r.project);
+  },
+
+  /** Загрузка бинарника (микс/сэмпл/фильм) → файл → артефакт воркспейса. */
+  async uploadArtifact(
+    projectId: string,
+    input: {
+      blob: Blob;
+      type: "audio" | "video" | "image" | "file";
+      title: string;
+      description?: string;
+      stage?: string;
+      meta?: Record<string, unknown>;
+    },
+  ): Promise<ArtifactDto> {
+    const dataBase64 = await blobToBase64(input.blob);
+    const artifact = await request<{ artifact: ArtifactDto }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/upload`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          dataBase64,
+          mime: input.blob.type || "application/octet-stream",
+          type: input.type,
+          title: input.title,
+          description: input.description,
+          stage: input.stage,
+          meta: input.meta,
+        }),
+      },
+    ).then((r) => r.artifact);
+    return artifact;
   },
 
   listDocuments(projectId: string): Promise<DocumentDto[]> {

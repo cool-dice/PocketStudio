@@ -72,7 +72,8 @@ export function ModuleHeader({
   icon: LucideIcon;
   title: string;
   description: string;
-  stage: ModuleStage;
+  /** Бейдж стадии; отсутствует = модель функционален и в продакшн-стадии. */
+  stage?: ModuleStage;
   onOpenMobileNav: () => void;
   /** Action buttons rendered on the right (desktop) / below (mobile). */
   children?: React.ReactNode;
@@ -100,7 +101,7 @@ export function ModuleHeader({
             <h1 className="truncate text-lg font-semibold leading-tight sm:text-xl">
               {title}
             </h1>
-            <StageBadge stage={stage} />
+            {stage ? <StageBadge stage={stage} /> : null}
           </div>
           <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
             {description}

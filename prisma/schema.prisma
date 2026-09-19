@@ -144,6 +144,7 @@ model Project {
   entities  Entity[]
   artifacts Artifact[]
   findings  Finding[]
+  dawProject DawProject?
 
   @@index([userId])
 }
@@ -285,6 +286,26 @@ model Artifact {
   updatedAt   DateTime @updatedAt
 
   @@index([projectId, type])
+}
+
+// ─────────────────────────── DAW (Фаза C) ───────────────────────────
+
+/// Состояние карманной DAW-студии воркспейса (Web Audio, треки в JSON).
+model DawProject {
+  id           String  @id @default(cuid())
+  projectId    String  @unique
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bpm          Int     @default(112)
+  /// Тактов по 16 шагов (16-е доли).
+  bars         Int     @default(4)
+  masterVolume Float   @default(0.85)
+  /// Транспонирование в полутонах (-12..12).
+  transpose    Int     @default(0)
+  metronome    Boolean @default(false)
+  /// JSON DawTrack[] — дорожки с паттернами (см. src/lib/daw-model.ts).
+  tracks       String  @default("[]")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 // ─────────────────── Findings — Аналитик (PS-3.2) ───────────────────

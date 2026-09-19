@@ -88,6 +88,11 @@ export function voiceLabel(voice: unknown): string {
 /** Лимит текста озвучки (как в REST /api/ai/tts). */
 export const NARRATION_MAX_CHARS = 4000;
 
+/** 1 → «1×», 0.75 → «0,75×» — по-русски, с запятой. */
+export function formatSpeed(v: number): string {
+  return `${String(v).replace(".", ",")}×`;
+}
+
 /** Дата артефакта по-русски: «12 мая, 14:30» (+год, если не текущий). */
 export function formatNarrationDate(iso: string): string {
   const date = new Date(iso);

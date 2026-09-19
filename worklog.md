@@ -1352,3 +1352,30 @@ Stage Summary:
   - tsc src/ = 0, lint = 0, dev.log без новых ошибок. Скриншоты tool-results/ps6-*.png (5 шт).
 - Бейдж «ИИ» в истории появится, когда ИИ-инструменты начнут писать главы через PATCH (путь подготовлен).
 - NEXT: дизайн-таб «палитра» — применение к UI воркспейса; generate_image/tts_narration из чата по-отдельности; полировка UX мудборда/раскадровки; ИИ-написание глав (кнопка «Написать главу» в редакторе).
+
+---
+Task ID: PS-7
+Agent: main + субагенты 7-a / 7-b
+Task: «А согласно роадмапу?» — Фаза C (Аудио-DAW + Видео-сборка) по docs/ROADMAP.md
+
+Work Log:
+- Аудит: Фаза A ✅, PS-5 (дизайн/видео-раскадровка/монетизация/экспорт) ✅ — по роадмапу следующая незакрытая = Фаза C: DAW (п. 1–2) + сборка фильма (п. 4).
+- main (бэкенд): Prisma DawProject (projectId unique, bpm/bars/masterVolume/transpose/metronome/tracks JSON) + db:push; src/lib/daw-model.ts (типы DawTrack: drums/bass/lead/pad/voice, DrumPattern, SynthNote, VoiceClip; сид «Бит»+«Бас»; normalizeDawState для сервера; DRUM_LABELS/TRACK_KIND_LABELS/midiToFreq); API GET/PUT /api/workspaces/[id]/daw (get-or-create с сидом; PUT — нормализация+upsert); API POST /api/workspaces/[id]/upload (base64→файл→артефакт, mime allowlist, ≤25МБ); api.ts: getDawState/saveDawState/uploadArtifact + blobToBase64; saveGeneratedFile + «webm»/«mp4».
+- Субагент 7-a (DAW-фронтенд; упал по таймауту в конце, но код записан полностью, main довёл): daw-engine.ts (единый движок live+offline над BaseAudioContext: lookahead 25мс/0.12с; синтез барабанов kick/snare/hihat/clap/tom; бас lowpass/лид vibrato-LFO/пэд медленная огибающая; голос из AudioBuffer артефакта; метроном; OfflineAudioContext→WAV 16-bit PCM); daw-studio.tsx (загрузка/автосейв 900мс с индикатором, транспорт, дорожки, экспорт); daw-transport.tsx (Play/Stop, BPM 40–220, такты 1/2/4/8, тон −12..+12, метроном, мастер, «Экспорт микса»); daw-track-card.tsx (шапка: имя/mute/громкость/панорама/удаление; цвета kinds: amber/emerald/violet/teal/rose); drum-grid.tsx (5 инструментов × шаги, группы по 4, границы тактов, подсветка текущего шага); note-grid.tsx (пиано-ролл 13 строк октавы, волна+октава селекторы); voice-track-panel.tsx (Select аудио-артефактов + шаг старта); audio-library-tab.tsx (аудио-артефакты с плеерами/избранным/скачиванием/удалением). audio-screen.tsx переписан: вкладки «Озвучка»/«Студия»/«Библиотека». УДАЛЕНЫ 11 мок-файлов (daw-tab, daw-timeline, daw-data, tracks-data, track-library, player-bar, step-sequencer, sample-browser, mixer-section, clip-inspector, generation-panel) — вкладки Музыка/Подкаст/Шумы и мок-плеер убраны.
+- Субагент 7-b (сборка фильма): film-compiler.ts (canvas 1280×720/854×480 + captureStream(30) + MediaRecorder webm vp9/opus; ken-burns 1.03→1.09, кроссфейды 0.6с, титры с emerald-полоской, сцены-заглушки с номерами; аудио через MediaStreamAudioDestinationNode — тихий рендер; длительность сцены = max(озвучка, чтение 3.5–18с)+хвост; отмена через AbortSignal); assemble-dialog.tsx (настройки разрешения/титров, прогресс «Готовим кадры…/Рендерим… сцена N», таймер, отмена, результат: <video> превью + бейджи длительности/МБ/сцен + «Скачать WebM» с транслит-именем); storyboard-workspace.tsx: кнопка «Собрать фильм» + onAssembled. video-screen.tsx очищен от wip-бейджа.
+- main (багфиксы после падения субагентов):
+  - КРИТИЧЕСКИЙ: blobToBase64 резал dataURL по indexOf(",") — mime «video/webm;codecs=vp9,opus» содержит запятую ВНУТРИ кодеков → base64 получал мусорный префикс → WebM-артефакт был битым (ffprobe: EBML header parsing failed). Фикс: lastIndexOf(";base64,")+7. WAV работал (в mime нет запятой) — потому и проявилось только на видео.
+  - /upload: mime со параметрами кодеков («video/webm;codecs=vp9,opus») не матчился с allowlist → base-mime strip параметров.
+  - ModuleHeader.stage теперь optional; сняты устаревшие бейджи «В разработке» с Воркспейсов и Документов (рабочие модули); оставлены на Skills/MCP/Tools (Фазы D–E).
+  - Перезапуск Next dev (bun --hot держал старый Prisma-клиент — db.dawProject был undefined).
+  - Чистка тестовых артефактов (битый webm + тестовый сэмпл).
+
+Stage Summary:
+- БРАУЗЕРНАЯ ВЕРИФИКАЦИЯ (:81, 1280×800 + 390×844, ps2c-audio@vf.io):
+  - DAW «Студия» (ws-music-moon): сид «Бит»+«Бас» из БД; Play → плейхед «Такт 1.1→1.4 · шаг 1→16/64» (112 BPM, математика сходится), консоль чиста; toggle ячейки Бочки → «Сохраняем…»→«Сохранено» → GET daw: kick[2]=True в БД; «Экспорт микса» → WAV 1.78МБ (10.07с, 44.1кГц стерео, RMS 3492 — звук есть) → артефакт «Микс · 19.09.2026» stage «Сведение» meta daw-mix; «Библиотека»: плеер+скачать+избранное+удалить; голосовая дорожка: добавлена через «Дорожка», Select озвучки «Проверка озвучки Фазы A…», буфер декодирован, проект играет с голосом (шаг 23/64).
+  - Сборка фильма (ws-film-dwinter): «Собрать фильм» → диалог (6 сцен, 1 с кадром, 1 с озвучкой, оценка 1:43) → фазы «Готовим кадры… N/6» → «Рендерим…» → ГОТОВО: 1:45, 20.1МБ, <video> превью; артефакт «Фильм: Сценарий: Хроники…» type=video stage «Монтаж»; файл ВАЛИДЕН (ffprobe: vp9 1280×720 + opus, matroska/webm); Обзор воркспейса показывает артефакт на стадии «Монтаж», чипы чата воркспейса — «Фильм · стадия „Монтаж“».
+  - Мобайл 390: Студия (scrollW=390, гриды в vf-scroll-x), Видео (scrollW=390, кнопка «Собрать фильм» доступна).
+  - VLM (daw-play/daw-mobile/film-result): дефектов нет, вёрстка корректная. tsc src/=0, lint=0, dev.log без ошибок. Скриншоты tool-results/ps7-*.png (6 шт).
+- Фаза C по роадмапу закрыта (кроме осознанно отложенного: разложение на стемы — нет движка в песочнице; ffmpeg-видеомикс заменён MediaRecorder-сборкой — работает).
+- ДОЛГИ: тестовый юзер dev-БД; медленная загрузка сцен в фоне браузера (img.decode деприоритизируется — на живой вкладке быстро); Durationsandbox MediaRecorder ~1.6Мбит/с (HD).
+- NEXT (по роадмапу): Фаза D — MCP-реестр в БД (Интеграции: каталог → реальные конфиги, старт с GitHub/Fetch/Playwright); Фаза E — Скиллы (импорт SKILL.md), курсор-стиль правки превью; из PS-6 NEXT: ИИ-написание глав; портреты в EntitySheet уже сделаны; применение палитры к UI воркспейса.

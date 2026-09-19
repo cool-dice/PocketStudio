@@ -21,11 +21,11 @@ import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
+  formatSpeed,
   NARRATION_MAX_CHARS,
   NARRATION_VOICES,
   type NarrationVoiceId,
 } from "./narration-data";
-import { formatSpeed } from "./tracks-data";
 
 export function NarrationPanel({
   workspaceId,

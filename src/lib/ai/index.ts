@@ -37,7 +37,7 @@ function ensureGenDir(): void {
 /** Сохранить бинарник в public/gen и вернуть публичный URL. */
 export function saveGeneratedFile(
   data: Buffer,
-  ext: "png" | "wav" | "mp3",
+  ext: "png" | "wav" | "mp3" | "webm" | "mp4",
 ): string {
   ensureGenDir();
   const name = `${crypto.randomUUID()}.${ext}`;
