@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+import { securityHeaderList } from "./src/lib/security-headers";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   /* config options here */
@@ -7,6 +9,12 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  async headers() {
+    return [
+      { source: "/", headers: securityHeaderList },
+      { source: "/:path*", headers: securityHeaderList },
+    ];
+  },
 };
 
 export default nextConfig;
