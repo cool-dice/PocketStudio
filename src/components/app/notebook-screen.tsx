@@ -17,6 +17,7 @@ import {
   Menu,
   NotebookPen,
   PenLine,
+  RotateCcw,
   Sparkles,
   Star,
   Trash2,
@@ -43,6 +44,15 @@ import {
   CategoryGlyph,
   categoryColorStyle,
 } from "@/lib/category-style";
+import {
+  NOTEBOOK_EMPTY,
+  NOTEBOOK_EMPTY_HINT,
+  NOTEBOOK_FILTER_EMPTY,
+  NOTEBOOK_FILTER_EMPTY_HINT,
+  NOTEBOOK_LOAD_ERROR,
+  NOTEBOOK_LOAD_ERROR_HINT,
+} from "@/lib/note-analysis";
+import { notebookFeedView } from "@/lib/notes-list-state";
 import type { Category, Note, NoteStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -57,10 +67,12 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
     hasMore,
     categories,
     loading,
+    loadError,
     loadingMore,
     filters,
     setFilter,
     loadMore,
+    retryLoad,
     toggleFavorite,
     deleteNote,
   } = useNotes();
@@ -80,6 +92,7 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
   };
 
   const hasFilters = !isAll;
+  const feedView = notebookFeedView(loading, loadError, notes.length);
 
   return (
     <section
@@ -173,7 +186,7 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
 
       {/* ── Feed ── */}
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto">
-        {loading ? (
+        {feedView === "loading" ? (
           <div
             className="mx-auto w-full max-w-3xl space-y-4 p-4"
             aria-label="Загрузка заметок"
@@ -182,7 +195,12 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
               <Skeleton key={i} className="h-32 w-full rounded-xl" />
             ))}
           </div>
-        ) : notes.length === 0 ? (
+        ) : feedView === "error" ? (
+          <NotebookLoadError
+            message={loadError ?? NOTEBOOK_LOAD_ERROR}
+            onRetry={() => retryLoad()}
+          />
+        ) : feedView === "empty" ? (
           <EmptyState hasFilters={hasFilters} />
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-4 p-4 pb-8">
@@ -483,7 +501,44 @@ function NoteCard({
   );
 }
 
-/* ── Empty state ── */
+/* ── Empty / error states ── */
+
+function NotebookLoadError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"
+    >
+      <span
+        aria-hidden="true"
+        className="flex size-16 items-center justify-center rounded-2xl bg-destructive/10 text-destructive"
+      >
+        <AlertTriangle className="size-7" />
+      </span>
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium">{message}</p>
+        <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">
+          {NOTEBOOK_LOAD_ERROR_HINT}
+        </p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-2 rounded-xl"
+        onClick={onRetry}
+      >
+        <RotateCcw className="size-4" aria-hidden="true" />
+        Попробовать снова
+      </Button>
+    </div>
+  );
+}
 
 function EmptyState({ hasFilters }: { hasFilters: boolean }) {
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
@@ -498,12 +553,10 @@ function EmptyState({ hasFilters }: { hasFilters: boolean }) {
       </span>
       <div className="space-y-1.5">
         <p className="text-sm font-medium">
-          {hasFilters ? "Здесь пока пусто" : "Пока пусто"}
+          {hasFilters ? NOTEBOOK_FILTER_EMPTY : NOTEBOOK_EMPTY}
         </p>
         <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">
-          {hasFilters
-            ? "В этом фильтре нет заметок. Попробуйте другой фильтр или запишите новую мысль."
-            : "Запишите первую мысль через ⌘K или попросите агента в чате — всё появится здесь."}
+          {hasFilters ? NOTEBOOK_FILTER_EMPTY_HINT : NOTEBOOK_EMPTY_HINT}
         </p>
       </div>
       <Button

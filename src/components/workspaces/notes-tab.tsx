@@ -24,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { invalidateWorkspaces } from "@/hooks/use-workspaces";
 import { api, ApiError } from "@/lib/api";
 import { notesListViewState } from "@/lib/notes-list-state";
+import { NOTEBOOK_LOAD_ERROR } from "@/lib/note-analysis";
 import { useAppUi } from "@/lib/store";
 import type { Note } from "@/lib/types";
 import { shouldShowTranscription } from "@/lib/voice-copy";
@@ -73,7 +74,7 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
         setNotesWorkspaceId(id);
         setErrorWorkspaceId(id);
         setError(
-          err instanceof ApiError ? err.message : "Не удалось загрузить заметки",
+          err instanceof ApiError ? err.message : NOTEBOOK_LOAD_ERROR,
         );
       }
     })();
@@ -175,7 +176,7 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
               className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-center"
             >
               <p className="text-sm text-muted-foreground">
-                {error ?? "Не удалось загрузить заметки"}
+                {error ?? NOTEBOOK_LOAD_ERROR}
               </p>
               <Button
                 type="button"

@@ -54,11 +54,14 @@ import {
   CategoryGlyph,
   categoryColorStyle,
 } from "@/lib/category-style";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import {
   ANALYSIS_FAILED_FALLBACK,
   EMPTY_ANALYSIS_BLOCKS_MESSAGE,
+  hasUsableAnalysisBlocks,
+  NOTE_ANALYSIS_UNCONFIGURED_HINT,
 } from "@/lib/note-analysis";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
 import type { Note, NoteProjectLink, NoteStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -485,19 +488,36 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
       const updated = await api.reanalyzeNote(note.id);
       updateContextNote(updated);
       bumpNotes(); // notebook feed: status chip → «Анализ в очереди»
-    } catch {
-      updateContextNote(note);
-      toast.error("Не удалось перезапустить анализ");
+    } catch (err) {
+      const unconfigured =
+        err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+      if (unconfigured) {
+        updateContextNote({
+          ...note,
+          status: "error",
+          positive: null,
+          negative: null,
+          final: null,
+          recommendations: null,
+          analyzedAt: null,
+          errorMessage: UNCONFIGURED_TOOL_MESSAGE,
+        });
+        bumpNotes();
+        toast.error(UNCONFIGURED_TOOL_MESSAGE, {
+          description: NOTE_ANALYSIS_UNCONFIGURED_HINT,
+        });
+      } else {
+        updateContextNote(note);
+        toast.error(
+          err instanceof ApiError ? err.message : "Не удалось перезапустить анализ",
+        );
+      }
     } finally {
       setReanalyzeBusy(false);
     }
   };
 
-  const hasBlocks =
-    !!note.positive ||
-    !!note.negative ||
-    !!note.final ||
-    (note.recommendations?.length ?? 0) > 0;
+  const hasBlocks = hasUsableAnalysisBlocks(note);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

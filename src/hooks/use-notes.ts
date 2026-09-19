@@ -19,6 +19,7 @@ import { toast } from "sonner";
 
 import { useSocket, type NoteEvent } from "@/hooks/use-socket";
 import { api } from "@/lib/api";
+import { NOTEBOOK_LOAD_ERROR } from "@/lib/note-analysis";
 import { useAppUi } from "@/lib/store";
 import type { Category, Note } from "@/lib/types";
 
@@ -39,6 +40,7 @@ export function useNotes() {
   const [hasMore, setHasMore] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [filters, setFilters] = useState<NotesFilters>({
     categoryId: null,
@@ -69,7 +71,10 @@ export function useNotes() {
   const loadFirstPage = useCallback(
     async (f: NotesFilters, silent: boolean) => {
       const seq = ++seqRef.current;
-      if (!silent) setLoading(true);
+      if (!silent) {
+        setLoading(true);
+        setLoadError(null);
+      }
       try {
         const [list, cats] = await Promise.all([
           api.listNotes({
@@ -87,9 +92,16 @@ export function useNotes() {
         setTotal(list.total);
         setHasMore(list.hasMore);
         setCategories(cats);
+        setLoadError(null);
       } catch {
         if (seq === seqRef.current) {
-          toast.error("Не удалось загрузить заметки");
+          if (!silent) {
+            setNotes([]);
+            setTotal(0);
+            setHasMore(false);
+            setLoadError(NOTEBOOK_LOAD_ERROR);
+          }
+          toast.error(NOTEBOOK_LOAD_ERROR);
         }
       } finally {
         if (seq === seqRef.current) setLoading(false);
@@ -128,6 +140,10 @@ export function useNotes() {
   const refresh = useCallback(() => {
     setTick((t) => t + 1);
   }, []);
+
+  const retryLoad = useCallback(() => {
+    void loadFirstPage(filtersRef.current, false);
+  }, [loadFirstPage]);
 
   /** Patch a note in the cached list in place (WS live updates). */
   const patchNoteLocally = useCallback(
@@ -185,7 +201,7 @@ export function useNotes() {
       setTotal(list.total);
       setHasMore(list.hasMore);
     } catch {
-      toast.error("Не удалось загрузить заметки");
+      toast.error(NOTEBOOK_LOAD_ERROR);
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
@@ -239,11 +255,13 @@ export function useNotes() {
     hasMore,
     categories,
     loading,
+    loadError,
     loadingMore,
     filters,
     setFilter,
     loadMore,
     refresh,
+    retryLoad,
     patchNoteLocally,
     toggleFavorite,
     deleteNote,

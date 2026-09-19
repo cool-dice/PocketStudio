@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
-import { EMPTY_NOTE_ANALYSIS_MESSAGE, isUsableNoteText } from "@/lib/note-analysis";
+import { GatewayError } from "@/lib/ai/errors";
+import { resolveToolRoute } from "@/lib/ai/resolve";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import {
+  EMPTY_NOTE_ANALYSIS_MESSAGE,
+  failedNoteAnalysisData,
+  isUsableNoteText,
+  queuedNoteAnalysisData,
+} from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 
 export const dynamic = "force-dynamic";
@@ -10,9 +18,10 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 /**
  * POST /api/notes/[id]/analyze — re-queue a note for the LLM analysis
- * pipeline (Stage 2). Resets status to "pending" and clears the previous
- * analysis; the agent-service analyzer worker picks the note up within
- * a few seconds. Re-analysis of a processed note is a legitimate
+ * pipeline (tool id `notes`). Unconfigured models fail immediately with
+ * UNCONFIGURED_TOOL_MESSAGE and status=error — never a fake 4-block JSON.
+ * Otherwise resets status to "pending"; the agent-service analyzer worker
+ * picks the note up. Re-analysis of a processed note is a legitimate
  * "переанализировать" action.
  */
 export async function POST(req: Request, ctx: RouteContext) {
@@ -37,19 +46,28 @@ export async function POST(req: Request, ctx: RouteContext) {
     );
   }
 
+  try {
+    await resolveToolRoute(db, session.sub, "notes");
+  } catch (err) {
+    const unconfigured =
+      err instanceof GatewayError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+    if (unconfigured) {
+      const failed = await db.note.update({
+        where: { id },
+        data: failedNoteAnalysisData(UNCONFIGURED_TOOL_MESSAGE),
+        include: { category: true },
+      });
+      return NextResponse.json(
+        { error: UNCONFIGURED_TOOL_MESSAGE, note: noteWithCategory(failed) },
+        { status: 400 },
+      );
+    }
+    throw err;
+  }
+
   const note = await db.note.update({
     where: { id },
-    data: {
-      status: "pending",
-      positiveBlock: null,
-      negativeBlock: null,
-      finalBlock: null,
-      recommendations: null,
-      analysisRaw: null,
-      analyzedAt: null,
-      errorMessage: null,
-      updatedAt: new Date(),
-    },
+    data: queuedNoteAnalysisData(),
     include: { category: true },
   });
 
