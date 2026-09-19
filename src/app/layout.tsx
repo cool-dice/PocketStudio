@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppProviders } from "@/components/app/providers";
 import { LANDING_META_DESCRIPTION } from "@/lib/landing-copy";
+import { THEME_STORAGE_KEY } from "@/lib/theme-pref";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,6 +51,7 @@ export default function RootLayout({
           attribute="class"
           defaultTheme="system"
           enableSystem
+          storageKey={THEME_STORAGE_KEY}
           disableTransitionOnChange
         >
           <AppProviders>

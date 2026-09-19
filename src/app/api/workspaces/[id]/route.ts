@@ -4,11 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { workspaceCounts, workspaceDto } from "@/lib/workspace-shapes";
-import {
-  WORKSPACE_STAGES,
-  canonicalStageLabel,
-  pipelineStageIndex,
-} from "@/lib/workspace-data";
+import { resolvePipelineStagePatch } from "@/lib/pipeline-stage";
 import type { WorkspaceKind } from "@/lib/workspace-types";
 
 export const dynamic = "force-dynamic";
@@ -71,19 +67,12 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   const type = existing.type as WorkspaceKind;
-  const stages = WORKSPACE_STAGES[type] ?? WORKSPACE_STAGES.universal;
-
-  // stageIndex по названию стадии — согласованно с пайплайном типа.
-  let { stage, stageIndex } = parsed.data;
-  if (stage !== undefined) {
-    stage = canonicalStageLabel(stage);
-  }
-  if (stage !== undefined && stageIndex === undefined) {
-    const idx = pipelineStageIndex(stages, stage);
-    stageIndex = idx >= 0 ? idx + 1 : undefined;
-  }
-  if (stageIndex !== undefined && stage === undefined) {
-    stage = stages[Math.min(stageIndex, stages.length) - 1];
+  const stagePatch = resolvePipelineStagePatch(type, {
+    stage: parsed.data.stage,
+    stageIndex: parsed.data.stageIndex,
+  });
+  if (!stagePatch.ok) {
+    return NextResponse.json({ error: stagePatch.error }, { status: 400 });
   }
 
   const project = await db.project.update({
@@ -93,8 +82,9 @@ export async function PATCH(req: Request, { params }: Params) {
       ...(parsed.data.description !== undefined
         ? { description: parsed.data.description }
         : {}),
-      ...(stage !== undefined ? { stage } : {}),
-      ...(stageIndex !== undefined ? { stageIndex } : {}),
+      ...(!stagePatch.skip
+        ? { stage: stagePatch.stage, stageIndex: stagePatch.stageIndex }
+        : {}),
       ...(parsed.data.progress !== undefined
         ? { progress: parsed.data.progress }
         : {}),

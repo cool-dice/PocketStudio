@@ -3,7 +3,7 @@
 /**
  * SidebarContent — logo + notifications bell, «Новый диалог», thread list
  * (rename inline / archive / delete with confirm), collections (soon), profile menu
- * (theme toggle, admin panel for admins, logout) with a WS status dot.
+ * (display name, theme light/dark/system, admin panel for admins, logout) with a WS status dot.
  * Rendered inside the desktop <aside> and the mobile <Sheet>.
  * Default list hides archived threads; «Показать архив» loads `?archived=1`.
  */
@@ -20,23 +20,23 @@ import {
   LogOut,
   MessageSquare,
   MessageSquarePlus,
-  Moon,
   NotebookPen,
   PenLine,
   Pencil,
   Rocket,
   Search,
   Shield,
-  Sun,
   Trash2,
+  UserRound,
   Wrench,
   X,
   RefreshCw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useTheme } from "next-themes";
 
 import { Logo } from "@/components/logo";
+import { ProfileDialog } from "@/components/app/profile-dialog";
+import { ThemeMenuItems } from "@/components/app/theme-menu";
 import { NotificationsBell } from "@/components/app/notifications-bell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -59,7 +59,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
@@ -165,6 +164,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const [deleting, setDeleting] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const initials = (user?.name ?? "U")
     .trim()
     .split(/\s+/)
@@ -624,7 +624,17 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
               </span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <ThemeToggleItem />
+            <ThemeMenuItems />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                onNavigate?.();
+                setProfileOpen(true);
+              }}
+            >
+              <UserRound className="size-4" aria-hidden="true" />
+              Профиль
+            </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => {
                 onNavigate?.();
@@ -655,6 +665,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
       </div>
 
       {/* ── Delete confirmation ── */}
@@ -688,30 +699,5 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
         </AlertDialogContent>
       </AlertDialog>
     </>
-  );
-}
-
-function ThemeToggleItem() {
-  const { resolvedTheme, setTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
-  return (
-    <DropdownMenuItem
-      onSelect={(e) => {
-        // Keep the menu open when flipping the switch.
-        e.preventDefault();
-        setTheme(isDark ? "light" : "dark");
-      }}
-    >
-      <Sun className="size-4 dark:hidden" aria-hidden="true" />
-      <Moon className="hidden size-4 dark:block" aria-hidden="true" />
-      Тёмная тема
-      <Switch
-        checked={isDark}
-        aria-label="Тёмная тема"
-        className="ml-auto"
-        onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
-        onClick={(e) => e.stopPropagation()}
-      />
-    </DropdownMenuItem>
   );
 }

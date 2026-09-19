@@ -30,6 +30,8 @@ interface AuthContextValue {
   ) => Promise<User>;
   logout: () => Promise<void>;
   markOnboardingDone: () => void;
+  /** After PATCH /api/me — replace the in-memory session user. */
+  applyUser: (next: User) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -84,9 +86,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser((u) => (u ? { ...u, onboardingDone: true } : u));
   }, []);
 
+  const applyUser = useCallback((next: User) => {
+    setUser(next);
+  }, []);
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, register, logout, markOnboardingDone }}
+      value={{
+        user,
+        loading,
+        login,
+        register,
+        logout,
+        markOnboardingDone,
+        applyUser,
+      }}
     >
       {children}
     </AuthContext.Provider>

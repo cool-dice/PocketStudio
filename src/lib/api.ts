@@ -231,6 +231,16 @@ export const api = {
     return request<{ user: User }>("/api/auth/me").then((r) => r.user);
   },
 
+  updateMe(body: { name: string }): Promise<User> {
+    return request<{ user: User; token?: string }>("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }).then((r) => {
+      if (r.token) setAuthToken(r.token);
+      return r.user;
+    });
+  },
+
   authBootstrap(): Promise<{ firstUserBecomesAdmin: boolean }> {
     return request<{ firstUserBecomesAdmin: boolean }>("/api/auth/bootstrap");
   },

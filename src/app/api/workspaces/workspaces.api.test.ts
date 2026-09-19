@@ -283,3 +283,99 @@ describe.skipIf(SKIP_PG)("workspaces API: archive list honesty + favorites", () 
     expect(JSON.stringify(emptyArchiveJson)).not.toMatch(/пока нет|не удалось/i);
   });
 });
+
+describe.skipIf(SKIP_PG)("workspaces API: pipeline stage PATCH honesty", () => {
+  const ids: string[] = [];
+
+  afterAll(async () => {
+    for (const id of ids.reverse()) {
+      await db.user.delete({ where: { id } }).catch(() => {});
+    }
+  });
+
+  async function seedUser(label: string) {
+    const user = await db.user.create({
+      data: {
+        name: label,
+        email: `ws-stage-${label}-${stamp}@example.test`,
+        passwordHash: await hashPassword("password-ok"),
+        role: "client",
+      },
+    });
+    ids.push(user.id);
+    const token = await signSession({
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    });
+    return { user, token };
+  }
+
+  test("known stage advances index; unknown is 400 and not stored", async () => {
+    const { user, token } = await seedUser("film");
+    const film = await db.project.create({
+      data: {
+        userId: user.id,
+        name: "Фильм стадий",
+        type: "film",
+        origin: "workspace",
+        stage: "Сценарий",
+        stageIndex: 1,
+      },
+    });
+    const params = { params: Promise.resolve({ id: film.id }) };
+
+    const advanced = await patchWorkspace(
+      jsonRequest(
+        `http://localhost/api/workspaces/${film.id}`,
+        "PATCH",
+        { stage: "Монтаж" },
+        token,
+      ),
+      params,
+    );
+    expect(advanced.status).toBe(200);
+    const advancedJson = (await advanced.json()) as {
+      workspace: { stage: string; stageIndex: number };
+    };
+    expect(advancedJson.workspace.stage).toBe("Монтаж");
+    expect(advancedJson.workspace.stageIndex).toBe(5);
+
+    const legacy = await patchWorkspace(
+      jsonRequest(
+        `http://localhost/api/workspaces/${film.id}`,
+        "PATCH",
+        { stage: "Публикация" },
+        token,
+      ),
+      params,
+    );
+    expect(legacy.status).toBe(200);
+    const legacyJson = (await legacy.json()) as {
+      workspace: { stage: string; stageIndex: number };
+    };
+    expect(legacyJson.workspace.stage).toBe("Выпуск");
+    expect(legacyJson.workspace.stageIndex).toBe(6);
+
+    const unknown = await patchWorkspace(
+      jsonRequest(
+        `http://localhost/api/workspaces/${film.id}`,
+        "PATCH",
+        { stage: "Код" },
+        token,
+      ),
+      params,
+    );
+    expect(unknown.status).toBe(400);
+    const unknownJson = (await unknown.json()) as {
+      error: string;
+      workspace?: unknown;
+    };
+    expect(unknownJson.error).toMatch(/неизвестн/i);
+    expect(unknownJson.workspace).toBeUndefined();
+    const row = await db.project.findUnique({ where: { id: film.id } });
+    expect(row?.stage).toBe("Выпуск");
+    expect(row?.stageIndex).toBe(6);
+  });
+});

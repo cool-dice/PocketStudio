@@ -6,9 +6,16 @@
  * Auth CTAs go to `/login` (and `/login?tab=register`), not an inline dialog.
  */
 
+import { useEffect, useState } from "react";
 import { ArrowRight, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
+
+import {
+  cycleThemePref,
+  parseThemePref,
+  themeToggleAriaLabel,
+} from "@/lib/theme-pref";
 
 import { ChatFeatureSection } from "@/components/landing/chat-feature-section";
 import { HeroSection } from "@/components/landing/hero-section";
@@ -61,14 +68,17 @@ export function LandingScreen() {
 }
 
 function ThemeToggleGhost({ className }: { className?: string }) {
-  const { resolvedTheme, setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const pref = mounted ? parseThemePref(theme) : "system";
   return (
     <Button
       variant="ghost"
       size="icon"
-      aria-label="Переключить тему"
+      aria-label={themeToggleAriaLabel(pref)}
       className={className}
-      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+      onClick={() => setTheme(cycleThemePref(pref))}
     >
       <Sun className="size-4 dark:hidden" aria-hidden="true" />
       <Moon className="hidden size-4 dark:block" aria-hidden="true" />

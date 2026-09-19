@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { publicUserDto } from "@/lib/user-dto";
 
 export const dynamic = "force-dynamic";
 
@@ -15,14 +16,5 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
 
-  return NextResponse.json({
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      createdAt: user.createdAt,
-      onboardingDone: user.onboardingDone,
-    },
-  });
+  return NextResponse.json({ user: publicUserDto(user) });
 }

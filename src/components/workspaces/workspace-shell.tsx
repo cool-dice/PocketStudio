@@ -131,7 +131,7 @@ export function WorkspaceShell({
         className="min-h-0 flex-1 overflow-hidden"
       >
         {safeTab === "overview" ? (
-          <OverviewTab workspace={workspace} />
+          <OverviewTab workspace={workspace} onUpdated={reload} />
         ) : safeTab === "notes" ? (
           <NotesTab workspace={summary} />
         ) : (
