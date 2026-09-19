@@ -19,6 +19,7 @@ import {
 import { GatewayError, isGatewayError } from "./errors";
 import { resolveToolRoute } from "./resolve";
 import type { AiToolId } from "./tools";
+import { DOCUMENT_ANALYST_SYSTEM } from "./prompts";
 
 export { GatewayError, isGatewayError } from "./errors";
 export { AI_TOOLS, AI_TOOL_IDS, UNCONFIGURED_TOOL_MESSAGE } from "./tools";
@@ -225,21 +226,17 @@ export interface AnalystFindingDraft {
   sourceRef: string | null;
 }
 
-const ANALYST_SYSTEM = `Ты — редактор-аналитик текста (Аналитик студии). Тебе дают документ с главами/разделами.
-Найди до 8 самых важных проблем трёх видов:
-- contradiction — противоречие (факт А противоречит факту Б в другом месте);
-- omission — недосказанность (обещано, но не раскрыто; сцена/требование без развития);
-- inconsistency — расхождение (числа, возраст, имена, формулировки расходятся между местами).
-Отвечай СТРОГО JSON-массивом (без markdown), каждый элемент:
-{"type":"contradiction|omission|inconsistency","severity":"info|warning|critical","title":"краткое описание проблемы на русском","quote":"точная цитата из текста (если есть)","advice":"конкретный совет, что сделать","sourceRef":"глава/раздел, напр. «гл. 2 · гл. 7»"}
-Если проблем нет — верни [].`;
-
 export async function aiAnalyzeDocument(
   userId: string,
   sections: { title: string; content: string }[],
 ): Promise<AnalystFindingDraft[]> {
   const doc = sections.map((s) => `### ${s.title}\n${s.content}`).join("\n\n");
-  const raw = await aiChatJson<unknown>(userId, "document_check", ANALYST_SYSTEM, doc);
+  const raw = await aiChatJson<unknown>(
+    userId,
+    "document_check",
+    DOCUMENT_ANALYST_SYSTEM,
+    doc,
+  );
   if (!Array.isArray(raw)) return [];
   const allowedTypes = ["contradiction", "omission", "inconsistency"];
   const allowedSev = ["info", "warning", "critical"];

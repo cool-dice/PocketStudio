@@ -10,6 +10,7 @@ export const AI_TOOL_IDS = [
   "describe",
   "palette",
   "monetize",
+  "rewrite_section",
   "image",
   "tts",
   "asr",
@@ -61,6 +62,12 @@ export const AI_TOOLS: readonly AiToolDef[] = [
     id: "monetize",
     label: "План монетизации",
     description: "Продукты, каналы и прогноз дохода по воркспейсу",
+    capability: "chat",
+  },
+  {
+    id: "rewrite_section",
+    label: "Написать / переписать главу",
+    description: "Черновик, перепись и продолжение глав документов",
     capability: "chat",
   },
   {

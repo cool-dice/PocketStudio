@@ -140,6 +140,10 @@ interface AppUiState {
   /** Картинка, с которой открыли растр («Редактировать» в галерее). */
   designSourceUrl: string | null;
   openDesignEditor: (opts?: { imageUrl?: string | null }) => void;
+
+  /** Composer prefill from preview inspect / quest. */
+  composerDraft: string | null;
+  setComposerDraft: (text: string | null) => void;
 }
 
 export const useAppUi = create<AppUiState>((set, get) => ({
@@ -266,4 +270,7 @@ export const useAppUi = create<AppUiState>((set, get) => ({
     }
     set({ mainArea: "design", designSourceUrl: imageUrl });
   },
+
+  composerDraft: null,
+  setComposerDraft: (composerDraft) => set({ composerDraft }),
 }));

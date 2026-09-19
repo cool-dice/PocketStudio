@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { aiChatText, aiErrorResponse } from "@/lib/ai";
+import { sectionSystemFor } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
 import { snapshotSection } from "@/lib/section-revisions";
 import { ensureOwned } from "@/lib/workspace-api";
@@ -12,29 +13,14 @@ export const maxDuration = 120;
 
 const schema = z.object({
   sectionId: z.string().trim().min(1),
-  action: z.enum(["rewrite", "continue", "custom"]),
+  action: z.enum(["write", "rewrite", "continue", "custom"]),
   instruction: z.string().trim().max(2_000).optional(),
 });
-
-const REWRITE_SYSTEM = `Ты — редактор художественной и технической прозы студии PocketStudio.
-Тебе дают главу документа. Перепиши её целиком на русском языке: сохрани смысл, персонажей и факты, но сделай текст живее, конкретнее и ровнее по ритму.
-Не добавляй заголовок главы, не пиши пояснений «вот переписанный текст», не используй markdown-обёртки.
-Отвечай только текстом главы.`;
-
-const CONTINUE_SYSTEM = `Ты — соавтор студии PocketStudio.
-Тебе дают текущий текст главы. Напиши СЛЕДУЮЩИЕ 2–4 абзаца, которые органично продолжают сцену или мысль.
-Не повторяй уже написанное. Не добавляй заголовок. Не пиши пояснений.
-Отвечай только новым текстом продолжения.`;
-
-const CUSTOM_SYSTEM = `Ты — редактор студии PocketStudio.
-Тебе дают главу и инструкцию автора. Выполни инструкцию и верни ПОЛНЫЙ новый текст главы на русском.
-Не добавляй заголовок, не пиши пояснений, не оборачивай в markdown.
-Отвечай только текстом главы.`;
 
 function buildUserPrompt(opts: {
   title: string;
   content: string;
-  action: "rewrite" | "continue" | "custom";
+  action: "write" | "rewrite" | "continue" | "custom";
   instruction?: string;
 }): string {
   const body = opts.content.trim() || "(глава пока пустая — напиши её с нуля)";
@@ -72,18 +58,13 @@ export async function POST(req: Request) {
   const check = await ensureOwned(req, section.document);
   if (!check.ok) return check.response;
 
-  const system =
-    action === "rewrite"
-      ? REWRITE_SYSTEM
-      : action === "continue"
-        ? CONTINUE_SYSTEM
-        : CUSTOM_SYSTEM;
+  const system = sectionSystemFor(action, !section.content.trim());
 
   try {
     const generated = (
       await aiChatText(
         check.userId,
-        "agent",
+        "rewrite_section",
         system,
         buildUserPrompt({
           title: section.title,

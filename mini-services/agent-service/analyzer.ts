@@ -20,6 +20,7 @@
 import type { Server } from "socket.io";
 import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
+import { NOTES_ANALYSIS_SYSTEM } from "../../src/lib/ai/prompts";
 import { createNotification } from "./notifications";
 import {
   CATEGORY_COLORS,
@@ -34,26 +35,6 @@ const MAX_RECOMMENDATIONS = 8;
 const MAX_RECOMMENDATION_CHARS = 300;
 const MAX_CATEGORY_NAME = 40;
 const LLM_ATTEMPTS = 2;
-
-const ANALYSIS_SYSTEM_PROMPT = `Ты — вдумчивый аналитик личного блокнота. Пользователь записал сырую мысль, а ты раскладываешь её по полочкам: честно, без воды и ложного оптимизма.
-
-Проанализируй мысль и верни СТРОГО один JSON-объект без markdown-обёртки и без пояснений:
-{
-  "positive": "Сильные стороны, потенциал и что уже хорошо (60–120 слов, конкретно).",
-  "negative": "Риски, слабые места, подводные камни и честные возражения (60–120 слов).",
-  "final": "Взвешенный синтез — главный вывод из этой мысли (50–100 слов).",
-  "recommendations": ["Короткое конкретное действие", "...", "..."],
-  "category_name": "Название категории (1–2 слова)",
-  "category_color": "emerald",
-  "category_icon": "lightbulb"
-}
-
-Требования:
-- "recommendations": 3–6 пунктов, каждый — конкретное действие от первого лица, до 20 слов.
-- "category_color" — одно из: emerald, amber, rose, sky, violet, stone, teal, orange, pink, cyan.
-- "category_icon" — одно из: lightbulb, briefcase, shopping-cart, heart, brain, zap, star, book, code, rocket, wallet, coffee.
-- Если заметке уже назначена категория — верни её название в "category_name" без изменений.
-- Пиши по-русски, живым и точным языком. Не выдумывай фактов, которых нет в мысли.`;
 
 // ─────────────────────────── payload ───────────────────────────
 
@@ -248,7 +229,7 @@ async function analyzeNote(noteId: string): Promise<void> {
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= LLM_ATTEMPTS && !analysis; attempt++) {
     try {
-      const raw = await generateLLMResponse(ANALYSIS_SYSTEM_PROMPT, [
+      const raw = await generateLLMResponse(NOTES_ANALYSIS_SYSTEM, [
         { role: "user", content: userMessage },
       ], { userId: note.userId, toolId: "notes", jsonMode: true });
       analysis = parseAnalysisResult(raw);

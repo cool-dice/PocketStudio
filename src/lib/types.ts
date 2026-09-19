@@ -1,5 +1,5 @@
 /**
- * VibeFlow shared client types — mirror the REST/WS API shapes
+ * PocketStudio shared client types — mirror the REST/WS API shapes
  * (see worklog Task 1 contracts, 2-a auth routes, 2-b agent-service).
  */
 
@@ -93,6 +93,8 @@ export interface Note extends NoteAnalysis {
   transcription?: string | null;
   errorMessage?: string | null;
   category: NoteCategoryRef | null;
+  tags?: { id: string; name: string; color: string }[];
+  remindAt?: string | null;
 }
 
 export interface Category extends NoteCategoryRef {

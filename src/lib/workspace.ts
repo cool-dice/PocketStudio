@@ -568,7 +568,7 @@ print(count)
 export async function exportProjectZip(root: string): Promise<string> {
   const zipPath = path.join(
     os.tmpdir(),
-    `vibeflow-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.zip`,
+    `pocketstudio-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.zip`,
   );
 
   let printedCount = "0";

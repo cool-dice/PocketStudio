@@ -146,15 +146,31 @@ function CaptureForm() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      await api.createNote({ text: trimmed });
+      const note = await api.createNote({ text: trimmed });
       bumpNotes();
       setCaptureOpen(false);
-      toast.success("Мысль сохранена ✓", {
-        action: {
-          label: "Открыть блокнот",
-          onClick: () => useAppUi.getState().setMainArea("notebook"),
-        },
-      });
+      let quest = false;
+      try {
+        quest = sessionStorage.getItem("pocketstudio-quest") === "1";
+        if (quest) sessionStorage.removeItem("pocketstudio-quest");
+      } catch {
+        quest = false;
+      }
+      if (quest) {
+        useAppUi.getState().openNote(note, { auto: true });
+        useAppUi.getState().setMainArea("chat");
+        useAppUi.getState().setComposerDraft(
+          `Quest: помоги разобраться с первой мыслью: «${trimmed.slice(0, 120)}»`,
+        );
+        toast.success("Quest начат — штурман ждёт вашу мысль в чате");
+      } else {
+        toast.success("Мысль сохранена ✓", {
+          action: {
+            label: "Открыть блокнот",
+            onClick: () => useAppUi.getState().setMainArea("notebook"),
+          },
+        });
+      }
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : "Не удалось сохранить мысль",

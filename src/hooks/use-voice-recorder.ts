@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * useVoiceRecorder — voice capture engine for VibeFlow (Stage 2, Task 6-b).
+ * useVoiceRecorder — voice capture engine for PocketStudio (Stage 2, Task 6-b).
  *
  * State machine: idle → requesting → recording → processing → idle.
  *  - idle       — nothing captured, mic button available.

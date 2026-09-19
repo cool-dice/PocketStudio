@@ -11,6 +11,11 @@ import { api, ApiError } from "@/lib/api";
 export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
   const [title, setTitle] = useState("");
   const [price, setPrice] = useState("100");
+  const [mode, setMode] = useState<"simulated" | "live">("simulated");
+  const [adapter, setAdapter] = useState<{
+    liveKeyConfigured: boolean;
+    modes: { id: string; label: string; hint: string }[];
+  } | null>(null);
   const [offers, setOffers] = useState<
     Awaited<ReturnType<typeof api.listOffers>>
   >([]);
@@ -21,12 +26,14 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
 
   const load = useCallback(async () => {
     try {
-      const [o, p] = await Promise.all([
+      const [o, p, pay] = await Promise.all([
         api.listOffers(workspaceId),
         api.listPayouts(),
+        api.paymentsStatus().catch(() => null),
       ]);
       setOffers(o);
       setPayouts(p);
+      if (pay) setAdapter(pay);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить кабинет");
     }
@@ -48,7 +55,7 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
         projectId: workspaceId,
         title: title.trim(),
         priceCents: cents,
-        paymentMode: "simulated",
+        paymentMode: mode,
       });
       setTitle("");
       toast.success("Оффер создан");
@@ -77,8 +84,10 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
         Кабинет: офферы и выплаты
       </h2>
       <p className="text-xs text-muted-foreground">
-        Платёжный адаптер по умолчанию — simulated. Живой ключ задаётся через
-        PAYMENTS_API_KEY; админ может отметить оплату вручную.
+        Адаптер: {mode === "simulated" ? "симуляция" : "live"}.
+        {adapter?.liveKeyConfigured
+          ? " PAYMENTS_API_KEY задан."
+          : " Живой ключ не задан — live откажет честно."}
       </p>
       <div className="flex flex-wrap gap-2">
         <Input
@@ -95,6 +104,15 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
           className="w-28"
           aria-label="Цена в рублях"
         />
+        <select
+          className="h-9 rounded-md border bg-background px-2 text-sm"
+          value={mode}
+          onChange={(e) => setMode(e.target.value === "live" ? "live" : "simulated")}
+          aria-label="Режим оплаты"
+        >
+          <option value="simulated">Симуляция</option>
+          <option value="live">Live</option>
+        </select>
         <Button size="sm" onClick={() => void create()} disabled={busy}>
           <Plus className="size-3.5" /> Создать
         </Button>

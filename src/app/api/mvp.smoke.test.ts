@@ -301,4 +301,63 @@ describe("full app smoke: skills, favorite, duplicate, offers", () => {
     const invJson = (await inv.json()) as { invite: { token: string } };
     expect(invJson.invite.token.length).toBeGreaterThan(8);
   });
+
+  test("note tags, reminders, stats, payments adapter, health brand", async () => {
+    expect(token && userId).toBeTruthy();
+    const { GET: getStats } = await import("./notes/stats/route");
+    const { GET: getTags } = await import("./tags/route");
+    const { GET: getPay } = await import("./payments/status/route");
+    const { GET: health } = await import("./route");
+    const { PATCH: patchNote } = await import("./notes/[id]/route");
+
+    const noteRes = await createNote(
+      jsonRequest(
+        "http://localhost/api/notes",
+        "POST",
+        { text: "канон глаз Марины" },
+        token!,
+      ),
+    );
+    expect(noteRes.status).toBe(201);
+    const noteJson = (await noteRes.json()) as { note: { id: string } };
+
+    const tagged = await patchNote(
+      jsonRequest(
+        `http://localhost/api/notes/${noteJson.note.id}`,
+        "PATCH",
+        { tags: ["канон", "персонаж"], remindAt: new Date(Date.now() + 3600_000).toISOString() },
+        token!,
+      ),
+      { params: Promise.resolve({ id: noteJson.note.id }) },
+    );
+    expect(tagged.status).toBe(200);
+    const taggedJson = (await tagged.json()) as {
+      note: { tags: { name: string }[]; remindAt: string | null };
+    };
+    expect(taggedJson.note.tags.some((t) => t.name === "канон")).toBe(true);
+    expect(taggedJson.note.remindAt).toBeTruthy();
+
+    const stats = await getStats(
+      jsonRequest("http://localhost/api/notes/stats", "GET", undefined, token!),
+    );
+    expect(stats.status).toBe(200);
+    const statsJson = (await stats.json()) as { days: unknown[]; total14d: number };
+    expect(statsJson.days.length).toBe(14);
+
+    const tags = await getTags(
+      jsonRequest("http://localhost/api/tags", "GET", undefined, token!),
+    );
+    expect(tags.status).toBe(200);
+
+    const pay = await getPay(
+      jsonRequest("http://localhost/api/payments/status", "GET", undefined, token!),
+    );
+    expect(pay.status).toBe(200);
+    const payJson = (await pay.json()) as { defaultMode: string };
+    expect(payJson.defaultMode).toBe("simulated");
+
+    const h = await health();
+    const hJson = (await h.json()) as { service: string };
+    expect(hJson.service).toBe("pocketstudio");
+  });
 });

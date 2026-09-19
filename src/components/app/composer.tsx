@@ -54,8 +54,17 @@ export function Composer() {
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const openCreateProject = useAppUi((s) => s.openCreateProject);
   const bumpProjectFiles = useAppUi((s) => s.bumpProjectFiles);
+  const composerDraft = useAppUi((s) => s.composerDraft);
+  const setComposerDraft = useAppUi((s) => s.setComposerDraft);
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!composerDraft) return;
+    setValue(composerDraft);
+    setComposerDraft(null);
+    requestAnimationFrame(() => taRef.current?.focus());
+  }, [composerDraft, setComposerDraft]);
 
   const boundProject = getById(activeThread?.projectId ?? null);
 
@@ -174,7 +183,7 @@ export function Composer() {
               const objectUrl = URL.createObjectURL(blob);
               const anchor = document.createElement("a");
               anchor.href = objectUrl;
-              anchor.download = `vibeflow-${boundProject.name}.zip`;
+              anchor.download = `pocketstudio-${boundProject.name}.zip`;
               document.body.append(anchor);
               anchor.click();
               anchor.remove();

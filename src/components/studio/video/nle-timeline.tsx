@@ -150,6 +150,18 @@ export function NleTimeline({
     }));
     setCompiling(true);
     try {
+      const ff = await api.compileFilmFfmpeg(workspaceId);
+      if (ff.status === "built" && ff.url) {
+        toast.success("ffmpeg собрал WebM");
+        const a = document.createElement("a");
+        a.href = ff.url;
+        a.download = "montage-ffmpeg.webm";
+        a.click();
+        return;
+      }
+      toast.message(
+        ff.log?.slice(0, 140) || "ffmpeg недоступен — собираю в браузере",
+      );
       const compiled = await compileFilm(scenes, {
         width: 854,
         height: 480,

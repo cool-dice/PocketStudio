@@ -657,7 +657,7 @@ async function executeToolCall(opts: {
         );
       }
     } else if (
-      (call.tool === "write_file" || call.tool === "delete_file") &&
+      (call.tool === "write_file" || call.tool === "delete_file" || call.tool === "apply_patch") &&
       thread.projectId
     ) {
       io.to(userRoom).emit("project:updated", {
@@ -836,7 +836,7 @@ async function runAgentTurn(
       if (r && r.error === undefined) {
         toolCallsSucceeded++;
         if (
-          (call.tool === "write_file" || call.tool === "delete_file") &&
+          (call.tool === "write_file" || call.tool === "delete_file" || call.tool === "apply_patch") &&
           thread.projectId
         ) {
           turnDirty = true;

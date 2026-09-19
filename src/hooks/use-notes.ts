@@ -27,6 +27,7 @@ const PAGE_SIZE = 20;
 export interface NotesFilters {
   categoryId: string | null;
   favorite: boolean;
+  reminders: boolean;
 }
 
 export function useNotes() {
@@ -42,6 +43,7 @@ export function useNotes() {
   const [filters, setFilters] = useState<NotesFilters>({
     categoryId: null,
     favorite: false,
+    reminders: false,
   });
   const [tick, setTick] = useState(0);
 
@@ -73,6 +75,7 @@ export function useNotes() {
           api.listNotes({
             categoryId: f.categoryId ?? undefined,
             favorite: f.favorite || undefined,
+            reminders: f.reminders || undefined,
             page: 1,
             limit: PAGE_SIZE,
           }),
@@ -168,6 +171,7 @@ export function useNotes() {
       const list = await api.listNotes({
         categoryId: f.categoryId ?? undefined,
         favorite: f.favorite || undefined,
+        reminders: f.reminders || undefined,
         page,
         limit: PAGE_SIZE,
       });

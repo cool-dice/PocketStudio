@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { aiChatJson, aiErrorResponse } from "@/lib/ai";
+import { PALETTE_SYSTEM } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
 import {
   normalizeStylePalette,
@@ -28,15 +29,6 @@ const TYPE_LABELS: Record<string, string> = {
   app: "приложение",
   universal: "универсальный проект",
 };
-
-const PALETTE_SYSTEM = `Ты — арт-директор студии. По брифу проекта собери мини-гайдлайн визуального стиля.
-Верни СТРОГО один JSON-объект (без markdown, без пояснений до и после) вида:
-{"mood":"настроение проекта одной ёмкой фразой","colors":[{"hex":"#RRGGBB","name":"короткое название цвета","usage":"где и зачем использовать этот цвет"}],"fonts":{"heading":"шрифт для заголовков","body":"шрифт для основного текста","note":"одна фраза о том, как пара работает вместе"},"advice":"1–2 конкретных совета по применению стиля"}
-Требования:
-- ровно 5 или 6 согласованных цветов: фон/света, тени/глубина, 1–2 акцента; hex строго #RRGGBB;
-- названия цветов, usage, mood, advice и всё остальное — на русском языке;
-- шрифты — реально существующие пары (можно из Google Fonts), heading и body разные;
-- advice — практичный, без общих слов.`;
 
 /** LLM → нормализованная палитра; бросает ошибку, если ответ нечитаем. */
 async function requestPalette(

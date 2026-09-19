@@ -35,7 +35,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useNotes } from "@/hooks/use-notes";
+import { NotebookStats } from "@/components/app/notebook-stats";
 import { formatNoteDate } from "@/lib/format";
 import { useAppUi } from "@/lib/store";
 import {
@@ -70,7 +70,7 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
   const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
 
   const isAll =
-    filters.categoryId === null && filters.favorite === false;
+    filters.categoryId === null && filters.favorite === false && !filters.reminders;
   const isFavorite = filters.favorite;
 
   const confirmDelete = () => {
@@ -120,20 +120,38 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
         </Button>
       </header>
 
+      <NotebookStats
+        onDueClick={() =>
+          setFilter({ categoryId: null, favorite: false, reminders: true })
+        }
+      />
+
       {/* ── Filter chips ── */}
       <div className="shrink-0 border-b" role="group" aria-label="Фильтры заметок">
         <div className="vf-scroll-x flex items-center gap-2 overflow-x-auto px-3 py-2.5 sm:px-4">
           <FilterChip
             active={isAll}
-            onClick={() => setFilter({ categoryId: null, favorite: false })}
+            onClick={() =>
+              setFilter({ categoryId: null, favorite: false, reminders: false })
+            }
           >
             Все
           </FilterChip>
           <FilterChip
             active={isFavorite}
-            onClick={() => setFilter({ categoryId: null, favorite: true })}
+            onClick={() =>
+              setFilter({ categoryId: null, favorite: true, reminders: false })
+            }
           >
             <span aria-hidden="true">⭐</span> Избранные
+          </FilterChip>
+          <FilterChip
+            active={filters.reminders}
+            onClick={() =>
+              setFilter({ categoryId: null, favorite: false, reminders: true })
+            }
+          >
+            Напоминания
           </FilterChip>
           {categories.map((category) => (
             <CategoryFilterChip
@@ -141,7 +159,11 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
               category={category}
               active={filters.categoryId === category.id}
               onClick={() =>
-                setFilter({ categoryId: category.id, favorite: false })
+                setFilter({
+                  categoryId: category.id,
+                  favorite: false,
+                  reminders: false,
+                })
               }
             />
           ))}
@@ -385,6 +407,14 @@ function NoteCard({
             </span>
           )}
           <NoteStatusChip status={note.status} />
+          {(note.tags ?? []).slice(0, 3).map((tag) => (
+            <span
+              key={tag.id}
+              className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
+            >
+              #{tag.name}
+            </span>
+          ))}
         </div>
         <Button
           variant="ghost"

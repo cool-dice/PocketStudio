@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { aiChatText, aiErrorResponse } from "@/lib/ai";
+import { DESCRIBE_SYSTEM } from "@/lib/ai/prompts";
 import { ensureOwned } from "@/lib/workspace-api";
 import { db } from "@/lib/db";
 
@@ -13,11 +14,6 @@ export const maxDuration = 120;
 const schema = z.object({
   entityId: z.string().trim().min(1),
 });
-
-const DESCRIBE_SYSTEM = `Ты — сценарист и технический писатель студии. Тебе дают карточку сущности (вид, название, краткая подпись, текущее описание).
-Напиши живое, конкретное описание на русском языке: 2–3 абзаца, без списков и без повторения входных данных слово в слово.
-Для персонажей — характер и голос; для лора (локации/предметы/события/фракции/правила) — атмосферу и роль в истории; для продуктовых сущностей (пользователи/роли/требования/модули/интеграции) — практическую ценность и границы ответственности.
-Отвечай только текстом описания.`;
 
 export async function POST(req: Request) {
   const parsed = schema.safeParse(await req.json().catch(() => ({})));

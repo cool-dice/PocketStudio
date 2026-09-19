@@ -24,7 +24,7 @@ import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
 import { generateImage as gatewayGenerateImage, synthesizeSpeech, chatCompletion } from "../../src/lib/ai/connector";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
-import type { ToolContext, ToolDef } from "./tools";
+import { DOCUMENT_ANALYST_SYSTEM, sectionSystemFor } from "../../src/lib/ai/prompts";
 
 // ─────────────────────────── shared helpers ───────────────────────────
 
@@ -244,15 +244,7 @@ const createEntity: ToolDef = {
 
 // ─────────────────────────── tool: check_document ───────────────────────────
 
-/** Промпт Аналитика — копия ANALYST_SYSTEM из src/lib/ai/index.ts (Фаза A). */
-const ANALYST_SYSTEM = `Ты — редактор-аналитик текста (Аналитик студии). Тебе дают документ с главами/разделами.
-Найди до 8 самых важных проблем трёх видов:
-- contradiction — противоречие (факт А противоречит факту Б в другом месте);
-- omission — недосказанность (обещано, но не раскрыто; сцена/требование без развития);
-- inconsistency — расхождение (числа, возраст, имена, формулировки расходятся между местами).
-Отвечай СТРОГО JSON-массивом (без markdown), каждый элемент:
-{"type":"contradiction|omission|inconsistency","severity":"info|warning|critical","title":"краткое описание проблемы на русском","quote":"точная цитата из текста (если есть)","advice":"конкретный совет, что сделать","sourceRef":"глава/раздел, напр. «гл. 2 · гл. 7»"}
-Если проблем нет — верни [].`;
+/** Промпт Аналитика — src/lib/ai/prompts.ts DOCUMENT_ANALYST_SYSTEM. */
 
 /** Вытащить первый JSON-массив/объект из ответа модели (как src/lib/ai). */
 function extractJson(text: string): unknown {
@@ -386,7 +378,7 @@ const checkDocument: ToolDef = {
     // 3. LLM-анализ через шлюз (промпт как у Аналитика Next-стороны).
     let drafts: FindingDraft[];
     try {
-      const raw = await generateLLMResponse(ANALYST_SYSTEM, [
+      const raw = await generateLLMResponse(DOCUMENT_ANALYST_SYSTEM, [
         { role: "user", content: docText },
       ], { userId, toolId: "document_check", jsonMode: true });
       drafts = parseFindings(raw);
@@ -688,12 +680,12 @@ const appendSection: ToolDef = {
 const rewriteSection: ToolDef = {
   name: "rewrite_section",
   description:
-    "Переписать или продолжить главу документа. Старый текст сохраняется в истории версий.",
+    "Переписать, продолжить или написать главу документа. Старый текст сохраняется в истории версий.",
   argsSchema: {
     documentId: "id документа (необязательно, если чат в воркспейсе)",
     documentTitle: "название документа, если id неизвестен",
     sectionTitle: "заголовок главы, если не первая",
-    action: "rewrite|continue (по умолчанию rewrite)",
+    action: "write|rewrite|continue (по умолчанию rewrite; пустая глава → write)",
     instruction: "своя инструкция правки (необязательно)",
     workspaceId: "id воркспейса, если чат не привязан",
   },
@@ -702,7 +694,14 @@ const rewriteSection: ToolDef = {
       return { error: "Некорректные аргументы инструмента" };
     }
     const actionRaw = optString(args.action, 20) ?? "rewrite";
-    const action = actionRaw === "continue" ? "continue" : "rewrite";
+    const action =
+      actionRaw === "continue"
+        ? "continue"
+        : actionRaw === "write"
+          ? "write"
+          : actionRaw === "custom"
+            ? "custom"
+            : "rewrite";
     const instruction = optString(args.instruction, 2_000);
 
     let documentId = pickString(args, ["documentId"]);
@@ -740,12 +739,10 @@ const rewriteSection: ToolDef = {
       : document.sections[0];
     if (!section) return { error: "В документе нет глав" };
 
-    const system =
-      action === "continue"
-        ? "Ты соавтор. Напиши следующие 2–4 абзаца на русском, без заголовка и без пояснений."
-        : instruction
-          ? "Ты редактор. Выполни инструкцию автора и верни полный новый текст главы на русском, без заголовка и пояснений."
-          : "Ты редактор. Перепиши главу целиком на русском: живее и конкретнее, без заголовка и пояснений.";
+    const system = sectionSystemFor(
+      action,
+      !section.content.trim(),
+    );
     const user = [
       `Глава: ${section.title}`,
       "",
@@ -754,7 +751,7 @@ const rewriteSection: ToolDef = {
     ].join("\n");
 
     try {
-      const route = await resolveToolRoute(db, userId, "agent");
+      const route = await resolveToolRoute(db, userId, "rewrite_section");
       const result = await chatCompletion(route, [
         { role: "system", content: system },
         { role: "user", content: user },

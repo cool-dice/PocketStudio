@@ -62,6 +62,11 @@ export function OnboardingTour() {
       // ignore — tour is UX only
     }
     if (andQuest) {
+      try {
+        sessionStorage.setItem("pocketstudio-quest", "1");
+      } catch {
+        /* ignore */
+      }
       setCaptureOpen(true);
     }
   }

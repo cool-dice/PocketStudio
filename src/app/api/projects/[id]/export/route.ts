@@ -17,7 +17,7 @@ function contentDisposition(name: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 60) || "project";
   const utf8 = encodeURIComponent(name).replace(/["\\]/g, "");
-  return `attachment; filename="vibeflow-${ascii}.zip"; filename*=UTF-8''vibeflow-${utf8}.zip`;
+  return `attachment; filename="pocketstudio-${ascii}.zip"; filename*=UTF-8''pocketstudio-${utf8}.zip`;
 }
 
 export async function GET(

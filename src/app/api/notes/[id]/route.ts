@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 const patchNoteSchema = z.object({
   favorite: z.boolean().optional(),
   categoryId: z.string().trim().min(1).nullable().optional(),
+  remindAt: z.string().nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(32)).max(8).optional(),
   rawText: z
     .string()
     .trim()
@@ -29,7 +31,7 @@ export async function GET(req: Request, ctx: RouteContext) {
 
   const note = await db.note.findFirst({
     where: { id, userId: session.sub },
-    include: { category: true },
+    include: { category: true, tags: { include: { tag: true } } },
   });
 
   if (!note) {
@@ -87,7 +89,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     favorite?: boolean;
     categoryId?: string | null;
     rawText?: string;
-    // Editing the text invalidates the old analysis → re-queue (Stage 2).
+    remindAt?: Date | null;
     status?: string;
     positiveBlock?: null;
     negativeBlock?: null;
@@ -99,6 +101,20 @@ export async function PATCH(req: Request, ctx: RouteContext) {
   } = {};
   if (parsed.data.favorite !== undefined) data.favorite = parsed.data.favorite;
   if (parsed.data.categoryId !== undefined) data.categoryId = parsed.data.categoryId;
+  if (parsed.data.remindAt !== undefined) {
+    if (!parsed.data.remindAt) {
+      data.remindAt = null;
+    } else {
+      const at = new Date(parsed.data.remindAt);
+      if (Number.isNaN(at.getTime())) {
+        return NextResponse.json(
+          { error: "Некорректная дата напоминания" },
+          { status: 400 },
+        );
+      }
+      data.remindAt = at;
+    }
+  }
   if (parsed.data.rawText !== undefined) {
     data.rawText = parsed.data.rawText;
     data.status = "pending";
@@ -111,10 +127,26 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     data.errorMessage = null;
   }
 
+  if (parsed.data.tags) {
+    const names = parsed.data.tags
+      .map((t) => t.replace(/^#/, "").trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    await db.noteTag.deleteMany({ where: { noteId: id } });
+    for (const name of names) {
+      const tag =
+        (await db.tag.findFirst({ where: { userId: session.sub, name } })) ??
+        (await db.tag.create({
+          data: { userId: session.sub, name, color: "stone" },
+        }));
+      await db.noteTag.create({ data: { noteId: id, tagId: tag.id } });
+    }
+  }
+
   const note = await db.note.update({
     where: { id },
     data,
-    include: { category: true },
+    include: { category: true, tags: { include: { tag: true } } },
   });
 
   return NextResponse.json({ note: noteWithCategory(note) });

@@ -676,6 +676,70 @@ const writeFile: ToolDef = {
   },
 };
 
+// ─────────────────────────── tool: apply_patch ───────────────────────────
+
+const applyPatch: ToolDef = {
+  mcpAdapter: "filesystem",
+  name: "apply_patch",
+  description:
+    "Точечно заменить фрагмент файла активного проекта (oldText→newText или unified diff). Только режим «Действовать». Предпочтительнее write_file для существующих файлов.",
+  argsSchema: {
+    path: "путь к файлу внутри проекта",
+    oldText: "точный фрагмент, который заменить (если не передан patch)",
+    newText: "новый фрагмент",
+    patch: "опциональный unified diff с hunk @@",
+    replaceAll: "заменить все вхождения oldText (по умолчанию только первое)",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    if (typeof args.path !== "string" || !args.path.trim()) {
+      return { error: "Аргумент path обязателен и должен быть строкой" };
+    }
+    if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+
+    const loaded = await loadProject(userId, ctx);
+    if ("error" in loaded) return { error: loaded.error };
+
+    try {
+      const { applyPatchArgs } = await import("../../src/lib/apply-patch");
+      const root = projectRoot(loaded.project.id);
+      const file = await readWorkspaceFile(
+        root,
+        args.path.trim(),
+        MAX_AGENT_FILE_BYTES,
+      );
+      const oldText =
+        typeof args.oldText === "string" ? args.oldText : null;
+      const newText =
+        typeof args.newText === "string" ? args.newText : null;
+      const patch = typeof args.patch === "string" ? args.patch : null;
+      const { next, replacements } = applyPatchArgs({
+        content: file.content,
+        oldText,
+        newText,
+        patch,
+        replaceAll: Boolean(args.replaceAll),
+      });
+      const written = await writeWorkspaceFile(
+        root,
+        args.path.trim(),
+        next,
+        MAX_AGENT_FILE_BYTES,
+      );
+      return {
+        path: written.path,
+        replacements,
+        size: written.size,
+        message: `Правка ${written.path}: ${replacements} замен`,
+      };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+};
+
 // ─────────────────────────── tool: delete_file ───────────────────────────
 
 const deleteFile: ToolDef = {
@@ -812,6 +876,7 @@ const completeTask: ToolDef = {
 import { WORKSPACE_TOOLS } from "./workspace-tools";
 import { DESIGN_TOOLS } from "./design-tools";
 import { MCP_TOOLS } from "./mcp-tools";
+import { CANON_TOOLS } from "./canon-tools";
 
 export const TOOLS: ToolDef[] = [
   createNote,
@@ -823,9 +888,11 @@ export const TOOLS: ToolDef[] = [
   listFiles,
   readFile,
   writeFile,
+  applyPatch,
   deleteFile,
   checkpointTool,
   completeTask,
+  ...CANON_TOOLS,
   ...WORKSPACE_TOOLS,
   ...DESIGN_TOOLS,
   ...MCP_TOOLS,

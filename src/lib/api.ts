@@ -1,5 +1,5 @@
 /**
- * Typed fetch wrappers for the VibeFlow REST API (Next.js :3000).
+ * Typed fetch wrappers for the PocketStudio REST API (Next.js :3000).
  * Auth uses a hybrid scheme:
  *   1. `Authorization: Bearer <jwt>` from localStorage (primary — works inside
  *      sandbox preview iframes where third-party cookies are blocked);
@@ -287,6 +287,8 @@ export const api = {
   listNotes(params?: {
     categoryId?: string;
     favorite?: boolean;
+    reminders?: boolean;
+    tagId?: string;
     q?: string;
     page?: number;
     limit?: number;
@@ -295,6 +297,8 @@ export const api = {
     const qs = new URLSearchParams();
     if (params?.categoryId) qs.set("categoryId", params.categoryId);
     if (params?.favorite) qs.set("favorite", "1");
+    if (params?.reminders) qs.set("reminders", "1");
+    if (params?.tagId) qs.set("tagId", params.tagId);
     if (params?.q) qs.set("q", params.q);
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
@@ -322,7 +326,13 @@ export const api = {
 
   updateNote(
     id: string,
-    patch: { favorite?: boolean; categoryId?: string | null; rawText?: string },
+    patch: {
+      favorite?: boolean;
+      categoryId?: string | null;
+      rawText?: string;
+      remindAt?: string | null;
+      tags?: string[];
+    },
   ): Promise<Note> {
     return request<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -359,6 +369,20 @@ export const api = {
     return request<{ categories: Category[] }>("/api/categories").then(
       (r) => r.categories,
     );
+  },
+
+  listTags(): Promise<{ id: string; name: string; color: string; noteCount: number }[]> {
+    return request<{ tags: { id: string; name: string; color: string; noteCount: number }[] }>(
+      "/api/tags",
+    ).then((r) => r.tags);
+  },
+
+  notesStats(): Promise<{
+    days: { date: string; total: number; processed: number }[];
+    dueReminders: number;
+    total14d: number;
+  }> {
+    return request("/api/notes/stats");
   },
 
   /* ── Projects & workspace files (Stage 3) ── */
@@ -1157,7 +1181,7 @@ export const api = {
   /** ИИ: переписать / продолжить / править главу по инструкции. */
   aiRewriteSection(body: {
     sectionId: string;
-    action: "rewrite" | "continue" | "custom";
+    action: "write" | "rewrite" | "continue" | "custom";
     instruction?: string;
   }): Promise<DocumentSectionDto> {
     return request<{ section: DocumentSectionDto }>("/api/ai/section", {
@@ -1380,6 +1404,14 @@ export const api = {
     return request("/api/payouts");
   },
 
+  paymentsStatus(): Promise<{
+    defaultMode: string;
+    liveKeyConfigured: boolean;
+    modes: { id: string; label: string; hint: string }[];
+  }> {
+    return request("/api/payments/status");
+  },
+
   dockerBuild(workspaceId: string): Promise<{
     status: string;
     log: string;
@@ -1387,6 +1419,17 @@ export const api = {
   }> {
     return request(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/docker-build`,
+      { method: "POST" },
+    );
+  },
+
+  compileFilmFfmpeg(workspaceId: string): Promise<{
+    status: string;
+    log: string;
+    url: string | null;
+  }> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/compile-film`,
       { method: "POST" },
     );
   },

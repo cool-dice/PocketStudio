@@ -1,4 +1,4 @@
-// VibeFlow — unified platform schema (SQLite)
+// PocketStudio — unified platform schema (SQLite)
 // Dual storage: project sources live on disk + git; platform data lives here.
 
 generator client {
@@ -22,6 +22,8 @@ model User {
   avatarUrl    String?
   /// Первый запуск: тур onboarding пройден или пропущен.
   onboardingDone Boolean @default(false)
+  /// Quest после онбординга: id первой заметки (proto1).
+  questNoteId    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -79,6 +81,8 @@ model Note {
   category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   favorite Boolean  @default(false)
+  /// Напоминание (proto1 inbox): когда вернуть мысль в блокнот.
+  remindAt DateTime?
 
   // 4-block analysis (filled by pipeline)
   positiveBlock   String?
@@ -97,6 +101,7 @@ model Note {
 
   @@index([userId, status])
   @@index([userId, createdAt])
+  @@index([userId, remindAt])
 }
 
 model Tag {

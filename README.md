@@ -64,6 +64,15 @@ bun run dev:agent
 
 Подробный скрипт — в [`docs/MVP.md`](docs/MVP.md) § 8.
 
+## Промпты
+
+Все system-промпты собраны в [`src/lib/ai/prompts.ts`](src/lib/ai/prompts.ts)
+(заметки, аналитик, глава, палитра, монетизация, описание сущностей) и
+[`mini-services/agent-service/prompts.ts`](mini-services/agent-service/prompts.ts)
+(штурман, режимы ask/plan/act/review, планировщик, ревьюер).
+Инвентарь и решения — [`docs/PROMPTS.md`](docs/PROMPTS.md).
+Порт прототипов — [`docs/PROTOTYPE-PORT.md`](docs/PROTOTYPE-PORT.md).
+
 ## Тесты
 
 ```bash

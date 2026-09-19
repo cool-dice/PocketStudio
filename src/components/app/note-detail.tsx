@@ -324,6 +324,82 @@ function LinkedProjects({ noteId }: { noteId: string }) {
   );
 }
 
+function NoteInboxControls({ note }: { note: Note }) {
+  const updateContextNote = useAppUi((s) => s.updateContextNote);
+  const bumpNotes = useAppUi((s) => s.bumpNotes);
+  const [tagDraft, setTagDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const remindLocal = note.remindAt
+    ? note.remindAt.slice(0, 16)
+    : "";
+
+  async function saveTags() {
+    const names = tagDraft
+      .split(/[,\s]+/)
+      .map((t) => t.replace(/^#/, "").trim())
+      .filter(Boolean);
+    if (names.length === 0) return;
+    setBusy(true);
+    try {
+      const updated = await api.updateNote(note.id, {
+        tags: [...(note.tags ?? []).map((t) => t.name), ...names],
+      });
+      updateContextNote(updated);
+      bumpNotes();
+      setTagDraft("");
+    } catch {
+      toast.error("Не удалось сохранить теги");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRemind(value: string) {
+    setBusy(true);
+    try {
+      const iso = value ? new Date(value).toISOString() : null;
+      const updated = await api.updateNote(note.id, { remindAt: iso });
+      updateContextNote(updated);
+      bumpNotes();
+    } catch {
+      toast.error("Не удалось сохранить напоминание");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <label className="block text-[11px] font-medium text-muted-foreground">
+        Теги (через пробел)
+        <input
+          value={tagDraft}
+          onChange={(e) => setTagDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void saveTags();
+            }
+          }}
+          placeholder="идея клип"
+          disabled={busy}
+          className="mt-1 w-full rounded-md border bg-background px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="block text-[11px] font-medium text-muted-foreground">
+        Напоминание
+        <input
+          type="datetime-local"
+          defaultValue={remindLocal}
+          onBlur={(e) => void saveRemind(e.target.value)}
+          disabled={busy}
+          className="mt-1 w-full rounded-md border bg-background px-2 py-1 text-sm"
+        />
+      </label>
+    </div>
+  );
+}
+
 /* ── NoteDetail ── */
 
 export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
@@ -435,7 +511,16 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
             </span>
           )}
           <StatusChip status={note.status} />
+          {(note.tags ?? []).map((tag) => (
+            <span
+              key={tag.id}
+              className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
+            >
+              #{tag.name}
+            </span>
+          ))}
         </div>
+        <NoteInboxControls note={note} />
 
         <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap">
           {note.rawText || ""}

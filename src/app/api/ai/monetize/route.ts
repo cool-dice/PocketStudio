@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { aiChatJson, aiErrorResponse } from "@/lib/ai";
+import { MONETIZE_SYSTEM } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { documentDto } from "@/lib/workspace-shapes";
@@ -50,19 +51,6 @@ interface MonetizePlan {
     monthly: { label: string; amount: number }[];
   };
 }
-
-const MONETIZE_SYSTEM = `Ты — продюсер карманной творческой студии. Тебе дают воркспейс (тип, название, описание, стадия, что уже готово) и, возможно, бриф пользователя.
-Составь реалистичный, конкретный план монетизации этого творческого проекта на русском языке.
-Продукты и цены — правдоподобные для российского рынка (рубли, «490 ₽», «1 990 ₽», «9 $» для зарубежных площадок). Никакой воды: каждый пункт — конкретное действие или оффер.
-Отвечай СТРОГО одним JSON-объектом (без markdown, без пояснений вокруг) точно такой структуры:
-{
-  "concept": "1-2 предложения о том, как проект зарабатывает",
-  "products": [{"name": "название продукта", "price": "цена строкой", "note": "короткое пояснение (1 предложение)"}],
-  "channels": [{"name": "название канала/площадки", "note": "что там делать"}],
-  "steps": [{"term": "Неделя 1-2", "note": "конкретное действие"}],
-  "forecast": {"assumption": "допущение прогноза (1 предложение)", "monthly": [{"label": "Месяц 1", "amount": 15000}]}
-}
-Требования: products — ровно 4-5 штук; channels — 3-4; steps — 4-6 с нарастающими сроками (Неделя 1-2, Неделя 3-4, Месяц 2, Месяц 3); forecast.monthly — ровно 3 точки (Месяц 1, Месяц 2, Месяц 3), amount — число в рублях.`;
 
 /** Строковое поле с защитой от мусора LLM. */
 function str(value: unknown, max = 300): string {

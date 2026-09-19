@@ -36,6 +36,7 @@ import { toast } from "sonner";
 
 import { DiffDialog } from "@/components/app/diff-dialog";
 import { MonacoEditor } from "@/components/app/monaco-editor";
+import { PreviewInspector } from "@/components/app/preview-inspector";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -196,7 +197,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
       const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
       const fileName = match
         ? decodeURIComponent(match[1])
-        : `vibeflow-project-${projectId}.zip`;
+        : `pocketstudio-project-${projectId}.zip`;
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
@@ -794,20 +795,27 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
       </div>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>Превью проекта</DialogTitle>
             <DialogDescription>
-              {previewHint ?? "Статический iframe по файлам на диске."}
+              {previewHint ?? "Статический iframe по файлам на диске."} Кликните
+              элемент, чтобы инспектировать.
             </DialogDescription>
           </DialogHeader>
           {previewSrc ? (
-            <iframe
-              title="Превью проекта"
-              src={previewSrc}
-              sandbox="allow-scripts allow-same-origin"
-              className="h-[60vh] w-full rounded-lg border bg-white"
-            />
+            <div className="flex flex-col gap-3 md:flex-row">
+              <iframe
+                title="Превью проекта"
+                src={previewSrc}
+                sandbox="allow-scripts allow-same-origin"
+                className="h-[60vh] w-full rounded-lg border bg-white"
+              />
+              <PreviewInspector
+                iframeSrc={previewSrc}
+                projectName={project?.name ?? "проект"}
+              />
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground">
               Нет index.html для iframe. Это не запущенное приложение — только

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Новое приложение",
-  description: "Создано в VibeFlow — мысли становятся приложениями",
+  description: "Создано в PocketStudio — мысли становятся приложениями",
 };
 
 export default function RootLayout({

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { listWorkspaceTree, projectRoot, readWorkspaceFile } from "@/lib/workspace";
+import { injectPreviewInspect } from "@/lib/preview-inspect";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,9 @@ export async function GET(req: Request, { params }: Params) {
   if (fileParam) {
     try {
       const file = await readWorkspaceFile(root, fileParam);
-      const html = file.content;
+      const html = fileParam.endsWith(".html")
+        ? injectPreviewInspect(file.content)
+        : file.content;
       return new NextResponse(html, {
         headers: {
           "content-type": guessType(fileParam),
