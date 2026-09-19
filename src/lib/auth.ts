@@ -199,21 +199,29 @@ export function clearSessionCookies(res: { cookies: { set: (name: string, value:
   res.cookies.set(LEGACY_SESSION_COOKIE, "", clearSessionCookieOptions());
 }
 
-export function sessionCookieOptions() {
+/**
+ * `ps_session` is httpOnly. The iframe sandbox still authenticates via Bearer
+ * `ps_token` in localStorage — dual-read in getUserFromRequest / api.ts.
+ */
+export function sessionCookieSecure(nodeEnv = process.env.NODE_ENV): boolean {
+  return nodeEnv === "production";
+}
+
+export function sessionCookieOptions(nodeEnv = process.env.NODE_ENV) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: false,
+    secure: sessionCookieSecure(nodeEnv),
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
   };
 }
 
-export function clearSessionCookieOptions() {
+export function clearSessionCookieOptions(nodeEnv = process.env.NODE_ENV) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: false,
+    secure: sessionCookieSecure(nodeEnv),
     path: "/",
     maxAge: 0,
   };

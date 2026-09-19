@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { NextResponse } from "next/server";
 
 import {
   attachSessionCookie,
+  clearSessionCookieOptions,
+  clearSessionCookies,
   readSessionToken,
+  sessionCookieOptions,
+  sessionCookieSecure,
   signSession,
   verifyToken,
 } from "./auth";
@@ -110,19 +115,135 @@ describe("signSession", () => {
   });
 });
 
+type CookieOpts = ReturnType<typeof sessionCookieOptions>;
+
+function setCookieLines(res: { headers: Headers }): string[] {
+  if (typeof res.headers.getSetCookie === "function") {
+    return res.headers.getSetCookie();
+  }
+  const raw = res.headers.get("set-cookie");
+  return raw ? [raw] : [];
+}
+
+function cookieLine(res: { headers: Headers }, name: string): string {
+  const line = setCookieLines(res).find((entry) =>
+    entry.toLowerCase().startsWith(`${name.toLowerCase()}=`),
+  );
+  expect(line).toBeTruthy();
+  return line!;
+}
+
+function cookieFlags(line: string): string[] {
+  return line
+    .split(";")
+    .slice(1)
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function expectSessionCookieFlags(
+  line: string,
+  opts: { expired?: boolean; secure: boolean },
+) {
+  const flags = cookieFlags(line);
+  expect(flags).toContain("httponly");
+  expect(flags).toContain("samesite=lax");
+  expect(flags).toContain("path=/");
+  if (opts.expired) {
+    expect(flags).toContain("max-age=0");
+  } else {
+    expect(flags.some((flag) => /^max-age=\d+$/.test(flag) && flag !== "max-age=0")).toBe(
+      true,
+    );
+  }
+  expect(flags.includes("secure")).toBe(opts.secure);
+}
+
+describe("session cookie flags", () => {
+  test("httpOnly + SameSite=Lax; Secure only in production", () => {
+    expect(sessionCookieSecure("production")).toBe(true);
+    expect(sessionCookieSecure("development")).toBe(false);
+    expect(sessionCookieSecure("test")).toBe(false);
+
+    const prod = sessionCookieOptions("production");
+    expect(prod).toMatchObject({
+      httpOnly: true,
+      sameSite: "lax",
+      secure: true,
+      path: "/",
+    });
+    expect(prod.maxAge).toBeGreaterThan(0);
+
+    const nonProd = sessionCookieOptions("test");
+    expect(nonProd.httpOnly).toBe(true);
+    expect(nonProd.sameSite).toBe("lax");
+    expect(nonProd.secure).toBe(false);
+
+    const clearProd = clearSessionCookieOptions("production");
+    expect(clearProd.httpOnly).toBe(true);
+    expect(clearProd.sameSite).toBe("lax");
+    expect(clearProd.secure).toBe(true);
+    expect(clearProd.maxAge).toBe(0);
+  });
+
+  test("login Set-Cookie writes httpOnly Lax ps_session (Secure in production)", () => {
+    const live = NextResponse.json({ token: "tok-live" });
+    attachSessionCookie(live, "tok-live");
+    const liveLine = cookieLine(live, SESSION_COOKIE);
+    expect(liveLine).toContain("tok-live");
+    expectSessionCookieFlags(liveLine, {
+      secure: sessionCookieSecure(),
+    });
+    const expiredLegacy = cookieLine(live, LEGACY_SESSION_COOKIE);
+    expectSessionCookieFlags(expiredLegacy, {
+      expired: true,
+      secure: sessionCookieSecure(),
+    });
+
+    const prod = NextResponse.json({ token: "tok-prod" });
+    prod.cookies.set(SESSION_COOKIE, "tok-prod", sessionCookieOptions("production"));
+    expectSessionCookieFlags(cookieLine(prod, SESSION_COOKIE), { secure: true });
+  });
+
+  test("logout Set-Cookie expires ps_session with the same flags", () => {
+    const live = NextResponse.json({ ok: true });
+    clearSessionCookies(live);
+    expectSessionCookieFlags(cookieLine(live, SESSION_COOKIE), {
+      expired: true,
+      secure: sessionCookieSecure(),
+    });
+    expectSessionCookieFlags(cookieLine(live, LEGACY_SESSION_COOKIE), {
+      expired: true,
+      secure: sessionCookieSecure(),
+    });
+
+    const prod = NextResponse.json({ ok: true });
+    prod.cookies.set(SESSION_COOKIE, "", clearSessionCookieOptions("production"));
+    expectSessionCookieFlags(cookieLine(prod, SESSION_COOKIE), {
+      expired: true,
+      secure: true,
+    });
+  });
+});
+
 describe("attachSessionCookie", () => {
   test("writes ps_session and expires vf_session", () => {
-    const store = new Map<string, { value: string; maxAge?: number }>();
+    const store = new Map<string, { value: string; opts: CookieOpts }>();
     const res = {
       cookies: {
-        set(name: string, value: string, opts: { maxAge?: number }) {
-          store.set(name, { value, maxAge: opts.maxAge });
+        set(name: string, value: string, opts: CookieOpts) {
+          store.set(name, { value, opts });
         },
       },
     };
     attachSessionCookie(res, "tok-123");
     expect(store.get(SESSION_COOKIE)?.value).toBe("tok-123");
+    expect(store.get(SESSION_COOKIE)?.opts).toMatchObject({
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+    });
     expect(store.get(LEGACY_SESSION_COOKIE)?.value).toBe("");
-    expect(store.get(LEGACY_SESSION_COOKIE)?.maxAge).toBe(0);
+    expect(store.get(LEGACY_SESSION_COOKIE)?.opts.maxAge).toBe(0);
   });
 });
