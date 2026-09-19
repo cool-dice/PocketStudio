@@ -1129,7 +1129,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ entityId }),
     });
-  }
+  },
 
   /** ИИ: переписать / продолжить / править главу по инструкции. */
   aiRewriteSection(body: {
