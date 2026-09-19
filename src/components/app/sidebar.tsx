@@ -28,6 +28,7 @@ import {
   Trash2,
   Wrench,
   X,
+  RefreshCw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -66,6 +67,14 @@ import { useNotes } from "@/hooks/use-notes";
 import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
 import { useAppUi, type MainArea } from "@/lib/store";
+import {
+  THREADS_EMPTY,
+  THREADS_EMPTY_HINT,
+  THREADS_LOAD_ERROR,
+  THREADS_LOAD_ERROR_HINT,
+  THREADS_RETRY,
+  threadsListView,
+} from "@/lib/thread-copy";
 import type { ThreadListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -128,6 +137,8 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const {
     threads,
     threadsLoading,
+    threadsError,
+    refreshThreads,
     activeThreadId,
     selectThread,
     newThread,
@@ -142,6 +153,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ThreadListItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [creating, setCreating] = useState(false);
   const initials = (user?.name ?? "U")
     .trim()
@@ -199,13 +211,21 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
     setRenamingId(null);
   };
 
-  const confirmDelete = () => {
-    if (deleteTarget) {
-      onNavigate?.();
-      void deleteThread(deleteTarget.id);
-    }
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    const ok = await deleteThread(deleteTarget.id);
+    setDeleting(false);
+    if (!ok) return;
     setDeleteTarget(null);
+    onNavigate?.();
   };
+
+  const listView = threadsListView(
+    threadsLoading,
+    threadsError,
+    threads.length,
+  );
 
   return (
     <>
@@ -268,15 +288,33 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
           Диалоги
         </h3>
         <div className="vf-scroll min-h-0 flex-1 overflow-y-auto pb-2">
-          {threadsLoading ? (
+          {listView === "loading" ? (
             <div className="space-y-2 px-1 pt-1">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full rounded-lg" />
               ))}
             </div>
-          ) : threads.length === 0 ? (
+          ) : listView === "error" ? (
+            <div className="flex flex-col items-start gap-2 px-1 pt-2">
+              <p className="text-sm font-medium">
+                {threadsError ?? THREADS_LOAD_ERROR}
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {THREADS_LOAD_ERROR_HINT}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-1"
+                onClick={() => void refreshThreads()}
+              >
+                <RefreshCw className="size-3.5" aria-hidden="true" />
+                {THREADS_RETRY}
+              </Button>
+            </div>
+          ) : listView === "empty" ? (
             <p className="px-1 pt-2 text-sm leading-relaxed text-muted-foreground">
-              Пока нет диалогов. Начните новый — и он появится здесь.
+              {THREADS_EMPTY}. {THREADS_EMPTY_HINT}
             </p>
           ) : (
             <ul className="space-y-1">
@@ -566,7 +604,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
+          if (!open && !deleting) setDeleteTarget(null);
         }}
       >
         <AlertDialogContent>
@@ -578,12 +616,16 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Отмена</AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmDelete}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDelete();
+              }}
+              disabled={deleting}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
-              Удалить
+              {deleting ? "Удаляем…" : "Удалить"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

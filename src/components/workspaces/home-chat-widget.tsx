@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useThreads } from "@/hooks/use-threads";
 import { MAX_MESSAGE_LENGTH } from "@/lib/types";
+import { THREADS_LOAD_ERROR, THREADS_LOAD_ERROR_HINT } from "@/lib/thread-copy";
 import { useAppUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/lib/types";
@@ -47,6 +48,7 @@ export function HomeChatWidget() {
     sendMessage,
     ensureStudioThread,
     threadsLoading,
+    threadsError,
   } = useThreads();
   const setMainArea = useAppUi((s) => s.setMainArea);
 
@@ -58,9 +60,9 @@ export function HomeChatWidget() {
   const tail = studioScoped ? messages.slice(-TAIL) : [];
 
   useEffect(() => {
-    if (threadsLoading) return;
+    if (threadsLoading || threadsError) return;
     void ensureStudioThread();
-  }, [threadsLoading, ensureStudioThread, activeThread?.projectId]);
+  }, [threadsLoading, threadsError, ensureStudioThread, activeThread?.projectId]);
 
   // Прижмаем список к низу при новых сообщениях/стриминге.
   useEffect(() => {
@@ -68,10 +70,11 @@ export function HomeChatWidget() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, thinking, messagesLoading]);
 
-  const canSend = !busy && value.trim().length > 0;
+  const canSend = !busy && !threadsError && value.trim().length > 0;
 
   const submit = async () => {
     if (!canSend) return;
+    if (threadsError) return;
     const text = value.trim();
     setValue("");
     await ensureStudioThread();
@@ -128,7 +131,14 @@ export function HomeChatWidget() {
         ref={listRef}
         className="vf-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-4"
       >
-        {messagesLoading || !studioScoped ? (
+        {threadsError ? (
+          <div className="flex flex-col items-start gap-1 py-4">
+            <p className="text-sm font-medium">{THREADS_LOAD_ERROR}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {THREADS_LOAD_ERROR_HINT}
+            </p>
+          </div>
+        ) : messagesLoading || !studioScoped ? (
           <div className="space-y-3">
             <Skeleton className="h-8 w-2/3" />
             <Skeleton className="ml-auto h-8 w-1/2" />
@@ -160,7 +170,7 @@ export function HomeChatWidget() {
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={busy}
+            disabled={busy || Boolean(threadsError)}
             maxLength={MAX_MESSAGE_LENGTH}
             placeholder={busy ? "Студия печатает…" : "Спросите студию…"}
             className="vf-scroll max-h-24 min-h-9 flex-1 resize-none self-center bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"

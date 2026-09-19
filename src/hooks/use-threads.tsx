@@ -35,6 +35,15 @@ import {
   shouldBlockSend,
   shouldKeepBusyOnSocketError,
 } from "@/lib/chat-send-guard";
+import {
+  THREADS_DELETE_FAILED,
+  THREADS_LOAD_ERROR,
+  THREADS_RENAME_FAILED,
+  composerTargetAfterDelete,
+  renamedTitle,
+  resolveSendThreadId,
+  sidebarThreadsAfterDelete,
+} from "@/lib/thread-copy";
 import type {
   ChatMessage,
   Message,
@@ -62,6 +71,9 @@ import { useSocket } from "@/hooks/use-socket";
 interface ThreadsContextValue {
   threads: ThreadListItem[];
   threadsLoading: boolean;
+  /** Failed list fetch — never paint this as «пока нет диалогов». */
+  threadsError: string | null;
+  refreshThreads: () => Promise<void>;
   activeThreadId: string | null;
   activeThread: ThreadListItem | null;
   messages: ChatMessage[];
@@ -76,7 +88,7 @@ interface ThreadsContextValue {
   tasks: Task[];
   selectThread: (id: string) => Promise<void>;
   newThread: () => Promise<void>;
-  deleteThread: (id: string) => Promise<void>;
+  deleteThread: (id: string) => Promise<boolean>;
   renameThread: (id: string, title: string) => Promise<void>;
   /** Switch the thread mode (ask/plan/act/review) — optimistic + PATCH. */
   updateThreadMode: (id: string, mode: ThreadMode) => Promise<void>;
@@ -156,6 +168,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
 
   const [threads, setThreads] = useState<ThreadListItem[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(true);
+  const [threadsError, setThreadsError] = useState<string | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -188,6 +201,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const sendLockRef = useRef(false);
   const abortingRef = useRef<string | null>(null);
   const busyRef = useRef(false);
+  const deletedIdsRef = useRef<Set<string>>(new Set());
+  const threadsErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     socketRef.current = socket;
@@ -201,6 +216,9 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     threadsRef.current = threads;
   }, [threads]);
+  useEffect(() => {
+    threadsErrorRef.current = threadsError;
+  }, [threadsError]);
   useEffect(() => {
     streamingRef.current = streaming;
   }, [streaming]);
@@ -236,7 +254,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     if (streamingRef.current?.threadId === threadId) return;
     try {
       await api.deleteThread(threadId);
-      setThreads((prev) => prev.filter((t) => t.id !== threadId));
+      deletedIdsRef.current.add(threadId);
+      setThreads((prev) => sidebarThreadsAfterDelete(prev, threadId, true));
     } catch {
       // Keep the thread if the request fails — harmless.
     }
@@ -250,12 +269,15 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const selectThreadInternal = useCallback(
     async (id: string, opts?: { skipCleanup?: boolean }) => {
       const prevId = activeIdRef.current;
-      if (prevId === id) return;
+      // Same id with messages already loaded is a no-op. After deleting the
+      // active thread we clear loadedRef so the next row still hydrates even
+      // if we pointed the composer at it synchronously.
+      if (prevId === id && loadedRef.current === id) return;
 
-      if (prevId && !opts?.skipCleanup) {
+      if (prevId && prevId !== id && !opts?.skipCleanup) {
         await maybeDeleteEmptyThread(prevId);
       }
-      if (prevId) emitLeave(prevId);
+      if (prevId && prevId !== id) emitLeave(prevId);
 
       const seq = ++selectSeqRef.current;
       loadedRef.current = null;
@@ -304,6 +326,34 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     selectRef.current = selectThreadInternal;
   });
 
+  const refreshThreads = useCallback(async () => {
+    setThreadsLoading(true);
+    setThreadsError(null);
+    try {
+      const list = await api.listThreads();
+      setThreads(list);
+      const stillValid =
+        activeIdRef.current !== null &&
+        list.some((t) => t.id === activeIdRef.current);
+      if (!stillValid && list.length > 0) {
+        await selectRef.current(list[0].id, { skipCleanup: true });
+      }
+      if (!stillValid && list.length === 0) {
+        activeIdRef.current = null;
+        loadedRef.current = null;
+        setActiveThreadId(null);
+        setMessages([]);
+        setTasks([]);
+        setPhase(null);
+        setMessagesLoading(false);
+      }
+    } catch {
+      setThreadsError(THREADS_LOAD_ERROR);
+    } finally {
+      setThreadsLoading(false);
+    }
+  }, []);
+
   // Initial load: thread list + auto-select the most recent thread.
   useEffect(() => {
     let cancelled = false;
@@ -312,11 +362,12 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         const list = await api.listThreads();
         if (cancelled) return;
         setThreads(list);
+        setThreadsError(null);
         if (list.length > 0) {
           await selectRef.current(list[0].id, { skipCleanup: true });
         }
       } catch {
-        if (!cancelled) toast.error("Не удалось загрузить список диалогов");
+        if (!cancelled) setThreadsError(THREADS_LOAD_ERROR);
       } finally {
         if (!cancelled) setThreadsLoading(false);
       }
@@ -391,6 +442,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
 
   /** Home/studio chat: never keep a workspace-bound thread as the active one. */
   const ensureStudioThread = useCallback(async () => {
+    if (threadsErrorRef.current) return;
     const current = threadsRef.current.find((t) => t.id === activeIdRef.current);
     if (current && current.projectId == null) return;
     const studio = threadsRef.current.find((t) => t.projectId == null);
@@ -443,26 +495,37 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       try {
         await api.deleteThread(id);
       } catch {
-        toast.error("Не удалось удалить диалог");
-        return;
+        toast.error(THREADS_DELETE_FAILED);
+        return false;
       }
-      setThreads((prev) => prev.filter((t) => t.id !== id));
-      if (activeIdRef.current === id) {
-        emitLeave(id);
-        loadedRef.current = null;
-        const next = threadsRef.current.find((t) => t.id !== id);
-        if (next) {
-          await selectThreadInternal(next.id, { skipCleanup: true });
-        } else {
-          const seq = ++selectSeqRef.current;
-          activeIdRef.current = null;
-          setActiveThreadId(null);
-          setMessages([]);
-          setTasks([]);
-          setPhase(null);
-          setMessagesLoading(false);
-        }
+      deletedIdsRef.current.add(id);
+      const knownIds = threadsRef.current.map((t) => t.id);
+      const nextId = composerTargetAfterDelete(
+        activeIdRef.current,
+        id,
+        knownIds,
+      );
+      setThreads((prev) => sidebarThreadsAfterDelete(prev, id, true));
+      if (activeIdRef.current !== id) return true;
+
+      emitLeave(id);
+      loadedRef.current = null;
+      setMessages([]);
+      setTasks([]);
+      setPhase(null);
+      setStreaming((cur) => (cur?.threadId === id ? null : cur));
+      setThinkingThreadId((cur) => (cur === id ? null : cur));
+      // Point the composer away from the deleted id before awaiting GET.
+      activeIdRef.current = nextId;
+      setActiveThreadId(nextId);
+      setMessagesLoading(Boolean(nextId));
+      if (nextId) {
+        await selectThreadInternal(nextId, { skipCleanup: true });
+      } else {
+        ++selectSeqRef.current;
+        setMessagesLoading(false);
       }
+      return true;
     },
     [emitLeave, selectThreadInternal],
   );
@@ -470,13 +533,24 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const renameThread = useCallback(async (id: string, title: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
+    const previous =
+      threadsRef.current.find((t) => t.id === id)?.title ?? trimmed;
     try {
       const thread = await api.updateThread(id, { title: trimmed });
       setThreads((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, title: thread.title } : t)),
+        prev.map((t) =>
+          t.id === id
+            ? { ...t, title: renamedTitle(true, previous, thread.title) }
+            : t,
+        ),
       );
     } catch {
-      toast.error("Не удалось переименовать диалог");
+      setThreads((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, title: renamedTitle(false, previous, trimmed) } : t,
+        ),
+      );
+      toast.error(THREADS_RENAME_FAILED);
     }
   }, []);
 
@@ -495,9 +569,15 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       }
       sendLockRef.current = true;
 
-      // No active thread yet (fresh account / all deleted) — create one
+      // No active thread yet (fresh account / last one deleted) — create one
       // transparently so the first message always works (Cursor-style).
-      let threadId = activeIdRef.current;
+      // Never send to a thread the sidebar already dropped.
+      const knownIds = threadsRef.current.map((t) => t.id);
+      let threadId = resolveSendThreadId(
+        activeIdRef.current,
+        knownIds,
+        deletedIdsRef.current,
+      );
       if (!threadId) {
         try {
           const thread = await api.createThread();
@@ -889,6 +969,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     () => ({
       threads,
       threadsLoading,
+      threadsError,
+      refreshThreads,
       activeThreadId,
       activeThread,
       messages,
@@ -911,6 +993,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     [
       threads,
       threadsLoading,
+      threadsError,
+      refreshThreads,
       activeThreadId,
       activeThread,
       messages,

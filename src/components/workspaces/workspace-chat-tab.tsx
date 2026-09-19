@@ -130,6 +130,7 @@ export function WorkspaceChatTab({
   const {
     threads,
     threadsLoading,
+    threadsError,
     activeThread,
     messages,
     messagesLoading,
@@ -147,7 +148,7 @@ export function WorkspaceChatTab({
   const bindingRef = useRef(false);
 
   useEffect(() => {
-    if (threadsLoading || bindingRef.current) return;
+    if (threadsLoading || threadsError || bindingRef.current) return;
     if (activeThread?.projectId === workspace.id) return;
 
     const existing = threads.find((t) => t.projectId === workspace.id);
@@ -162,6 +163,7 @@ export function WorkspaceChatTab({
   }, [
     threads,
     threadsLoading,
+    threadsError,
     activeThread?.projectId,
     workspace.id,
     workspace.title,
