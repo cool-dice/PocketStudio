@@ -27,6 +27,9 @@ import {
   ENTITY_DELETE_CONFIRM_LEAD,
   ENTITY_DELETE_FAILED,
   ENTITY_DELETED,
+  ENTITY_DESCRIBE_FAILED,
+  ENTITY_DESCRIBE_FAILED_HINT,
+  ENTITY_DESCRIBE_UNCONFIGURED_HINT,
   ENTITY_PORTRAIT_FAILED,
   ENTITY_PORTRAIT_FAILED_HINT,
   ENTITY_PORTRAIT_UNCONFIGURED_HINT,
@@ -191,9 +194,13 @@ export function EntitiesTab({
       toast.success("Описание готово", {
         description: `Студия вписала текст в карточку «${entity.name}».`,
       });
-    } catch {
-      toast.error("Не удалось сгенерировать описание", {
-        description: "Попробуйте ещё раз через минуту.",
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : ENTITY_DESCRIBE_FAILED;
+      toast.error(message, {
+        description:
+          message === UNCONFIGURED_TOOL_MESSAGE
+            ? ENTITY_DESCRIBE_UNCONFIGURED_HINT
+            : ENTITY_DESCRIBE_FAILED_HINT,
       });
     } finally {
       setDescribingId(null);

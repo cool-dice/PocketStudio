@@ -53,6 +53,11 @@ export const ENTITY_PORTRAIT_FAILED_HINT =
 export const ENTITY_PORTRAIT_UNCONFIGURED_HINT =
   "Откройте Админ → Модели ИИ и назначьте модель для изображений.";
 
+export const ENTITY_DESCRIBE_FAILED = "Не удалось сгенерировать описание";
+export const ENTITY_DESCRIBE_FAILED_HINT = "Попробуйте ещё раз через минуту.";
+export const ENTITY_DESCRIBE_UNCONFIGURED_HINT =
+  "Откройте Админ → Модели ИИ и назначьте модель для описаний.";
+
 export const ENTITY_DELETE_CONFIRM_LEAD = "Удалить карточку";
 export const ENTITY_DELETED = "Карточка удалена";
 export const ENTITY_DELETE_FAILED = "Не удалось удалить сущность";

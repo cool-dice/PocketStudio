@@ -147,7 +147,7 @@ export function AppShell() {
       )}
 
       {/* ── Right: context (xl+, только в полном чате) ── */}
-      {mainArea === "chat" && contextOpen && (
+      {(mainArea === "chat" || mainArea === "notebook") && contextOpen && (
         <ContextPanel onClose={() => setContextOpen(false)} />
       )}
 

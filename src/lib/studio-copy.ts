@@ -29,3 +29,9 @@ export const PREVIEW_HTML_HINT =
 
 export const PREVIEW_LISTING_HINT =
   "Нет index.html — это список файлов, а не запущенное приложение.";
+
+export const PALETTE_UNCONFIGURED_HINT =
+  "Откройте Админ → Модели ИИ и назначьте модель для палитры стиля.";
+export const PALETTE_GENERATE_FAILED = "Не удалось собрать палитру";
+export const PALETTE_GENERATE_FAILED_HINT =
+  "Попробуйте ещё раз или уточните бриф.";

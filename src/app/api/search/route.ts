@@ -1,28 +1,24 @@
 import { NextResponse } from "next/server";
+
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import {
+  emptySearchResults,
+  SEARCH_MIN_QUERY,
+  SEARCH_PER_GROUP,
+  searchExcerpt,
+  searchMatches,
+  searchTotal,
+} from "@/lib/search";
+import type {
+  SearchNoteHit,
+  SearchProjectHit,
+  SearchThreadHit,
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-/* ── GET /api/search?q=… — global search across threads, notes, projects ── */
-
-const MIN_QUERY = 2;
-const PER_GROUP = 5;
-
-/** Case-insensitive substring test (JS — honest for ASCII and Cyrillic). */
-function matches(haystack: string | null | undefined, needle: string): boolean {
-  if (!haystack) return false;
-  return haystack.toLowerCase().includes(needle);
-}
-
-/** Short preview around the first match, with ellipses when trimmed. */
-function excerpt(text: string, needle: string, radius = 42): string {
-  const idx = text.toLowerCase().indexOf(needle);
-  if (idx < 0) return text.slice(0, radius * 2).trim();
-  const start = Math.max(0, idx - radius);
-  const end = Math.min(text.length, idx + needle.length + radius);
-  return `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
-}
+/* ── GET /api/search?q=…&workspaceId=… — current user only; optional workspace ── */
 
 export async function GET(req: Request) {
   const session = await getUserFromRequest(req);
@@ -30,22 +26,32 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
 
-  const q = (new URL(req.url).searchParams.get("q") ?? "").trim();
-  if (q.length < MIN_QUERY) {
-    return NextResponse.json({
-      threads: [],
-      notes: [],
-      projects: [],
-      total: 0,
+  const url = new URL(req.url);
+  const q = (url.searchParams.get("q") ?? "").trim();
+  const workspaceId = (url.searchParams.get("workspaceId") ?? "").trim() || null;
+
+  if (workspaceId) {
+    const owned = await db.project.findFirst({
+      where: { id: workspaceId, userId: session.sub, archived: false },
+      select: { id: true },
     });
+    if (!owned) {
+      return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
+    }
+  }
+
+  if (q.length < SEARCH_MIN_QUERY) {
+    return NextResponse.json(emptySearchResults());
   }
   const needle = q.toLowerCase();
 
-  // Personal-workspace scale: fetch bounded slices and match in JS —
-  // case-insensitive both for ASCII and Cyrillic.
   const [threads, notes, projects] = await Promise.all([
     db.thread.findMany({
-      where: { userId: session.sub, archived: false },
+      where: {
+        userId: session.sub,
+        archived: false,
+        ...(workspaceId ? { projectId: workspaceId } : {}),
+      },
       orderBy: { updatedAt: "desc" },
       take: 300,
       select: {
@@ -63,7 +69,12 @@ export async function GET(req: Request) {
       },
     }),
     db.note.findMany({
-      where: { userId: session.sub },
+      where: {
+        userId: session.sub,
+        ...(workspaceId
+          ? { links: { some: { projectId: workspaceId } } }
+          : {}),
+      },
       orderBy: { createdAt: "desc" },
       take: 500,
       select: {
@@ -76,7 +87,11 @@ export async function GET(req: Request) {
       },
     }),
     db.project.findMany({
-      where: { userId: session.sub },
+      where: {
+        userId: session.sub,
+        archived: false,
+        ...(workspaceId ? { id: workspaceId } : {}),
+      },
       orderBy: { updatedAt: "desc" },
       take: 100,
       select: {
@@ -89,32 +104,32 @@ export async function GET(req: Request) {
     }),
   ]);
 
-  const threadHits = threads
+  const threadHits: SearchThreadHit[] = threads
     .filter(
       (t) =>
-        matches(t.title, needle) ||
-        t.messages.some((m) => matches(m.content, needle)),
+        searchMatches(t.title, needle) ||
+        t.messages.some((m) => searchMatches(m.content, needle)),
     )
-    .slice(0, PER_GROUP)
+    .slice(0, SEARCH_PER_GROUP)
     .map((t) => {
-      const message = t.messages.find((m) => matches(m.content, needle));
+      const message = t.messages.find((m) => searchMatches(m.content, needle));
       return {
         id: t.id,
         title: t.title,
-        mode: t.mode,
+        mode: t.mode as SearchThreadHit["mode"],
         projectId: t.projectId,
         updatedAt: t.updatedAt.toISOString(),
-        preview: message ? excerpt(message.content, needle) : null,
+        preview: message ? searchExcerpt(message.content, needle) : null,
       };
     });
 
-  const noteHits = notes
-    .filter((n) => matches(n.rawText, needle))
-    .slice(0, PER_GROUP)
+  const noteHits: SearchNoteHit[] = notes
+    .filter((n) => searchMatches(n.rawText, needle))
+    .slice(0, SEARCH_PER_GROUP)
     .map((n) => ({
       id: n.id,
-      preview: excerpt(n.rawText ?? "", needle, 60),
-      status: n.status,
+      preview: searchExcerpt(n.rawText ?? "", needle, 60),
+      status: n.status as SearchNoteHit["status"],
       favorite: n.favorite,
       createdAt: n.createdAt.toISOString(),
       category: n.category
@@ -122,23 +137,23 @@ export async function GET(req: Request) {
         : null,
     }));
 
-  const projectHits = projects
-    .filter(
-      (p) => matches(p.name, needle) || matches(p.description, needle),
-    )
-    .slice(0, PER_GROUP)
+  const projectHits: SearchProjectHit[] = projects
+    .filter((p) => searchMatches(p.name, needle) || searchMatches(p.description, needle))
+    .slice(0, SEARCH_PER_GROUP)
     .map((p) => ({
       id: p.id,
       name: p.name,
       description: p.description,
-      origin: p.origin,
+      origin: p.origin as SearchProjectHit["origin"],
       updatedAt: p.updatedAt.toISOString(),
     }));
 
-  return NextResponse.json({
+  const results = {
     threads: threadHits,
     notes: noteHits,
     projects: projectHits,
-    total: threadHits.length + noteHits.length + projectHits.length,
-  });
+    total: 0,
+  };
+  results.total = searchTotal(results);
+  return NextResponse.json(results);
 }

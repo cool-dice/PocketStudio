@@ -8,6 +8,9 @@ import {
   CHARACTER_SHEET_NO_REFS,
   CHARACTER_SHEET_NO_TRAITS,
   ENTITY_DELETE_FAILED,
+  ENTITY_DESCRIBE_FAILED,
+  ENTITY_DESCRIBE_FAILED_HINT,
+  ENTITY_DESCRIBE_UNCONFIGURED_HINT,
   ENTITY_PORTRAIT_FAILED,
   ENTITY_PORTRAIT_FAILED_HINT,
   ENTITY_PORTRAIT_UNCONFIGURED_HINT,
@@ -74,5 +77,9 @@ describe("entity sheet empty/error copy", () => {
     expect(UNCONFIGURED_TOOL_MESSAGE).toMatch(/Администратор ещё не настроил/);
     expect(ENTITY_PORTRAIT_UNCONFIGURED_HINT).toMatch(/Модели ИИ/);
     expect(ENTITY_DELETE_FAILED).toMatch(/удалить/i);
+    expect(ENTITY_DESCRIBE_FAILED).toMatch(/описание/i);
+    expect(ENTITY_DESCRIBE_UNCONFIGURED_HINT).toMatch(/Модели ИИ/);
+    expect(ENTITY_DESCRIBE_FAILED_HINT).not.toMatch(/Администратор ещё не настроил/);
+    expect(ENTITY_DESCRIBE_FAILED).not.toBe(UNCONFIGURED_TOOL_MESSAGE);
   });
 });

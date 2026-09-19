@@ -8,6 +8,8 @@ import {
   NLE_SCOPE_HINT,
   PREVIEW_HTML_HINT,
   PREVIEW_LISTING_HINT,
+  PALETTE_GENERATE_FAILED,
+  PALETTE_UNCONFIGURED_HINT,
   VIDEO_LANDING_BLURB,
   VIDEO_MODULE_DESCRIPTION,
 } from "./studio-copy";
@@ -38,5 +40,12 @@ describe("studio honesty copy", () => {
     expect(`${PREVIEW_HTML_HINT}\n${PREVIEW_LISTING_HINT}`).not.toMatch(
       /приложение запущено|dev-сервер работает|next server is running/i,
     );
+  });
+
+  test("palette unconfigured copy points at Admin → models", () => {
+    expect(PALETTE_UNCONFIGURED_HINT).toMatch(/Модели ИИ/);
+    expect(PALETTE_UNCONFIGURED_HINT).toMatch(/палитр/i);
+    expect(PALETTE_GENERATE_FAILED).toMatch(/палитр/i);
+    expect(PALETTE_GENERATE_FAILED).not.toMatch(/placeholder|fake|#000000/i);
   });
 });

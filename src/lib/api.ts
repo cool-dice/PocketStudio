@@ -594,8 +594,9 @@ export const api = {
 
   /* ── Global search (Stage 4) ── */
 
-  search(q: string): Promise<SearchResults> {
+  search(q: string, workspaceId?: string | null): Promise<SearchResults> {
     const qs = new URLSearchParams({ q });
+    if (workspaceId) qs.set("workspaceId", workspaceId);
     return request<SearchResults>(`/api/search?${qs.toString()}`);
   },
 

@@ -26,7 +26,8 @@ import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-pick
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, ApiError } from "@/lib/api";
-import { DESIGN_MODULE_DESCRIPTION } from "@/lib/studio-copy";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import { DESIGN_MODULE_DESCRIPTION, PALETTE_GENERATE_FAILED, PALETTE_GENERATE_FAILED_HINT, PALETTE_UNCONFIGURED_HINT } from "@/lib/studio-copy";
 import { briefFromArtifact, paletteFromArtifact } from "@/lib/palette";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
@@ -217,8 +218,13 @@ export function DesignScreen({
         });
       } catch (err) {
         toast.error(
-          err instanceof ApiError ? err.message : "Не удалось собрать палитру",
-          { description: "Попробуйте ещё раз или уточните бриф." },
+          err instanceof ApiError ? err.message : PALETTE_GENERATE_FAILED,
+          {
+            description:
+              err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE
+                ? PALETTE_UNCONFIGURED_HINT
+                : PALETTE_GENERATE_FAILED_HINT,
+          },
         );
       } finally {
         setPaletteBusy(false);
