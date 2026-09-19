@@ -6,6 +6,7 @@
  * вывод пропорций и утилиты отображения.
  */
 
+import { displayableImageSrc } from "@/lib/image-copy";
 import type { ArtifactDto } from "@/lib/workspace-types";
 
 /* ─────────────────────────── размеры генерации ─────────────────────────── */
@@ -112,8 +113,10 @@ export interface GalleryTile {
   title: string;
   prompt: string;
   description: string | null;
-  /** Реальный файл (/gen/<uuid>.png) — рендерится <img>. */
+  /** Реальный файл (/gen/<uuid>.png) — рендерится <img>. Мёртвый /gen → null. */
   url: string | null;
+  /** DB has /gen/… but the blob is gone — UI must not render a 404 <img>. */
+  fileMissing: boolean;
   /** CSS-градиент («linear-gradient(...)») или tailwind-классы заглушки. */
   gradient: string | null;
   aspect: ImageAspect;
@@ -148,7 +151,8 @@ export function tileFromArtifact(
     title: artifact.title,
     prompt: artifact.prompt ?? artifact.title,
     description: artifact.description,
-    url: artifact.url,
+    url: displayableImageSrc(artifact),
+    fileMissing: Boolean(artifact.fileMissing),
     gradient,
     aspect,
     sizeLabel: preset.size,
@@ -172,6 +176,7 @@ export function pendingTile(
     prompt: prompt.trim() || "Изображение по описанию студии",
     description: null,
     url: null,
+    fileMissing: false,
     gradient: FALLBACK_GRADIENT,
     aspect,
     sizeLabel,

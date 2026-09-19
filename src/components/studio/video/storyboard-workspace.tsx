@@ -23,6 +23,12 @@ import {
   AUDIO_TTS_UNCONFIGURED_HINT,
   playableAudioSrc,
 } from "@/lib/audio-copy";
+import {
+  IMAGE_GEN_FAILED,
+  IMAGE_GEN_FAILED_HINT,
+  IMAGE_GEN_UNCONFIGURED_HINT,
+  displayableImageSrc,
+} from "@/lib/image-copy";
 import type {
   ArtifactDto,
   DocumentDto,
@@ -254,16 +260,23 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
           stage: sceneStage(sectionId),
           size: SCENE_IMAGE_SIZE,
         });
+        if (!displayableImageSrc(artifact)) {
+          toast.error(IMAGE_GEN_FAILED, { description: IMAGE_GEN_FAILED_HINT });
+          return;
+        }
         setArtifacts((prev) => [...prev, artifact]);
         toast.success("Кадр готов", {
           description: scene?.section.title ?? undefined,
         });
       } catch (err) {
-        toast.error("Кадр не сгенерировался", {
-          description:
-            err instanceof ApiError
+        const unconfigured =
+          err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+        toast.error(IMAGE_GEN_FAILED, {
+          description: unconfigured
+            ? IMAGE_GEN_UNCONFIGURED_HINT
+            : err instanceof ApiError
               ? err.message
-              : "Попробуйте ещё раз — обычно это помогает.",
+              : IMAGE_GEN_FAILED_HINT,
         });
       } finally {
         setImageBusy((prev) => {

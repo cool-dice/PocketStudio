@@ -479,6 +479,9 @@ const generateImage: ToolDef = {
         size,
         signal: ctx.signal,
       });
+      if (buffer.length === 0) {
+        return { error: "Генерация вернула пустой файл — попробуйте ещё раз" };
+      }
       const url = saveGenFile(buffer, "png");
       const artifact = await db.artifact.create({
         data: {
@@ -499,6 +502,9 @@ const generateImage: ToolDef = {
       };
     } catch (err) {
       if (isAbortFlag(err)) return abortedToolResult();
+      if (err instanceof GatewayError && err.message === UNCONFIGURED_TOOL_MESSAGE) {
+        return { error: UNCONFIGURED_TOOL_MESSAGE };
+      }
       return {
         error:
           "Не удалось сгенерировать изображение: " +

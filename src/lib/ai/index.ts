@@ -187,6 +187,9 @@ export async function aiGenerateImage(
     prompt: composeImagePrompt(prompt),
     size: sanitizeImageSize(size),
   });
+  if (buffer.length === 0) {
+    throw new GatewayError("Генерация вернула пустой файл — попробуйте ещё раз", 502);
+  }
   const url = saveGeneratedFile(buffer, "png");
   return { url };
 }

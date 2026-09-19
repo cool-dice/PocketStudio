@@ -16,6 +16,18 @@ import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared
 import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import {
+  IMAGE_GALLERY_EMPTY,
+  IMAGE_GALLERY_EMPTY_HINT,
+  IMAGE_GALLERY_FILTER_EMPTY,
+  IMAGE_GALLERY_LOAD_ERROR,
+  IMAGE_GALLERY_LOAD_ERROR_HINT,
+  IMAGE_GEN_FAILED,
+  IMAGE_GEN_FAILED_HINT,
+  IMAGE_GEN_UNCONFIGURED_HINT,
+  displayableImageSrc,
+} from "@/lib/image-copy";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
@@ -83,7 +95,7 @@ export function ImagesScreen({
     } catch (err) {
       setTiles([]);
       setLoadError(
-        err instanceof ApiError ? err.message : "Не удалось загрузить галерею",
+        err instanceof ApiError ? err.message : IMAGE_GALLERY_LOAD_ERROR,
       );
     } finally {
       setLoading(false);
@@ -107,6 +119,11 @@ export function ImagesScreen({
           title: title || undefined,
           size,
         });
+        const src = displayableImageSrc(artifact);
+        if (!src) {
+          toast.error(IMAGE_GEN_FAILED, { description: IMAGE_GEN_FAILED_HINT });
+          return;
+        }
         setTiles((prev) => [
           tileFromArtifact(artifact, preset.aspect),
           ...prev.filter((t) => t.status !== "generating"),
@@ -116,9 +133,15 @@ export function ImagesScreen({
         });
       } catch (err) {
         setTiles((prev) => prev.filter((t) => t.status !== "generating"));
+        const unconfigured =
+          err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
         toast.error(
-          err instanceof ApiError ? err.message : "Генерация не удалась",
-          { description: "Попробуйте ещё раз — обычно это помогает." },
+          err instanceof ApiError ? err.message : IMAGE_GEN_FAILED,
+          {
+            description: unconfigured
+              ? IMAGE_GEN_UNCONFIGURED_HINT
+              : IMAGE_GEN_FAILED_HINT,
+          },
         );
       } finally {
         setGenerating(null);
@@ -208,8 +231,8 @@ export function ImagesScreen({
 
   const galleryEmpty =
     tiles.length === 0 && !query.trim() && filter === "all"
-      ? "Пока нет картинок — опишите кадр в панели генерации или попросите оркестратора в чате."
-      : "Ничего не найдено — попробуйте изменить запрос или фильтры";
+      ? `${IMAGE_GALLERY_EMPTY} — ${IMAGE_GALLERY_EMPTY_HINT}`
+      : IMAGE_GALLERY_FILTER_EMPTY;
 
   const counts = useMemo(
     () => ({
@@ -297,6 +320,7 @@ export function ImagesScreen({
               {loadError ? (
                 <GalleryLoadError
                   message={loadError}
+                  hint={IMAGE_GALLERY_LOAD_ERROR_HINT}
                   onRetry={() => void loadGallery()}
                 />
               ) : (
@@ -369,6 +393,7 @@ export function ImagesScreen({
         {loadError ? (
           <GalleryLoadError
             message={loadError}
+            hint={IMAGE_GALLERY_LOAD_ERROR_HINT}
             onRetry={() => void loadGallery()}
           />
         ) : (
@@ -398,14 +423,17 @@ export function ImagesScreen({
 
 function GalleryLoadError({
   message,
+  hint,
   onRetry,
 }: {
   message: string;
+  hint: string;
   onRetry: () => void;
 }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
       <p className="text-sm text-muted-foreground">{message}</p>
+      <p className="text-xs text-muted-foreground">{hint}</p>
       <Button size="sm" variant="outline" onClick={onRetry}>
         <RefreshCw className="size-4" aria-hidden="true" />
         Повторить

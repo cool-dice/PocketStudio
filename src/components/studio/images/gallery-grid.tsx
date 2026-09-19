@@ -123,7 +123,7 @@ function GalleryTileCard({
               >
                 <Wand2 className="size-3.5" aria-hidden="true" />
               </TileAction>
-              {tile.url ? (
+              {tile.url && !tile.fileMissing ? (
                 <a
                   href={tile.url}
                   download

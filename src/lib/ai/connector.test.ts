@@ -250,6 +250,18 @@ describe("OpenAI image", () => {
     const { buffer } = await generateImage(openaiRoute, { prompt: "cat" });
     expect(buffer.toString()).toBe("hello-image");
   });
+
+  test("rejects an empty image payload instead of writing a fake png", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse({ data: [{ b64_json: "" }] })) as typeof fetch;
+    try {
+      await generateImage(openaiRoute, { prompt: "cat" });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(GatewayError);
+      expect((err as GatewayError).message).toMatch(/пустой файл/);
+    }
+  });
 });
 
 describe("OpenAI TTS", () => {

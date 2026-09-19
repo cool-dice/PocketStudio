@@ -27,6 +27,12 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, ApiError } from "@/lib/api";
 import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import {
+  IMAGE_GEN_FAILED,
+  IMAGE_GEN_FAILED_HINT,
+  IMAGE_GEN_UNCONFIGURED_HINT,
+  displayableImageSrc,
+} from "@/lib/image-copy";
 import { DESIGN_MODULE_DESCRIPTION, PALETTE_GENERATE_FAILED, PALETTE_GENERATE_FAILED_HINT, PALETTE_UNCONFIGURED_HINT } from "@/lib/studio-copy";
 import { briefFromArtifact, paletteFromArtifact } from "@/lib/palette";
 import { useWorkspaces } from "@/hooks/use-workspaces";
@@ -148,14 +154,24 @@ export function DesignScreen({
           size: request.size,
           stage: "design",
         });
+        if (!displayableImageSrc(artifact)) {
+          toast.error(IMAGE_GEN_FAILED, { description: IMAGE_GEN_FAILED_HINT });
+          return;
+        }
         prependArtifact(artifact);
         toast.success("Кадр готов и уже в мудборде", {
           description: artifact.title,
         });
       } catch (err) {
+        const unconfigured =
+          err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
         toast.error(
-          err instanceof ApiError ? err.message : "Генерация не удалась",
-          { description: "Попробуйте ещё раз — обычно это помогает." },
+          err instanceof ApiError ? err.message : IMAGE_GEN_FAILED,
+          {
+            description: unconfigured
+              ? IMAGE_GEN_UNCONFIGURED_HINT
+              : IMAGE_GEN_FAILED_HINT,
+          },
         );
       } finally {
         setGenerating(null);

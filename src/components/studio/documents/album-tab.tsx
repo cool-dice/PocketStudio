@@ -42,6 +42,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
 import {
   ALBUM_EMPTY,
   ALBUM_EMPTY_HINT,
@@ -60,6 +61,10 @@ import {
   ALBUM_REMOVE_OK,
   ALBUM_VARIATION_FAILED,
 } from "@/lib/album-copy";
+import {
+  IMAGE_GEN_UNCONFIGURED_HINT,
+  displayableImageSrc,
+} from "@/lib/image-copy";
 import type { ArtifactDto, EntityDto } from "@/lib/workspace-types";
 import { GradientArt } from "./art-placeholder";
 import { SelectableChip } from "./narrative-chip";
@@ -195,7 +200,7 @@ export function AlbumTab({
         title: trimmed.slice(0, 60),
         albumKind: "illustration",
       });
-      if (!isAlbumArtifact(artifact)) {
+      if (!isAlbumArtifact(artifact) || !displayableImageSrc(artifact)) {
         toast.error(ALBUM_GENERATE_FAILED, { description: ALBUM_GENERATE_FAILED_HINT });
         return;
       }
@@ -206,8 +211,12 @@ export function AlbumTab({
       });
       promptRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (err) {
+      const unconfigured =
+        err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
       toast.error(err instanceof ApiError ? err.message : ALBUM_GENERATE_FAILED, {
-        description: ALBUM_GENERATE_FAILED_HINT,
+        description: unconfigured
+          ? IMAGE_GEN_UNCONFIGURED_HINT
+          : ALBUM_GENERATE_FAILED_HINT,
       });
     } finally {
       setGenerating(false);
@@ -225,14 +234,18 @@ export function AlbumTab({
         entityId: item.entityId ?? undefined,
         albumKind: item.kind,
       });
-      if (!isAlbumArtifact(artifact)) {
+      if (!isAlbumArtifact(artifact) || !displayableImageSrc(artifact)) {
         toast.error(ALBUM_VARIATION_FAILED);
         return;
       }
       setArtifacts((prev) => [artifact, ...prev]);
       toast.success("Вариация готова", { description: "Новый тайл добавлен в начало альбома." });
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : ALBUM_VARIATION_FAILED);
+      const unconfigured =
+        err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+      toast.error(err instanceof ApiError ? err.message : ALBUM_VARIATION_FAILED, {
+        description: unconfigured ? IMAGE_GEN_UNCONFIGURED_HINT : undefined,
+      });
     } finally {
       setVariationId(null);
     }

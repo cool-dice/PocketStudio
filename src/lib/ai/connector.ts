@@ -279,10 +279,17 @@ export async function chatCompletion(
 function decodeImagePayload(payload: unknown): Buffer {
   const data = (payload as { data?: Array<{ b64_json?: string; url?: string }> })?.data;
   const first = Array.isArray(data) ? data[0] : undefined;
-  if (first?.b64_json) {
+  if (typeof first?.b64_json === "string") {
     return Buffer.from(first.b64_json, "base64");
   }
   throw new GatewayError("Пустой ответ генерации изображения", 502);
+}
+
+function asImageBuffer(buffer: Buffer): { buffer: Buffer } {
+  if (buffer.length === 0) {
+    throw new GatewayError("Генерация вернула пустой файл", 502);
+  }
+  return { buffer };
 }
 
 export async function generateImage(
@@ -313,15 +320,15 @@ export async function generateImage(
   await throwIfNotOk(res);
   const payload: unknown = await res.json();
   const first = (payload as { data?: Array<{ b64_json?: string; url?: string }> })?.data?.[0];
-  if (first?.b64_json) {
-    return { buffer: Buffer.from(first.b64_json, "base64") };
+  if (typeof first?.b64_json === "string") {
+    return asImageBuffer(Buffer.from(first.b64_json, "base64"));
   }
   if (first?.url) {
     const img = await fetchWithTimeout(first.url, { signal: opts.signal }, IMAGE_TIMEOUT_MS);
     await throwIfNotOk(img);
-    return { buffer: Buffer.from(await img.arrayBuffer()) };
+    return asImageBuffer(Buffer.from(await img.arrayBuffer()));
   }
-  return { buffer: decodeImagePayload(payload) };
+  return asImageBuffer(decodeImagePayload(payload));
 }
 
 export const OPENAI_TTS_VOICES = [

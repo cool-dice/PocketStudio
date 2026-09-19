@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { aiErrorResponse, aiGenerateImage } from "@/lib/ai";
+import { unlinkGeneratedFile } from "@/lib/gen-files";
+import { IMAGE_EMPTY_FILE, isHonestImageUrl } from "@/lib/image-copy";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { liveArtifactDto } from "@/lib/workspace-shapes";
 import { scheduleIndexArtifact } from "@/lib/rag";
@@ -37,8 +39,17 @@ export async function POST(req: Request) {
   const check = await ensureWorkspace(req, projectId);
   if (!check.ok) return check.response;
 
+  let savedUrl: string | null = null;
   try {
     const { url } = await aiGenerateImage(check.userId, prompt, size ?? "1024x1024");
+    if (!isHonestImageUrl(url)) {
+      unlinkGeneratedFile(url);
+      return NextResponse.json(
+        { error: "Провайдер не вернул изображение" },
+        { status: 502 },
+      );
+    }
+    savedUrl = url;
     const artifact = await db.artifact.create({
       data: {
         projectId,
@@ -51,9 +62,17 @@ export async function POST(req: Request) {
         meta: albumKind ? JSON.stringify({ albumKind }) : null,
       },
     });
+    savedUrl = null;
     scheduleIndexArtifact(db, artifact.id);
-    return NextResponse.json({ artifact: liveArtifactDto(artifact) }, { status: 201 });
+    const dto = liveArtifactDto(artifact);
+    if (dto.fileMissing || !isHonestImageUrl(dto.url)) {
+      unlinkGeneratedFile(url);
+      await db.artifact.delete({ where: { id: artifact.id } }).catch(() => {});
+      return NextResponse.json({ error: IMAGE_EMPTY_FILE }, { status: 502 });
+    }
+    return NextResponse.json({ artifact: dto }, { status: 201 });
   } catch (err) {
+    if (savedUrl) unlinkGeneratedFile(savedUrl);
     const mapped = aiErrorResponse(
       err,
       "Не удалось сгенерировать изображение — попробуйте ещё раз",

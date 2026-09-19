@@ -46,7 +46,7 @@ export function TileArt({
         />
       ) : null}
 
-      {tile.url ? (
+      {tile.url && !tile.fileMissing ? (
         <img
           src={tile.url}
           alt={tile.title}
