@@ -10,12 +10,11 @@ import type { PrismaClient } from "@prisma/client";
 import { throwIfAborted } from "../abort-flag";
 import { rankCanonHits } from "../retrieve";
 import { projectRoot, safeJoin, WorkspaceError } from "../workspace";
-import { tryEmbedTexts } from "./embed";
+import { tryEmbedTexts, embeddingsConfigured } from "./embed";
 import { chunkMatchesScope } from "./scope";
 import { loadScopedChunks, searchVector } from "./store";
 import type { RagChunkRow, RagHit, RagScope, RetrieveResult } from "./types";
-
-const KEYWORD_NOTICE = "поиск без эмбеддингов";
+import { RAG_KEYWORD_NOTICE } from "./types";
 
 function sourceIds(rows: RagChunkRow[], type: string): string[] {
   return [...new Set(rows.filter((r) => r.sourceType === type).map((r) => r.sourceId))];
@@ -137,29 +136,39 @@ export async function retrieve(
       query,
       scope: opts.scope.kind,
       mode: "keyword",
-      notice: KEYWORD_NOTICE,
+      notice: RAG_KEYWORD_NOTICE,
       hits: [],
     };
   }
 
-  const embedded = await tryEmbedTexts(db, opts.scope.userId, [query], opts.signal);
+  // Unconfigured embeddings: skip HTTP, never invent vectors, keyword in the same scope.
+  const configured = await embeddingsConfigured(db, opts.scope.userId);
   throwIfAborted(opts.signal);
-  if (embedded.vectors?.[0]) {
-    const rows = await searchVector(db, opts.scope, embedded.vectors[0], {
-      kinds: opts.kinds,
-      limit: limit * 2,
-    });
-    const scoped = rows.filter((r) => chunkMatchesScope(r, opts.scope));
-    const live = await filterLiveChunks(db, opts.scope, scoped, opts.signal);
-    const hits = live.slice(0, limit).map(rowToHit);
-    if (hits.length > 0) {
-      return {
-        query,
-        scope: opts.scope.kind,
-        mode: "vector",
-        notice: null,
-        hits,
-      };
+  if (configured) {
+    const embedded = await tryEmbedTexts(
+      db,
+      opts.scope.userId,
+      [query],
+      opts.signal,
+    );
+    throwIfAborted(opts.signal);
+    if (embedded.vectors?.[0]) {
+      const rows = await searchVector(db, opts.scope, embedded.vectors[0], {
+        kinds: opts.kinds,
+        limit: limit * 2,
+      });
+      const scoped = rows.filter((r) => chunkMatchesScope(r, opts.scope));
+      const live = await filterLiveChunks(db, opts.scope, scoped, opts.signal);
+      const hits = live.slice(0, limit).map(rowToHit);
+      if (hits.length > 0) {
+        return {
+          query,
+          scope: opts.scope.kind,
+          mode: "vector",
+          notice: null,
+          hits,
+        };
+      }
     }
   }
 
@@ -172,7 +181,7 @@ export async function retrieve(
     query,
     scope: opts.scope.kind,
     mode: "keyword",
-    notice: KEYWORD_NOTICE,
+    notice: RAG_KEYWORD_NOTICE,
     hits: fallback,
   };
 }

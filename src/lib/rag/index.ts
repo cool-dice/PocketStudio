@@ -1,5 +1,5 @@
 export type { RagHit, RagScope, RagScopeKind, RetrieveResult, RagSourceType } from "./types";
-export { RAG_SOURCE_TYPES, UNCONFIGURED_EMBEDDINGS_MESSAGE } from "./types";
+export { RAG_SOURCE_TYPES, UNCONFIGURED_EMBEDDINGS_MESSAGE, RAG_KEYWORD_NOTICE } from "./types";
 export {
   chunkMatchesScope,
   filterChunksByScope,

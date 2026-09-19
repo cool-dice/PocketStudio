@@ -28,9 +28,12 @@ function clipExcerpt(text: string): string {
 export function formatPrefetchHint(
   scope: "studio" | "workspace",
   hitCount: number,
+  mode?: "vector" | "keyword",
 ): string {
   if (hitCount <= 0) return "";
-  return scope === "workspace" ? "по канону воркспейса" : "по канону студии";
+  const base = scope === "workspace" ? "по канону воркспейса" : "по канону студии";
+  if (mode === "keyword") return `${base} · поиск без эмбеддингов`;
+  return base;
 }
 
 export function formatPrefetchBlock(
@@ -40,14 +43,17 @@ export function formatPrefetchBlock(
     path?: string | null;
     workspaceName?: string | null;
   }>,
+  opts?: { notice?: string | null; mode?: "vector" | "keyword" },
 ): string {
   if (hits.length === 0) return "";
   const lines = hits.slice(0, 6).map((h, i) => {
     const loc = [h.workspaceName, h.path ?? h.title].filter(Boolean).join(" · ");
     return `${i + 1}. ${loc}\n${clipExcerpt(h.excerpt)}`;
   });
-  return (
-    "Автоконтекст RAG (извлечён до первого ответа; при необходимости вызови retrieve_canon повторно):\n" +
-    lines.join("\n\n")
-  );
+  const keyword =
+    opts?.mode === "keyword" || Boolean(opts?.notice?.includes("без эмбеддингов"));
+  const lead = keyword
+    ? "Автоконтекст RAG (поиск без эмбеддингов; извлечён до первого ответа; при необходимости вызови retrieve_canon повторно):"
+    : "Автоконтекст RAG (извлечён до первого ответа; при необходимости вызови retrieve_canon повторно):";
+  return lead + "\n" + lines.join("\n\n");
 }

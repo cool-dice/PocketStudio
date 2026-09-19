@@ -336,5 +336,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Notes analysis fail-fast | POST/PATCH/очередь анализа: ненастроенный `notes` сразу `status=error` (тот же UNCONFIGURED), без ~5 с `pending` до воркера; GET сразу ошибка |
 | 2026-09-19 | Monetize plan honesty | Ненастроенный `monetize` → `UNCONFIGURED_TOOL_MESSAGE`, документ не пишется; сбой LLM не затирает прежний план; успех переживает GET reload; IDOR 404 |
 | 2026-09-19 | Agent/chat unconfigured | Ненастроенный `agent` → русская `UNCONFIGURED_TOOL_MESSAGE` в треде сразу (message:end), без зависания сокета и без фейкового успеха; композер снова печатает |
+| 2026-09-19 | Section + RAG unconfigured | Ненастроенный `rewrite_section` → 400 UNCONFIGURED на write/rewrite/continue/custom, глава не меняется, без hang LLM. Поиск/prefetch без эмбеддингов — keyword «поиск без эмбеддингов», тот же скоуп, без выдуманных векторов; reindex по-прежнему 400 |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

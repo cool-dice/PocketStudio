@@ -67,3 +67,6 @@ export const UNCONFIGURED_EMBEDDINGS_MESSAGE =
 
 export const EMBEDDING_DIM_MISMATCH_MESSAGE =
   `Модель эмбеддингов вернула векторы не той длины. Студия хранит ${RAG_EMBEDDING_DIM} измерений (например text-embedding-3-small). Смените модель в Админ → Модели ИИ.`;
+
+/** Search/prefetch without a configured embeddings model — never invent vectors. */
+export const RAG_KEYWORD_NOTICE = "поиск без эмбеддингов";

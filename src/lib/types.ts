@@ -183,6 +183,8 @@ export interface WsCanonPrefetchPayload {
   threadId: string;
   scope: "studio" | "workspace";
   hitCount: number;
+  mode?: "vector" | "keyword";
+  notice?: string | null;
 }
 
 /* ── Note analysis pipeline events (Stage 2, worklog Task 2-ctr) ── */

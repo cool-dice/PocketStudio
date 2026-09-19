@@ -662,6 +662,8 @@ async function prefetchCanonContext(
   text: string;
   scope: "studio" | "workspace";
   hitCount: number;
+  mode: "vector" | "keyword";
+  notice: string | null;
 } | null> {
   if (!looksLikeCanonQuestion(userText)) return null;
   throwIfAborted(signal);
@@ -676,12 +678,17 @@ async function prefetchCanonContext(
     limit: 6,
     signal,
   });
-  const text = formatPrefetchBlock(result.hits);
+  const text = formatPrefetchBlock(result.hits, {
+    mode: result.mode,
+    notice: result.notice,
+  });
   if (!text) return null;
   return {
     text,
     scope: result.scope === "workspace" ? "workspace" : "studio",
     hitCount: result.hits.length,
+    mode: result.mode,
+    notice: result.notice,
   };
 }
 
@@ -991,6 +998,8 @@ async function runAgentTurn(
           threadId,
           scope: prefetch.scope,
           hitCount: prefetch.hitCount,
+          mode: prefetch.mode,
+          notice: prefetch.notice,
         });
       }
     } catch (err) {

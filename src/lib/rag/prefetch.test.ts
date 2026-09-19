@@ -44,6 +44,24 @@ describe("formatPrefetchBlock", () => {
     expect(block).toContain("Автоконтекст RAG");
     expect(block).toContain("Тишина");
     expect(block).toContain("карие глаза");
+    expect(block).not.toContain("поиск без эмбеддингов");
+  });
+
+  test("keyword prefetch is labeled and does not claim vectors", () => {
+    const block = formatPrefetchBlock(
+      [
+        {
+          title: "гл. 2",
+          excerpt: "У Марины карие глаза",
+          path: "гл. 2",
+          workspaceName: "Тишина",
+        },
+      ],
+      { mode: "keyword", notice: "поиск без эмбеддингов" },
+    );
+    expect(block).toContain("поиск без эмбеддингов");
+    expect(block).toContain("карие глаза");
+    expect(block).not.toMatch(/вектор/i);
   });
 
   test("does not dump a giant excerpt into the block", () => {
@@ -64,5 +82,15 @@ describe("formatPrefetchHint", () => {
     expect(formatPrefetchHint("studio", 3)).toBe("по канону студии");
     expect(formatPrefetchHint("workspace", 1)).toBe("по канону воркспейса");
     expect(formatPrefetchHint("studio", 0)).toBe("");
+  });
+
+  test("keyword mode is labeled on the hint", () => {
+    expect(formatPrefetchHint("studio", 2, "keyword")).toBe(
+      "по канону студии · поиск без эмбеддингов",
+    );
+    expect(formatPrefetchHint("workspace", 1, "keyword")).toBe(
+      "по канону воркспейса · поиск без эмбеддингов",
+    );
+    expect(formatPrefetchHint("studio", 2, "vector")).toBe("по канону студии");
   });
 });

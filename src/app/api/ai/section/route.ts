@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { aiChatText, aiErrorResponse } from "@/lib/ai";
+import {
+  aiChatText,
+  aiErrorResponse,
+  isUnconfiguredToolError,
+  resolveToolRoute,
+  UNCONFIGURED_TOOL_MESSAGE,
+} from "@/lib/ai";
 import { sectionSystemFor } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
 import { snapshotSection } from "@/lib/section-revisions";
@@ -11,6 +17,11 @@ import { scheduleIndexSection } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
+
+/* ── POST /api/ai/section — write / rewrite / continue / custom ──
+ * Tool id `rewrite_section`. Unconfigured model fails immediately with
+ * UNCONFIGURED_TOOL_MESSAGE (400) — never a hang on the LLM and never a
+ * fake rewrite of the chapter. Same route covers write/continue/custom. */
 
 const schema = z.object({
   sectionId: z.string().trim().min(1),
@@ -58,6 +69,22 @@ export async function POST(req: Request) {
   }
   const check = await ensureOwned(req, section.document);
   if (!check.ok) return check.response;
+
+  try {
+    await resolveToolRoute(db, check.userId, "rewrite_section");
+  } catch (err) {
+    if (isUnconfiguredToolError(err)) {
+      return NextResponse.json(
+        { error: UNCONFIGURED_TOOL_MESSAGE },
+        { status: 400 },
+      );
+    }
+    const mapped = aiErrorResponse(
+      err,
+      "Не удалось переписать главу — попробуйте ещё раз",
+    );
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+  }
 
   const system = sectionSystemFor(action, !section.content.trim());
 

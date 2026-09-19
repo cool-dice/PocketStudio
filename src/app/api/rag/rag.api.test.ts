@@ -1,8 +1,9 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 
 import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { UNCONFIGURED_EMBEDDINGS_MESSAGE } from "@/lib/rag/types";
+import { embeddingsConfigured } from "@/lib/rag/embed";
+import { UNCONFIGURED_EMBEDDINGS_MESSAGE, RAG_KEYWORD_NOTICE } from "@/lib/rag/types";
 import { upsertChunk } from "@/lib/rag/store";
 
 import { POST as reindex } from "./reindex/route";
@@ -10,6 +11,7 @@ import { POST as search } from "./search/route";
 
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 const stamp = Date.now().toString(36);
+const originalFetch = globalThis.fetch;
 
 function jsonRequest(
   url: string,
@@ -34,6 +36,10 @@ describe.skipIf(SKIP_PG)("POST /api/rag", () => {
   let token: string | null = null;
   let bookId: string | null = null;
   let appId: string | null = null;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
 
   test("search scopes workspace vs global; reindex needs embeddings", async () => {
     const user = await db.user.create({
@@ -118,6 +124,17 @@ describe.skipIf(SKIP_PG)("POST /api/rag", () => {
       embedding: null,
     });
 
+    const unconfigured = !(await embeddingsConfigured(db, user.id));
+    let fetchCalls = 0;
+    if (unconfigured) {
+      globalThis.fetch = (async () => {
+        fetchCalls += 1;
+        await new Promise((r) => setTimeout(r, 30_000));
+        return new Response("should not hang", { status: 500 });
+      }) as typeof fetch;
+    }
+
+    const started = Date.now();
     const ws = await search(
       jsonRequest(
         "http://localhost/api/rag/search",
@@ -129,13 +146,17 @@ describe.skipIf(SKIP_PG)("POST /api/rag", () => {
       ),
     );
     expect(ws.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    if (unconfigured) expect(fetchCalls).toBe(0);
     const wsJson = (await ws.json()) as {
       scope: string;
       mode: string;
+      notice: string | null;
       hits: Array<{ workspaceId: string | null; excerpt: string }>;
     };
     expect(wsJson.scope).toBe("workspace");
     expect(wsJson.mode).toBe("keyword");
+    expect(wsJson.notice).toBe(RAG_KEYWORD_NOTICE);
     expect(wsJson.hits.every((h) => h.workspaceId === app.id)).toBe(true);
     expect(wsJson.hits.some((h) => h.excerpt.includes("Тишина"))).toBe(false);
     expect(wsJson.hits.some((h) => h.excerpt.includes("чужого"))).toBe(false);
@@ -172,9 +193,13 @@ describe.skipIf(SKIP_PG)("POST /api/rag", () => {
     expect(global.status).toBe(200);
     const gJson = (await global.json()) as {
       scope: string;
+      mode: string;
+      notice: string | null;
       hits: Array<{ workspaceId: string | null; excerpt: string }>;
     };
     expect(gJson.scope).toBe("global");
+    expect(gJson.mode).toBe("keyword");
+    expect(gJson.notice).toBe(RAG_KEYWORD_NOTICE);
     const projects = new Set(gJson.hits.map((h) => h.workspaceId));
     expect(projects.has(book.id)).toBe(true);
     expect(projects.has(app.id)).toBe(true);

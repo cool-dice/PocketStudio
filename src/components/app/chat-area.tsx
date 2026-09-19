@@ -158,7 +158,11 @@ export function ChatArea({
             )}
             {canonHint && (
               <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                {formatPrefetchHint(canonHint.scope, canonHint.hitCount)}
+                {formatPrefetchHint(
+                  canonHint.scope,
+                  canonHint.hitCount,
+                  canonHint.mode,
+                )}
               </span>
             )}
           </div>

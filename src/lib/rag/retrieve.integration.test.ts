@@ -10,7 +10,8 @@ import { encryptSecret, last4OfKey } from "../ai/crypto";
 import { retrieve } from "./retrieve";
 import { ragScopeFromThread } from "./scope";
 import { upsertChunk } from "./store";
-import { RAG_EMBEDDING_DIM } from "./types";
+import { embeddingsConfigured } from "./embed";
+import { RAG_EMBEDDING_DIM, RAG_KEYWORD_NOTICE } from "./types";
 
 const db = new PrismaClient();
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
@@ -334,6 +335,50 @@ describe.skipIf(SKIP_PG)("retrieve scope isolation (postgres)", () => {
     await removeProjectDir(coder).catch(() => {});
   });
 
+  test("unconfigured embeddings: keyword fallback stays scoped, no HTTP, no invented vectors", async () => {
+    await seed();
+    await db.userToolModel
+      .deleteMany({ where: { userId: userA, toolId: "embeddings" } })
+      .catch(() => {});
+    const configured = await embeddingsConfigured(db, userA);
+
+    let fetchCalls = 0;
+    if (!configured) {
+      globalThis.fetch = (async () => {
+        fetchCalls += 1;
+        await new Promise((r) => setTimeout(r, 30_000));
+        return new Response("should not hang", { status: 500 });
+      }) as typeof fetch;
+    }
+
+    const started = Date.now();
+    const workspace = await retrieve(db, {
+      scope: ragScopeFromThread(userA, coder),
+      query: "карие глаза agent sandbox",
+      limit: 12,
+    });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    if (!configured) expect(fetchCalls).toBe(0);
+    expect(workspace.mode).toBe("keyword");
+    expect(workspace.notice).toBe(RAG_KEYWORD_NOTICE);
+    expect(workspace.hits.every((h) => h.workspaceId === coder)).toBe(true);
+    expect(workspace.hits.some((h) => h.workspaceId === book)).toBe(false);
+    expect(workspace.hits.some((h) => h.excerpt.includes("чужой"))).toBe(false);
+
+    const global = await retrieve(db, {
+      scope: ragScopeFromThread(userA, null),
+      query: "карие глаза agent инбокс",
+      limit: 12,
+    });
+    if (!configured) expect(fetchCalls).toBe(0);
+    expect(global.mode).toBe("keyword");
+    expect(global.notice).toBe(RAG_KEYWORD_NOTICE);
+    const projects = new Set(global.hits.map((h) => h.workspaceId));
+    expect(projects.has(book)).toBe(true);
+    expect(projects.has(coder)).toBe(true);
+    expect(global.hits.some((h) => h.excerpt.includes("чужой"))).toBe(false);
+  });
+
   test("vector: mocked /v1/embeddings still honors workspace filter", async () => {
     await seed();
     const provider = await db.aiProvider.create({
@@ -395,8 +440,13 @@ describe.skipIf(SKIP_PG)("retrieve scope isolation (postgres)", () => {
     expect(global.hits.some((h) => h.excerpt.includes("чужой"))).toBe(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     globalThis.fetch = originalFetch;
+    if (userA) {
+      await db.userToolModel
+        .deleteMany({ where: { userId: userA, toolId: "embeddings" } })
+        .catch(() => {});
+    }
   });
 
   afterAll(async () => {

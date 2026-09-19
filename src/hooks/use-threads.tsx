@@ -93,7 +93,11 @@ interface ThreadsContextValue {
   sendMessage: (content: string) => Promise<void>;
   abortTurn: () => void;
   /** Short RAG hint after prefetch (not the chunks themselves). */
-  canonHint: { scope: "studio" | "workspace"; hitCount: number } | null;
+  canonHint: {
+    scope: "studio" | "workspace";
+    hitCount: number;
+    mode?: "vector" | "keyword";
+  } | null;
 }
 
 const ThreadsContext = createContext<ThreadsContextValue | null>(null);
@@ -169,6 +173,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const [canonHint, setCanonHint] = useState<{
     scope: "studio" | "workspace";
     hitCount: number;
+    mode?: "vector" | "keyword";
   } | null>(null);
 
   // Refs mirror state so WS handlers and callbacks always see fresh values.
@@ -649,12 +654,14 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       threadId,
       scope,
       hitCount,
+      mode,
     }: WsCanonPrefetchPayload) => {
       if (threadId !== activeIdRef.current) return;
       if (hitCount <= 0) return;
       setCanonHint({
         scope: scope === "workspace" ? "workspace" : "studio",
         hitCount,
+        mode,
       });
     };
 

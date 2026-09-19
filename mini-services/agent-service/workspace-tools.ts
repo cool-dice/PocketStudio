@@ -28,10 +28,14 @@ import {
   mapTtsVoice,
   synthesizeSpeech,
   chatCompletion,
+  type ResolvedRoute,
 } from "../../src/lib/ai/connector";
 import { GatewayError } from "../../src/lib/ai/errors";
 import { UNCONFIGURED_TOOL_MESSAGE } from "../../src/lib/ai/tools";
-import { resolveToolRoute } from "../../src/lib/ai/resolve";
+import {
+  isUnconfiguredToolError,
+  resolveToolRoute,
+} from "../../src/lib/ai/resolve";
 import {
   composeImagePrompt,
   DOCUMENT_ANALYST_SYSTEM,
@@ -734,6 +738,18 @@ const rewriteSection: ToolDef = {
             : "rewrite";
     const instruction = optString(args.instruction, 2_000);
 
+    let route: ResolvedRoute;
+    try {
+      route = await resolveToolRoute(db, userId, "rewrite_section");
+    } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
+      if (isUnconfiguredToolError(err)) {
+        return { error: UNCONFIGURED_TOOL_MESSAGE };
+      }
+      const msg = err instanceof Error ? err.message : "Не удалось переписать главу";
+      return { error: msg };
+    }
+
     let documentId = pickString(args, ["documentId"]);
     if (!documentId) {
       const ws = await resolveWorkspace(userId, args, ctx);
@@ -781,7 +797,6 @@ const rewriteSection: ToolDef = {
     ].join("\n");
 
     try {
-      const route = await resolveToolRoute(db, userId, "rewrite_section");
       const result = await chatCompletion(route, [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -820,6 +835,9 @@ const rewriteSection: ToolDef = {
       };
     } catch (err) {
       if (isAbortFlag(err)) return abortedToolResult();
+      if (isUnconfiguredToolError(err)) {
+        return { error: UNCONFIGURED_TOOL_MESSAGE };
+      }
       const msg = err instanceof Error ? err.message : "Не удалось переписать главу";
       return { error: msg };
     }
