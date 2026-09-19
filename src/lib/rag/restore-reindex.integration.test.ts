@@ -6,6 +6,7 @@ import { flushRagQueue, indexFileContent } from "@/lib/rag/hooks";
 import { retrieve } from "@/lib/rag/retrieve";
 import { ragScopeFromThread } from "@/lib/rag/scope";
 import {
+  checkpointProject,
   initProjectGit,
   listProjectCommits,
   projectRoot,
@@ -86,6 +87,8 @@ describe.skipIf(SKIP_PG)("git restore reindexes file RAG", () => {
       goneRel,
       `export const beacon = "${goneMarker}";\n`,
     );
+    const second = await checkpointProject(root, `gone-${stamp}`);
+    expect(second.noop).toBe(false);
     await indexFileContent(db, {
       userId: owner.id,
       projectId: project.id,
@@ -131,10 +134,11 @@ describe.skipIf(SKIP_PG)("git restore reindexes file RAG", () => {
     });
     expect(leftover).toBe(0);
 
-    const afterBeta = await retrieve(db, { scope, query: betaMarker, limit: 8 });
-    expect(afterBeta.hits.some((h) => h.path === keepRel)).toBe(false);
     const afterAlpha = await retrieve(db, { scope, query: alphaMarker, limit: 8 });
-    expect(afterAlpha.hits.some((h) => h.path === keepRel)).toBe(true);
+    const keepHit = afterAlpha.hits.find((h) => h.path === keepRel);
+    expect(keepHit).toBeTruthy();
+    expect(keepHit!.excerpt).toContain(alphaMarker);
+    expect(keepHit!.excerpt).not.toContain(betaMarker);
 
     const searched = await searchCanon(
       jsonRequest(
