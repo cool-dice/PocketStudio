@@ -161,6 +161,8 @@ export interface ArtifactDto {
   meta: Record<string, unknown> | null;
   favorite: boolean;
   createdAt: string;
+  /** DB has /gen/… but the blob is gone — UI must not render a 404 link. */
+  fileMissing?: boolean;
 }
 
 export type FindingType = "contradiction" | "omission" | "inconsistency";

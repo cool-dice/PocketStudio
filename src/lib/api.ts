@@ -1258,6 +1258,13 @@ export const api = {
     return request<DashboardDto>("/api/dashboard");
   },
 
+  addAlbumFromLibrary(projectId: string, sourceId: string): Promise<ArtifactDto> {
+    return request<{ artifact: ArtifactDto }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/artifacts`,
+      { method: "POST", body: JSON.stringify({ sourceId }) },
+    ).then((r) => r.artifact);
+  },
+
   aiGenerateImage(body: {
     projectId: string;
     prompt: string;
@@ -1265,6 +1272,7 @@ export const api = {
     entityId?: string;
     stage?: string;
     size?: string;
+    albumKind?: "portrait" | "illustration" | "concept";
   }): Promise<ArtifactDto> {
     return request<{ artifact: ArtifactDto }>("/api/ai/image", {
       method: "POST",

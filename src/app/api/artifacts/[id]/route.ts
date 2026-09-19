@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { scheduleIndexArtifact, scheduleRemove } from "@/lib/rag";
 import { unlinkGeneratedFile } from "@/lib/gen-files";
 import { ensureOwned } from "@/lib/workspace-api";
-import { artifactDto } from "@/lib/workspace-shapes";
+import { liveArtifactDto } from "@/lib/workspace-shapes";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +42,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
   scheduleIndexArtifact(db, updated.id);
 
-  return NextResponse.json({ artifact: artifactDto(updated) });
+  return NextResponse.json({ artifact: liveArtifactDto(updated) });
 }
 
 /* ── DELETE /api/artifacts/[id] ── */

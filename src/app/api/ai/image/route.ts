@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { aiErrorResponse, aiGenerateImage } from "@/lib/ai";
 import { ensureWorkspace } from "@/lib/workspace-api";
-import { artifactDto } from "@/lib/workspace-shapes";
+import { liveArtifactDto } from "@/lib/workspace-shapes";
 import { scheduleIndexArtifact } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +21,7 @@ const schema = z.object({
   size: z
     .enum(["1024x1024", "1152x864", "864x1152", "1440x720", "720x1440"])
     .optional(),
+  albumKind: z.enum(["portrait", "illustration", "concept"]).optional(),
 });
 
 export async function POST(req: Request) {
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  const { projectId, prompt, title, entityId, stage, size } = parsed.data;
+  const { projectId, prompt, title, entityId, stage, size, albumKind } = parsed.data;
 
   const check = await ensureWorkspace(req, projectId);
   if (!check.ok) return check.response;
@@ -41,16 +42,17 @@ export async function POST(req: Request) {
     const artifact = await db.artifact.create({
       data: {
         projectId,
-        type: "image",
+        type: albumKind === "portrait" ? "portrait" : "image",
         title: title || prompt.slice(0, 80),
         prompt,
         entityId: entityId || null,
         stage: stage || null,
         url,
+        meta: albumKind ? JSON.stringify({ albumKind }) : null,
       },
     });
     scheduleIndexArtifact(db, artifact.id);
-    return NextResponse.json({ artifact: artifactDto(artifact) }, { status: 201 });
+    return NextResponse.json({ artifact: liveArtifactDto(artifact) }, { status: 201 });
   } catch (err) {
     const mapped = aiErrorResponse(
       err,

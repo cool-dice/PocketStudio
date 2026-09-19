@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import path from "node:path";
 
-import { publicGenUrlIfExists, unlinkGeneratedFile } from "./gen-files";
+import { publicGenUrlIfExists, unlinkGeneratedFile, duplicateGeneratedFile, withLiveGenUrl } from "./gen-files";
 
 const GEN_DIR = path.join(process.cwd(), "public", "gen");
 const NAME = `ps-test-${Date.now()}.png`;
@@ -35,5 +35,17 @@ describe("public gen files", () => {
     unlinkGeneratedFile(URL);
     expect(existsSync(FILE)).toBe(false);
     expect(publicGenUrlIfExists(URL)).toBe(null);
+  });
+
+  test("duplicate copies the blob; withLiveGenUrl flags a missing /gen path", () => {
+    mkdirSync(GEN_DIR, { recursive: true });
+    writeFileSync(FILE, Buffer.from([3, 3, 3]));
+    const dup = duplicateGeneratedFile(URL);
+    expect(dup).toMatch(/^\/gen\//);
+    expect(dup).not.toBe(URL);
+    expect(withLiveGenUrl({ url: URL })).toEqual({ url: URL, fileMissing: false });
+    unlinkGeneratedFile(URL);
+    expect(withLiveGenUrl({ url: URL })).toEqual({ url: null, fileMissing: true });
+    if (dup) unlinkGeneratedFile(dup);
   });
 });

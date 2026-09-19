@@ -4,6 +4,7 @@
  */
 
 import { db } from "@/lib/db";
+import { withLiveGenUrl } from "@/lib/gen-files";
 import { parseEntityRefs } from "@/lib/entity-meta";
 import { mentionsOfRefs, type SectionHintMap } from "@/lib/entity-mentions";
 import type {
@@ -264,10 +265,15 @@ export function artifactDto(a: ArtifactRow): ArtifactDto {
   try {
     if (a.meta) meta = JSON.parse(a.meta);
   } catch { /* дефолт */ }
+  const type = ARTIFACT_TYPES.includes(a.type)
+    ? (a.type as ArtifactType)
+    : a.type === "illustration" || a.type === "concept"
+      ? "image"
+      : "file";
   return {
     id: a.id,
     projectId: a.projectId,
-    type: (ARTIFACT_TYPES.includes(a.type) ? a.type : "file") as ArtifactType,
+    type,
     title: a.title,
     description: a.description,
     url: a.url,
@@ -278,6 +284,11 @@ export function artifactDto(a: ArtifactRow): ArtifactDto {
     favorite: a.favorite,
     createdAt: a.createdAt.toISOString(),
   };
+}
+
+/** Artifact DTO with a dead /gen URL stripped so the UI cannot 404-click it. */
+export function liveArtifactDto(a: ArtifactRow): ArtifactDto {
+  return withLiveGenUrl(artifactDto(a));
 }
 
 /* ─────────────────────────── findings ─────────────────────────── */
