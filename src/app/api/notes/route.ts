@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { noteWithCategory } from "@/lib/note-utils";
+import { scheduleIndexNote } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -83,8 +84,8 @@ export async function GET(req: Request) {
   }
 
   if (q) {
-    // Unicode-safe case-insensitive matching: SQLite LIKE/lower() are
-    // ASCII-only, so filter candidates in JS (covers Cyrillic too).
+    // Unicode-safe case-insensitive matching in JS (covers Cyrillic;
+    // Postgres ILIKE depends on the cluster locale).
     const candidates = await db.note.findMany({
       where,
       select: { id: true, rawText: true },
@@ -178,6 +179,8 @@ export async function POST(req: Request) {
       data: { noteId: note.id, projectId, kind: "context" },
     });
   }
+
+  scheduleIndexNote(db, note.id);
 
   return NextResponse.json(
     { note: noteWithCategory({ ...note, category }) },

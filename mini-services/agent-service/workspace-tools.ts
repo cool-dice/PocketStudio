@@ -29,6 +29,12 @@ import {
   DOCUMENT_ANALYST_SYSTEM,
   sectionSystemFor,
 } from "../../src/lib/ai/prompts";
+import {
+  scheduleIndexArtifact,
+  scheduleIndexEntity,
+  scheduleIndexFinding,
+  scheduleIndexSection,
+} from "../../src/lib/rag/hooks";
 
 // ─────────────────────────── shared helpers ───────────────────────────
 
@@ -55,8 +61,7 @@ interface WorkspaceRow {
 
 /**
  * Найти воркспейс пользователя: по id (workspaceId/projectId) или по
- * названию (SQLite не умеет регистронезависимый LIKE для кириллицы —
- * фильтруем в JS, как findCategoryByName в tools.ts). Приоритет: точное
+ * названию (регистр и кириллица — через JS, как findCategoryByName). Приоритет: точное
  * совпадение → «начинается с» → «содержит».
  */
 async function resolveWorkspace(
@@ -229,6 +234,8 @@ const createEntity: ToolDef = {
         portrait: makePortrait(name),
       },
     });
+
+    scheduleIndexEntity(db, entity.id);
 
     return {
       message: `Сущность создана: ${entity.name} (${entity.kind})`,
@@ -410,6 +417,7 @@ const checkDocument: ToolDef = {
         }),
       ),
     );
+    for (const f of created) scheduleIndexFinding(db, f.id);
 
     return {
       message:
@@ -477,6 +485,7 @@ const generateImage: ToolDef = {
           url,
         },
       });
+      scheduleIndexArtifact(db, artifact.id);
       return {
         message: `Изображение готово: ${artifact.title}`,
         url,
@@ -550,6 +559,7 @@ const ttsNarration: ToolDef = {
           meta: JSON.stringify({ voice, chars: text.length }),
         },
       });
+      scheduleIndexArtifact(db, artifact.id);
       return {
         message: `Озвучка готова: ${artifact.title}`,
         url,
@@ -676,6 +686,7 @@ const appendSection: ToolDef = {
         content,
       },
     });
+    scheduleIndexSection(db, section.id);
     return {
       message: `Глава добавлена: ${section.title}`,
       workspaceId: document.projectId,
@@ -785,6 +796,7 @@ const rewriteSection: ToolDef = {
         where: { id: section.id },
         data: { content: nextContent },
       });
+      scheduleIndexSection(db, section.id);
       await db.document.update({
         where: { id: document.id },
         data: { updatedAt: new Date() },

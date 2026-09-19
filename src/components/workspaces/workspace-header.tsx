@@ -25,6 +25,7 @@ import {
   MoreHorizontal,
   NotebookPen,
   Pencil,
+  RefreshCw,
   Settings2,
   Star,
   Trash2,
@@ -121,6 +122,7 @@ export function WorkspaceHeader({
   const [name, setName] = useState(workspace.name);
   const [description, setDescription] = useState(workspace.description ?? "");
   const [saving, setSaving] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -130,6 +132,20 @@ export function WorkspaceHeader({
       setDescription(workspace.description ?? "");
     }
   }, [settingsOpen, workspace.name, workspace.description]);
+
+  async function reindexWorkspace() {
+    setReindexing(true);
+    try {
+      const res = await api.reindexRag({ projectId: workspace.id });
+      toast.success(res.message ?? "Воркспейс переиндексирован");
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось переиндексировать",
+      );
+    } finally {
+      setReindexing(false);
+    }
+  }
 
   async function saveMeta() {
     const trimmed = name.trim();
@@ -446,6 +462,19 @@ export function WorkspaceHeader({
                 aria-label="Описание воркспейса"
               />
             </label>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full justify-center gap-1.5"
+              disabled={reindexing}
+              onClick={() => void reindexWorkspace()}
+            >
+              <RefreshCw className={cn("size-3.5", reindexing && "animate-spin")} />
+              {reindexing ? "Индексируем…" : "Переиндексировать"}
+            </Button>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Обновить RAG только этого воркспейса. Нужна модель инструмента «Эмбеддинги».
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={onCloseSettings}>

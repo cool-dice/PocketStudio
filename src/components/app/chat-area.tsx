@@ -26,6 +26,7 @@ import {
 import { Composer } from "@/components/app/composer";
 import { MessageBubble } from "@/components/app/message-bubble";
 import { PlanCard } from "@/components/app/plan-card";
+import { RagScopeBadge } from "@/components/app/rag-scope-badge";
 import { Welcome } from "@/components/app/welcome";
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -146,6 +147,11 @@ export function ChatArea({
                 onSelect={(mode) =>
                   void updateThreadMode(activeThread.id, mode)
                 }
+              />
+            )}
+            {activeThread && (
+              <RagScopeBadge
+                scope={activeThread.projectId ? "workspace" : "global"}
               />
             )}
           </div>

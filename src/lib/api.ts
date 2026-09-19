@@ -1525,5 +1525,16 @@ export const api = {
       { method: "POST", body: JSON.stringify({ email, role }) },
     ).then((r) => r.invite);
   },
+
+  reindexRag(body: { projectId?: string; all?: boolean } = {}): Promise<{
+    ok: true;
+    message?: string;
+    report?: Record<string, number>;
+  }> {
+    return request("/api/rag/reindex", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
 };
 

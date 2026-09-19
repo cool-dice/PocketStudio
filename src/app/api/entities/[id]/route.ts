@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
 import { entityDto } from "@/lib/workspace-shapes";
+import { scheduleIndexEntity, scheduleRemove } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,8 @@ export async function PATCH(req: Request, { params }: Params) {
     include: { linksFrom: { select: { toId: true } } },
   });
 
+  scheduleIndexEntity(db, updated.id);
+
   return NextResponse.json({
     entity: entityDto(updated, updated.linksFrom.map((l) => l.toId)),
   });
@@ -98,5 +101,6 @@ export async function DELETE(req: Request, { params }: Params) {
   const entity = check.row;
 
   await db.entity.delete({ where: { id } });
+  scheduleRemove(db, check.userId, "entity", id);
   return NextResponse.json({ ok: true });
 }

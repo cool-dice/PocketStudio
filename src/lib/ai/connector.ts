@@ -9,6 +9,7 @@
 
 import {
   ANTHROPIC_NO_ASR_MESSAGE,
+  ANTHROPIC_NO_EMBEDDINGS_MESSAGE,
   ANTHROPIC_NO_IMAGE_MESSAGE,
   ANTHROPIC_NO_TTS_MESSAGE,
   type ProviderKind,
@@ -49,6 +50,7 @@ export interface ResolvedModel {
   capImage: boolean;
   capTts: boolean;
   capAsr: boolean;
+  capEmbeddings: boolean;
 }
 
 export interface ResolvedRoute {
@@ -435,4 +437,59 @@ export async function testConnection(route: ResolvedRoute): Promise<{ ok: true; 
   );
   await throwIfNotOk(chat);
   return { ok: true, detail: "Провайдер ответил на тестовый запрос" };
+}
+
+export interface EmbeddingsResult {
+  vectors: number[][];
+  dim: number;
+}
+
+/**
+ * OpenAI-compatible POST /embeddings. Anthropic has no embeddings API —
+ * fail with a clear Russian error instead of a cryptic 404.
+ */
+export async function createEmbeddings(
+  route: ResolvedRoute,
+  inputs: string[],
+  opts: { timeoutMs?: number } = {},
+): Promise<EmbeddingsResult> {
+  requireOpenai(route, ANTHROPIC_NO_EMBEDDINGS_MESSAGE);
+  const texts = inputs.map((t) => t.slice(0, 24_000));
+  if (texts.length === 0) return { vectors: [], dim: 0 };
+  const url = joinUrl(route.provider.baseUrl, "embeddings");
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        ...authHeaders(route),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: route.model.modelId,
+        input: texts.length === 1 ? texts[0] : texts,
+      }),
+    },
+    opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  );
+  await throwIfNotOk(res);
+  const payload: unknown = await res.json();
+  const data = (payload as { data?: Array<{ embedding?: number[]; index?: number }> })
+    ?.data;
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new GatewayError("Эмбеддинги: пустой ответ провайдера", 502);
+  }
+  const ordered = [...data].sort(
+    (a, b) => (a.index ?? 0) - (b.index ?? 0),
+  );
+  const vectors = ordered.map((row) => {
+    if (!Array.isArray(row.embedding) || row.embedding.length === 0) {
+      throw new GatewayError("Эмбеддинги: провайдер не вернул вектор", 502);
+    }
+    return row.embedding;
+  });
+  if (vectors.length !== texts.length) {
+    throw new GatewayError("Эмбеддинги: число векторов не совпало со входом", 502);
+  }
+  return { vectors, dim: vectors[0]?.length ?? 0 };
 }

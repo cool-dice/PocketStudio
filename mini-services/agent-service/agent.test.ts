@@ -56,6 +56,7 @@ describe("agent tool registry", () => {
     const names = TOOLS.map((t) => t.name);
     for (const name of [
       "retrieve_canon",
+      "retrieve_code",
       "apply_patch",
       "tag_note",
       "set_reminder",

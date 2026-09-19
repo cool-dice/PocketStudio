@@ -21,6 +21,7 @@ import { MessageSquare, Sparkles } from "lucide-react";
 import { Composer } from "@/components/app/composer";
 import { MessageBubble } from "@/components/app/message-bubble";
 import { PlanCard } from "@/components/app/plan-card";
+import { RagScopeBadge } from "@/components/app/rag-scope-badge";
 import { StageBadge } from "@/components/studio/shared/module-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useThreads } from "@/hooks/use-threads";
@@ -190,6 +191,7 @@ export function WorkspaceChatTab({
               <h2 className="truncate text-sm font-semibold">
                 Оркестратор воркспейса «{workspace.title}»
               </h2>
+              <RagScopeBadge scope="workspace" />
               <StageBadge stage="beta" />
             </div>
             <p className="mt-0.5 truncate text-xs text-muted-foreground">

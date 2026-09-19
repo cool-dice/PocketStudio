@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { BUILTIN_SKILLS } from "@/lib/skills-catalog";
 import { skillDto, storeDtos } from "@/lib/skill-shapes";
+import { scheduleIndexSkill } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -90,5 +91,6 @@ export async function POST(req: Request) {
       purchased: true,
     },
   });
+  scheduleIndexSkill(db, row.id);
   return NextResponse.json({ skill: skillDto(row) }, { status: 201 });
 }

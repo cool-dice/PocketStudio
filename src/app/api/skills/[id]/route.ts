@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { skillDto } from "@/lib/skill-shapes";
+import { scheduleIndexSkill, scheduleRemove } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,7 @@ export async function PATCH(req: Request, { params }: Params) {
       ...(parsed.data.icon !== undefined ? { icon: parsed.data.icon } : {}),
     },
   });
+  scheduleIndexSkill(db, row.id);
   return NextResponse.json({ skill: skillDto(row) });
 }
 
@@ -81,13 +83,15 @@ export async function POST(req: Request, { params }: Params) {
       purchased: true,
     },
   });
+  scheduleIndexSkill(db, copy.id);
   return NextResponse.json({ skill: skillDto(copy) }, { status: 201 });
 }
 
 export async function DELETE(req: Request, { params }: Params) {
   const { id } = await params;
   const found = await ownedSkill(req, id);
-  if ("error" in found && found.error) return found.error;
+  if ("error" in found) return found.error;
   await db.skill.delete({ where: { id } });
+  scheduleRemove(db, found.session.sub, "skill", id);
   return NextResponse.json({ ok: true });
 }

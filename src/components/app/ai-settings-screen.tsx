@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Loader2, Menu, Plus, Sparkles } from "lucide-react";
+import { KeyRound, Loader2, Menu, Plus, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { ProviderCard } from "@/components/app/admin-ai-panel";
@@ -163,6 +163,19 @@ export function AiSettingsScreen({
 
               <section className="rounded-2xl border bg-card p-4 sm:p-6">
                 <h2 className="flex items-center gap-2 text-sm font-semibold">
+                  <Sparkles className="size-4 text-primary" />
+                  RAG / канон
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Переиндексировать заметки, главы, сущности, код и скиллы
+                  для поиска в чате. Нужна модель для инструмента «Эмбеддинги».
+                  Главный чат видит все воркспейсы; чат воркспейса — только его.
+                </p>
+                <ReindexButton onDone={reload} />
+              </section>
+
+              <section className="rounded-2xl border bg-card p-4 sm:p-6">
+                <h2 className="flex items-center gap-2 text-sm font-semibold">
                   <KeyRound className="size-4 text-primary" />
                   Свой провайдер (BYOK)
                 </h2>
@@ -262,5 +275,35 @@ export function AiSettingsScreen({
         </div>
       </div>
     </section>
+  );
+}
+
+function ReindexButton({ onDone }: { onDone: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="mt-4 gap-1.5 rounded-xl"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        void api
+          .reindexRag()
+          .then((r) => {
+            toast.success(r.message ?? "Канон переиндексирован");
+            return onDone();
+          })
+          .catch((err) =>
+            toast.error(
+              err instanceof ApiError ? err.message : "Не удалось переиндексировать",
+            ),
+          )
+          .finally(() => setBusy(false));
+      }}
+    >
+      {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+      {busy ? "Индексируем…" : "Переиндексировать"}
+    </Button>
   );
 }

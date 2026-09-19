@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
 import { snapshotSection } from "@/lib/section-revisions";
 import { sectionDto } from "@/lib/workspace-shapes";
+import { scheduleIndexSection, scheduleRemove } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,8 @@ export async function PATCH(req: Request, { params }: Params) {
     }),
   ]);
 
+  scheduleIndexSection(db, updated.id);
+
   return NextResponse.json({ section: sectionDto(updated) });
 }
 
@@ -82,5 +85,6 @@ export async function DELETE(req: Request, { params }: Params) {
       data: { updatedAt: new Date() },
     }),
   ]);
+  scheduleRemove(db, check.userId, "section", id);
   return NextResponse.json({ ok: true });
 }

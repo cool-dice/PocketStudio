@@ -4,6 +4,8 @@ import {
   IDENTITY_BLOCK,
   JSON_TOOL_CONTRACT,
   OUTPUT_PROSE_CONTRACT,
+  RAG_GLOBAL_BLOCK,
+  RAG_WORKSPACE_BLOCK,
   wrapSkillDocs,
 } from "../../src/lib/ai/prompts";
 
@@ -16,7 +18,8 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - open_note {"noteId"}
 - tag_note {"noteId","tags":["…"]}
 - set_reminder {"noteId","at":"ISO-8601"}
-- retrieve_canon {"query","workspaceId?"} — канон воркспейса: заметки, главы, сущности
+- retrieve_canon {"query","kinds"?} — RAG: заметки, главы, сущности, код, скиллы. Скоуп = этот чат
+- retrieve_code {"query"} — то же, только файлы (kinds: file)
 - create_document {"title","content","sectionTitle?","kind?"}
 - append_section {"documentId","title","content"}
 - rewrite_section {"documentId?","action":"write|rewrite|continue","instruction?"}
@@ -36,13 +39,13 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - checkpoint {"message?"}
 - complete_task {"task":номер 1-based}
 
-Правила выбора: мысль → create_note; «вспомни/найди в каноне» → retrieve_canon или search_notes; глава с нуля → rewrite_section action write или create_document; правка существующего файла → apply_patch, новый файл → write_file. В чате воркспейса не спрашивай id — инструменты возьмут контекст.`;
+Правила выбора: мысль → create_note; «вспомни/найди в каноне» → retrieve_canon; код → retrieve_code или retrieve_canon kinds file; глава с нуля → rewrite_section action write или create_document; правка существующего файла → apply_patch, новый файл → write_file. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
 
 const MODE_PROMPTS: Record<ThreadModeName, string> = {
-  ask: `Режим «Спросить»: отвечай и разбирай. Разрешено: заметки, retrieve_canon, чтение файлов, документы/сущности/картинка/озвучка/аналитик.
+  ask: `Режим «Спросить»: отвечай и разбирай. Разрешено: заметки, retrieve_canon, retrieve_code, чтение файлов, документы/сущности/картинка/озвучка/аналитик.
 Запрещено: write_file, apply_patch, delete_file, checkpoint, create_project.
-Если идея приложения сырая — максимум 2 уточняющих вопроса, затем предложи план (не 7-шаговое интервью).`,
-  plan: `Режим «План»: сначала контекст (retrieve_canon / list_notes / list_files), затем план. Не меняй файлы и не создавай проекты.
+Сначала retrieve_canon, если вопрос про канон, персонажей, API или пути. Если идея приложения сырая — максимум 2 уточняющих вопроса, затем предложи план (не 7-шаговое интервью).`,
+  plan: `Режим «План»: сначала контекст (retrieve_canon / retrieve_code / list_notes / list_files), затем план. Не меняй файлы и не создавай проекты.
 
 Завершающий ответ ОБЯЗАН содержать в конце:
 \`\`\`план
@@ -50,16 +53,19 @@ const MODE_PROMPTS: Record<ThreadModeName, string> = {
 - [ ] Второй шаг
 \`\`\`
 3–8 шагов, один маркер на строку, до 120 символов, без нумерации. Не планируй работу, которую пользователь не просил. Не планируй файлы вне активного проекта. Если нужен проект, а его нет — первый шаг «Создать проект …». Для кода последний шаг — проверка/чекпоинт. Перед блоком — 1–3 предложения.`,
-  act: `Режим «Действовать»: полная свобода инструментов. Перед правкой канона вызови retrieve_canon. Существующий файл — apply_patch; новый — write_file. После серий правок — checkpoint. Шаги плана отмечай complete_task сразу после выполнения. Не пиши файлы вне корня активного проекта. Не давай финальный текст, пока выполненные шаги не отмечены.`,
-  review: `Режим «Ревью»: только чтение (list_files, read_file, retrieve_canon). Оценивай код и тексты: проблемы, риски, улучшения. Предлагай правки сниппетами \`\`\`diff. Не изменяй файлы. Опирайся только на прочитанное — не выдумывай пути.`,
+  act: `Режим «Действовать»: полная свобода инструментов. Перед правкой канона или кода вызови retrieve_canon / retrieve_code. Существующий файл — apply_patch; новый — write_file. После серий правок — checkpoint. Шаги плана отмечай complete_task сразу после выполнения. Не пиши файлы вне корня активного проекта. Не давай финальный текст, пока выполненные шаги не отмечены.`,
+  review: `Режим «Ревью»: только чтение (list_files, read_file, retrieve_canon, retrieve_code). Оценивай код и тексты: проблемы, риски, улучшения. Предлагай правки сниппетами \`\`\`diff. Не изменяй файлы. Опирайся только на прочитанное — не выдумывай пути.`,
 };
 
 export function buildAgentSystemPrompt(opts: {
   mode: string;
+  ragScope?: "global" | "workspace";
   projectName?: string | null;
+  projectType?: string | null;
   projectOrigin?: string | null;
   projectTree?: string[];
   recentCommits?: string[];
+  studios?: { name: string; type: string }[];
   planTasks?: { text: string; done: boolean }[];
   mcpToolDocs?: string[];
   filesystemOff?: boolean;
@@ -70,13 +76,24 @@ export function buildAgentSystemPrompt(opts: {
       ? opts.mode
       : "ask";
 
+  const ragScope = opts.ragScope ?? (opts.projectName ? "workspace" : "global");
+  const ragBlock = ragScope === "workspace" ? RAG_WORKSPACE_BLOCK : RAG_GLOBAL_BLOCK;
+
   let prompt = [
     IDENTITY_BLOCK,
+    ragBlock,
     JSON_TOOL_CONTRACT,
     TOOLS_BLOCK,
     OUTPUT_PROSE_CONTRACT,
     MODE_PROMPTS[modeName],
   ].join("\n\n");
+
+  if (ragScope === "global" && (opts.studios?.length ?? 0) > 0) {
+    prompt += `\n\nСтудии пользователя:\n${opts.studios!
+      .slice(0, 30)
+      .map((s) => `- ${s.name} (${s.type})`)
+      .join("\n")}`;
+  }
 
   const projectName = (opts.projectName ?? "").trim();
   if (projectName) {
@@ -85,9 +102,14 @@ export function buildAgentSystemPrompt(opts: {
     const origin = (opts.projectOrigin ?? "").trim();
     const lines: string[] = [
       `Активный проект: ${projectName}${origin ? ` (origin: ${origin})` : ""}. Пиши только в эти пути.`,
+      opts.projectType === "app"
+        ? "Тип: приложение. Ты личный кодер только этого репозитория — не подмешивай файлы и канон других воркспейсов."
+        : opts.projectType
+          ? `Тип воркспейса: ${opts.projectType}.`
+          : "",
       "Структура (до 40 путей):",
       ...(tree.length > 0 ? tree.map((p) => `- ${p}`) : ["- (пусто)"]),
-    ];
+    ].filter(Boolean);
     if (commits.length > 0) {
       lines.push("Последние коммиты:");
       lines.push(...commits.map((c) => `- ${c}`));

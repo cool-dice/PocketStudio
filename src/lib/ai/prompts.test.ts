@@ -5,6 +5,8 @@ import {
   IDENTITY_BLOCK,
   JSON_TOOL_CONTRACT,
   NOTES_ANALYSIS_SYSTEM,
+  RAG_GLOBAL_BLOCK,
+  RAG_WORKSPACE_BLOCK,
   composeImagePrompt,
   IMAGE_PROMPT_PREFIX,
   sectionSystemFor,
@@ -14,6 +16,7 @@ import {
 describe("prompt library", () => {
   test("identity is PocketStudio штурман, not a vendor chatbot", () => {
     expect(IDENTITY_BLOCK).toContain("штурман студии PocketStudio");
+    expect(IDENTITY_BLOCK).toContain("retrieve_canon");
     expect(IDENTITY_BLOCK.toLowerCase()).not.toContain("z-ai");
     expect(IDENTITY_BLOCK.toLowerCase()).not.toContain("chatglm");
     expect(IDENTITY_BLOCK.toLowerCase()).not.toContain("vibeflow");
@@ -54,5 +57,15 @@ describe("prompt library", () => {
     expect(once.startsWith(IMAGE_PROMPT_PREFIX)).toBe(true);
     expect(once).toContain("a red boat");
     expect(composeImagePrompt(once)).toBe(once);
+  });
+
+  test("RAG scope blocks isolate workspace vs studio", () => {
+    expect(RAG_GLOBAL_BLOCK).toContain("ВСЕХ воркспейсов");
+    expect(RAG_GLOBAL_BLOCK).toContain("Цитируй имя воркспейса");
+    expect(RAG_GLOBAL_BLOCK).toContain("только если в этом треде открыт проект");
+    expect(RAG_WORKSPACE_BLOCK).toContain("только ЭТОТ воркспейс");
+    expect(RAG_WORKSPACE_BLOCK).toContain("личный кодер");
+    expect(RAG_WORKSPACE_BLOCK).toContain("открыть её или спросить в главном чате");
+    expect(IDENTITY_BLOCK).toContain("не выдумывай");
   });
 });

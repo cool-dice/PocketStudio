@@ -8,6 +8,8 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "@/lib/workspace";
+import { scheduleIndexFile } from "@/lib/rag";
+import { shouldSkipPath } from "@/lib/rag/skip";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +106,14 @@ export async function PUT(
       where: { id: project.id },
       data: { updatedAt: new Date() },
     });
+    if (!shouldSkipPath(result.path)) {
+      scheduleIndexFile(db, {
+        userId: session.sub,
+        projectId: project.id,
+        relPath: result.path,
+        content: parsed.data.content,
+      });
+    }
     return NextResponse.json(result);
   } catch (err) {
     return errorResponse(err);

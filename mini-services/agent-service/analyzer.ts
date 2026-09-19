@@ -1,8 +1,8 @@
 // PocketStudio analyzer — Stage 2 honest analysis pipeline.
 //
 // Every new note (from ⌘K capture, the chat agent's create_note tool, or voice
-// capture) is created with status "pending". This worker polls the shared
-// SQLite every ANALYSIS_POLL_MS, picks the oldest pending notes (up to
+// capture) is created with status "pending". This worker polls Postgres
+// every ANALYSIS_POLL_MS, picks the oldest pending notes (up to
 // BATCH_PER_TICK, processed sequentially) and runs the 4-block LLM analysis:
 //
 //   positive (сильные стороны) / negative (риски) / final (синтез) /
@@ -21,6 +21,7 @@ import type { Server } from "socket.io";
 import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
 import { NOTES_ANALYSIS_SYSTEM } from "../../src/lib/ai/prompts";
+import { scheduleIndexNote } from "../../src/lib/rag/hooks";
 import { createNotification } from "./notifications";
 import {
   CATEGORY_COLORS,
@@ -303,6 +304,7 @@ async function analyzeNote(noteId: string): Promise<void> {
       updatedAt: new Date(),
     },
   });
+  scheduleIndexNote(db, noteId);
   console.log(`[analyzer] note ${noteId.slice(-6)} → processed (cat: ${categoryId ? analysis.categoryName : "kept"})`);
   await createNotification(
     io,

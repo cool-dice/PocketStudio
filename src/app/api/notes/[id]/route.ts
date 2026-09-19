@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { noteWithCategory } from "@/lib/note-utils";
+import { scheduleIndexNote, scheduleRemove } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -149,6 +150,8 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     include: { category: true, tags: { include: { tag: true } } },
   });
 
+  scheduleIndexNote(db, note.id);
+
   return NextResponse.json({ note: noteWithCategory(note) });
 }
 
@@ -169,6 +172,7 @@ export async function DELETE(req: Request, ctx: RouteContext) {
   }
 
   await db.note.delete({ where: { id } });
+  scheduleRemove(db, session.sub, "note", id);
 
   return NextResponse.json({ ok: true });
 }

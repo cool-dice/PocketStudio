@@ -26,7 +26,7 @@ export { AI_TOOLS, AI_TOOL_IDS, UNCONFIGURED_TOOL_MESSAGE } from "./tools";
 export type { AiToolId } from "./tools";
 export { maskApiKey, last4OfKey } from "./crypto";
 export { resolveToolRoute } from "./resolve";
-export { testConnection, mapTtsVoice } from "./connector";
+export { testConnection, mapTtsVoice, createEmbeddings } from "./connector";
 
 /** Папка для сгенерированных файлов (раздаётся Next как статика /gen/...). */
 const GEN_DIR = path.join(process.cwd(), "public", "gen");

@@ -78,6 +78,7 @@ function toRoute(toolId: string, row: LoadedCandidate): ResolvedRoute {
     capImage: row.capImage,
     capTts: row.capTts,
     capAsr: row.capAsr,
+    capEmbeddings: row.capEmbeddings,
   };
   return { toolId, provider, model };
 }
@@ -268,6 +269,7 @@ export async function routeForProviderTest(
       capImage: model?.capImage ?? false,
       capTts: model?.capTts ?? false,
       capAsr: model?.capAsr ?? false,
+      capEmbeddings: model?.capEmbeddings ?? false,
     },
   };
 }

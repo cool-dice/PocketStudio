@@ -1,8 +1,8 @@
 // GET /api/admin/stats — platform overview for the admin panel (Stage 4b).
 //
 // Honest scope: personal-scale counts + a 14-day activity sparkline built
-// from createdAt timestamps bucketed in JS (SQLite groupBy can't bucket
-// dates, and the row counts are bounded anyway).
+// from createdAt timestamps bucketed in JS (date buckets stay in process;
+// the row counts are bounded anyway).
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";

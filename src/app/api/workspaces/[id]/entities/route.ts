@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { entityDto } from "@/lib/workspace-shapes";
+import { scheduleIndexEntity } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +86,8 @@ export async function POST(req: Request, { params }: Params) {
       portrait: data.portrait ? JSON.stringify(data.portrait) : null,
     },
   });
+
+  scheduleIndexEntity(db, entity.id);
 
   return NextResponse.json({ entity: entityDto(entity) }, { status: 201 });
 }

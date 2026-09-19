@@ -17,6 +17,8 @@
 // (worklog Task 4, Task 1-a).
 
 import { db } from "./db-client";
+import { scheduleIndexFile, scheduleIndexNote, scheduleRemove } from "../../src/lib/rag/hooks";
+import { shouldSkipPath } from "../../src/lib/rag/skip";
 import {
   projectRoot,
   createFromTemplate,
@@ -121,7 +123,7 @@ function parseLimit(value: unknown, fallback = 10): number {
   return Math.min(20, Math.max(1, Math.floor(n)));
 }
 
-/** Find the user's category by exact name, case-insensitive (SQLite-aware). */
+/** Find the user's category by exact name, case-insensitive (JS, Unicode-safe). */
 async function findCategoryByName(
   userId: string,
   name: string,
@@ -264,6 +266,8 @@ const createNote: ToolDef = {
       }
     }
 
+    scheduleIndexNote(db, note.id);
+
     return {
       note: {
         id: note.id,
@@ -303,7 +307,7 @@ const searchNotes: ToolDef = {
 
     const limit = parseLimit(args.limit);
 
-    // SQLite has no case-insensitive LIKE for non-ASCII (Russian) via Prisma
+    // Unicode-safe case-insensitive match (JS): Postgres ILIKE depends on locale.
     // `contains`, so fetch the newest 500 notes and filter in JS.
     const needle = query.toLowerCase();
     const recent = await db.note.findMany({
@@ -669,7 +673,16 @@ const writeFile: ToolDef = {
 
     try {
       const root = projectRoot(loaded.project.id);
-      return await writeWorkspaceFile(root, args.path.trim(), args.content, MAX_AGENT_FILE_BYTES);
+      const written = await writeWorkspaceFile(root, args.path.trim(), args.content, MAX_AGENT_FILE_BYTES);
+      if (!shouldSkipPath(written.path)) {
+        scheduleIndexFile(db, {
+          userId,
+          projectId: loaded.project.id,
+          relPath: written.path,
+          content: args.content,
+        });
+      }
+      return written;
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };
     }
@@ -728,6 +741,14 @@ const applyPatch: ToolDef = {
         next,
         MAX_AGENT_FILE_BYTES,
       );
+      if (!shouldSkipPath(written.path)) {
+        scheduleIndexFile(db, {
+          userId,
+          projectId: loaded.project.id,
+          relPath: written.path,
+          content: next,
+        });
+      }
       return {
         path: written.path,
         replacements,
@@ -766,7 +787,9 @@ const deleteFile: ToolDef = {
 
     try {
       const root = projectRoot(loaded.project.id);
-      return await deleteWorkspacePath(root, args.path.trim());
+      const deleted = await deleteWorkspacePath(root, args.path.trim());
+      scheduleRemove(db, userId, "file", `${loaded.project.id}:${deleted.path}`);
+      return deleted;
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };
     }

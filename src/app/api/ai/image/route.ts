@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { aiErrorResponse, aiGenerateImage } from "@/lib/ai";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { artifactDto } from "@/lib/workspace-shapes";
+import { scheduleIndexArtifact } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
         url,
       },
     });
+    scheduleIndexArtifact(db, artifact.id);
     return NextResponse.json({ artifact: artifactDto(artifact) }, { status: 201 });
   } catch (err) {
     const mapped = aiErrorResponse(

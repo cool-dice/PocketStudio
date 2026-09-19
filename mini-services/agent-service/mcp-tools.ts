@@ -1,7 +1,7 @@
 // PocketStudio MCP tools (Фаза D) — builtin-адаптеры реестра интеграций.
 //
 // Три инструмента, которые включает/выключает пользователь на экране
-// «Интеграции» (строки McpServer в общей SQLite):
+// «Интеграции» (строки McpServer в Postgres):
 //   fetch      → fetch_url  (обычный HTTP + HTML→текст)
 //              → web_search (DuckDuckGo HTML)
 //   browser    → browser_read (agent-browser CLI: open + read + close)

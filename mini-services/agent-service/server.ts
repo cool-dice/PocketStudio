@@ -164,9 +164,18 @@ async function buildTurnSystemPrompt(
       return `### ${s.name}\nТриггеры: ${triggers}\n\n${s.skillMd}`;
     });
 
+    const studios = await db.project.findMany({
+      where: { userId, archived: false },
+      select: { name: true, type: true },
+      orderBy: { updatedAt: "desc" },
+      take: 30,
+    });
+
     if (!thread.projectId) {
       return buildAgentSystemPrompt({
         mode: thread.mode,
+        ragScope: "global",
+        studios,
         planTasks,
         mcpToolDocs: mcp.docs,
         filesystemOff: mcp.filesystemOff,
@@ -175,11 +184,13 @@ async function buildTurnSystemPrompt(
     }
     const project = await db.project.findFirst({
       where: { id: thread.projectId, userId },
-      select: { id: true, name: true, origin: true },
+      select: { id: true, name: true, origin: true, type: true },
     });
     if (!project) {
       return buildAgentSystemPrompt({
         mode: thread.mode,
+        ragScope: "global",
+        studios,
         mcpToolDocs: mcp.docs,
         filesystemOff: mcp.filesystemOff,
         skillDocs,
@@ -192,7 +203,9 @@ async function buildTurnSystemPrompt(
     ]);
     return buildAgentSystemPrompt({
       mode: thread.mode,
+      ragScope: "workspace",
       projectName: project.name,
+      projectType: project.type,
       projectOrigin: project.origin,
       projectTree: tree.entries
         .filter((e) => e.type === "file")
@@ -1117,14 +1130,11 @@ io.on("connection", async (socket: Socket) => {
 // ─────────────────────────── boot ───────────────────────────
 
 async function main() {
-  // Shared SQLite: enable WAL + busy timeout so the Next.js app and this
-  // service can write concurrently without "database is locked" errors.
   try {
-    await db.$queryRawUnsafe("PRAGMA journal_mode=WAL;");
-    await db.$queryRawUnsafe("PRAGMA busy_timeout=5000;");
+    await db.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS vector");
   } catch (err) {
     console.warn(
-      "[db] WAL/busy_timeout pragma failed (continuing):",
+      "[db] CREATE EXTENSION vector failed (is DATABASE_URL Postgres + pgvector?):",
       err instanceof Error ? err.message : String(err),
     );
   }

@@ -14,6 +14,8 @@ let userId: string | null = null;
 let token: string | null = null;
 let workspaceId: string | null = null;
 
+const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
+
 function jsonRequest(
   url: string,
   method: string,
@@ -37,7 +39,7 @@ afterAll(async () => {
   await db.$disconnect().catch(() => {});
 });
 
-describe("MVP smoke: auth", () => {
+describe.skipIf(SKIP_PG)("MVP smoke: auth", () => {
   test("register rejects invalid JSON", async () => {
     const res = await register(
       new Request("http://localhost/api/auth/register", {
@@ -66,7 +68,7 @@ describe("MVP smoke: auth", () => {
   });
 });
 
-describe("MVP smoke: workspaces + notes", () => {
+describe.skipIf(SKIP_PG)("MVP smoke: workspaces + notes", () => {
   test("unauthenticated workspace create is 401", async () => {
     const res = await createWorkspace(
       jsonRequest("http://localhost/api/workspaces", "POST", {
@@ -135,7 +137,7 @@ describe("MVP smoke: workspaces + notes", () => {
   });
 });
 
-describe("MVP smoke: AI unconfigured", () => {
+describe.skipIf(SKIP_PG)("MVP smoke: AI unconfigured", () => {
   test("image generation fails in Russian when no provider is set for the user", async () => {
     expect(token && workspaceId).toBeTruthy();
     const res = await aiImage(
@@ -159,7 +161,7 @@ describe("MVP smoke: AI unconfigured", () => {
   });
 });
 
-describe("full app smoke: skills, favorite, duplicate, offers", () => {
+describe.skipIf(SKIP_PG)("full app smoke: skills, favorite, duplicate, offers", () => {
   test("skills catalog seeds builtins and toggles persist", async () => {
     expect(token).toBeTruthy();
     const { GET: listSkills, POST: createSkill } = await import("./skills/route");

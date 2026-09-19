@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { chatCompletion, generateImage, synthesizeSpeech } from "./connector";
+import { chatCompletion, createEmbeddings, generateImage, synthesizeSpeech } from "./connector";
 import type { ResolvedRoute } from "./connector";
 import { GatewayError } from "./errors";
 import { pickCandidate, type LoadedCandidate } from "./resolve";
@@ -27,6 +27,7 @@ const openaiRoute: ResolvedRoute = {
     capImage: true,
     capTts: true,
     capAsr: true,
+    capEmbeddings: false,
   },
 };
 
@@ -150,6 +151,39 @@ describe("Anthropic messages", () => {
       expect(err).toBeInstanceOf(GatewayError);
       expect((err as GatewayError).message).toMatch(/озвуч/);
     }
+  });
+
+  test("embeddings fail with a clear Russian error", async () => {
+    try {
+      await createEmbeddings(anthropicRoute, ["карие глаза"]);
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(GatewayError);
+      expect((err as GatewayError).message).toMatch(/эмбеддинг/i);
+    }
+  });
+});
+
+describe("OpenAI embeddings", () => {
+  test("POSTs /embeddings and returns vectors in order", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("https://api.openai.com/v1/embeddings");
+      const body = JSON.parse(String(init?.body));
+      expect(body.model).toBe("gpt-4o-mini");
+      expect(body.input).toEqual(["hello", "world"]);
+      return jsonResponse({
+        data: [
+          { index: 1, embedding: [0, 1] },
+          { index: 0, embedding: [1, 0] },
+        ],
+      });
+    }) as typeof fetch;
+    const { vectors, dim } = await createEmbeddings(openaiRoute, ["hello", "world"]);
+    expect(dim).toBe(2);
+    expect(vectors).toEqual([
+      [1, 0],
+      [0, 1],
+    ]);
   });
 });
 

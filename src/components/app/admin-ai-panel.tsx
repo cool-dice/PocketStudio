@@ -314,6 +314,7 @@ export function ProviderCard({
     capImage: false,
     capTts: false,
     capAsr: false,
+    capEmbeddings: false,
   });
   const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -482,6 +483,7 @@ export function ProviderCard({
             ["capImage", "картинки"],
             ["capTts", "озвучка"],
             ["capAsr", "речь"],
+            ["capEmbeddings", "эмбеддинги"],
           ] as const
         ).map(([key, label]) => (
           <label key={key} className="inline-flex items-center gap-1.5">
@@ -513,6 +515,7 @@ function ModelRow({
     model.capImage && "картинки",
     model.capTts && "озвучка",
     model.capAsr && "речь",
+    model.capEmbeddings && "эмбеддинги",
   ].filter(Boolean);
 
   return (

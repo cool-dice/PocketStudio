@@ -1,6 +1,6 @@
 /**
- * Pragmatic workspace canon retrieval (replaces proto2 pgvector RAG).
- * Cyrillic-safe substring match over notes, document sections, entities.
+ * Keyword ranking helpers used by RAG fallback (same user/project filters
+ * as vector search). Cyrillic-safe substring match.
  */
 
 export type CanonHitKind = "note" | "section" | "entity";

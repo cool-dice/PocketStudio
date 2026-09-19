@@ -1,9 +1,12 @@
 /**
- * retrieve_canon / tag_note / set_reminder — proto1 inbox + proto2 RAG, SQLite.
+ * retrieve_canon / retrieve_code / tag_note / set_reminder.
+ * RAG is scoped from the open thread — never from a model-supplied foreign workspaceId.
  */
 
 import { db } from "./db-client";
-import { rankCanonHits } from "../../src/lib/retrieve";
+import { retrieve } from "../../src/lib/rag/retrieve";
+import { resolveRetrieveScope } from "../../src/lib/rag/scope";
+import { RAG_SOURCE_TYPES } from "../../src/lib/rag/types";
 import type { ToolContext, ToolDef } from "./tools";
 
 function pickString(args: Record<string, unknown>, keys: string[]): string | null {
@@ -14,103 +17,106 @@ function pickString(args: Record<string, unknown>, keys: string[]): string | nul
   return null;
 }
 
+function parseKinds(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const kinds = raw
+    .map((k) => String(k))
+    .filter((k) => (RAG_SOURCE_TYPES as readonly string[]).includes(k));
+  return kinds.length ? kinds : undefined;
+}
+
+async function runRetrieve(
+  args: Record<string, unknown>,
+  userId: string,
+  ctx: ToolContext,
+  forcedKinds?: string[],
+) {
+  const query = pickString(args, ["query", "q"]);
+  if (!query) return { error: "Аргумент query обязателен" };
+
+  const requested = pickString(args, ["workspaceId", "projectId"]);
+  const scope = resolveRetrieveScope({
+    userId,
+    threadProjectId: ctx.projectId,
+    requestedProjectId: requested,
+  });
+
+  if (scope.kind === "workspace" && scope.projectId) {
+    const owned = await db.project.findFirst({
+      where: { id: scope.projectId, userId },
+      select: { id: true, name: true, type: true },
+    });
+    if (!owned) return { error: "Воркспейс не найден" };
+  }
+
+  const limitRaw = typeof args.limit === "number" ? args.limit : Number(args.limit);
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(12, Math.max(1, Math.floor(limitRaw)))
+    : 8;
+  const kinds = forcedKinds ?? parseKinds(args.kinds);
+
+  const result = await retrieve(db, { scope, query, kinds, limit });
+  const hits = result.hits.map((h) => ({
+    kind: h.kind,
+    id: h.sourceId,
+    title: h.title,
+    excerpt: h.excerpt,
+    workspaceId: h.workspaceId,
+    workspaceName: h.workspaceName,
+    path: h.path,
+  }));
+
+  const isolation =
+    result.scope === "workspace"
+      ? "Только этот воркспейс — чужой канон и чужой код недоступны."
+      : "Главный чат: фрагменты со всех ваших воркспейсов. Цитируйте имя студии.";
+
+  return {
+    query: result.query,
+    scope: result.scope,
+    mode: result.mode,
+    notice: result.notice,
+    isolation,
+    hits,
+    message:
+      hits.length === 0
+        ? result.notice
+          ? `Ничего не найдено (${result.notice}). Не выдумывай факты.`
+          : "В каноне ничего не нашлось — не выдумывай факты, спроси пользователя."
+        : `Найдено ${hits.length} фрагментов${result.notice ? ` (${result.notice})` : ""}.`,
+  };
+}
+
 const retrieveCanon: ToolDef = {
   name: "retrieve_canon",
   description:
-    "Найти канон воркспейса: заметки, главы документов и сущности по запросу. Не выдумывает факты.",
+    "RAG по канону: заметки, главы, сущности, артефакты, код, скиллы. Скоуп берётся из чата (главный = все воркспейсы пользователя; чат воркспейса = только он). Не выдумывает факты.",
   argsSchema: {
     query: "поисковый запрос (обязательно)",
-    workspaceId: "ограничить воркспейсом (необязательно — берётся из чата)",
+    kinds: "опционально: note|section|entity|artifact|file|thread|skill|finding",
     limit: "сколько хитов вернуть, 1–12",
   },
   async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
-    const query = pickString(args, ["query", "q"]);
-    if (!query) return { error: "Аргумент query обязателен" };
-    const workspaceId =
-      pickString(args, ["workspaceId", "projectId"]) ?? ctx.projectId ?? null;
+    return runRetrieve(args, userId, ctx);
+  },
+};
 
-    const noteWhere = workspaceId
-      ? {
-          userId,
-          links: { some: { projectId: workspaceId } },
-        }
-      : { userId };
-    const notes = await db.note.findMany({
-      where: noteWhere,
-      select: { id: true, rawText: true, links: { select: { projectId: true } } },
-      orderBy: { updatedAt: "desc" },
-      take: 120,
-    });
-
-    const sectionWhere = workspaceId
-      ? { document: { project: { userId, id: workspaceId } } }
-      : { document: { project: { userId } } };
-    const sections = await db.documentSection.findMany({
-      where: sectionWhere,
-      select: {
-        id: true,
-        title: true,
-        content: true,
-        document: { select: { projectId: true, title: true } },
-      },
-      take: 80,
-    });
-
-    const entityWhere = workspaceId
-      ? { project: { userId, id: workspaceId } }
-      : { project: { userId } };
-    const entities = await db.entity.findMany({
-      where: entityWhere,
-      select: {
-        id: true,
-        name: true,
-        short: true,
-        description: true,
-        projectId: true,
-      },
-      take: 80,
-    });
-
-    const rows = [
-      ...notes.map((n) => ({
-        kind: "note" as const,
-        id: n.id,
-        title: "Заметка",
-        body: n.rawText ?? "",
-        workspaceId: n.links[0]?.projectId ?? workspaceId,
-      })),
-      ...sections.map((s) => ({
-        kind: "section" as const,
-        id: s.id,
-        title: `${s.document.title} · ${s.title}`,
-        body: s.content,
-        workspaceId: s.document.projectId,
-      })),
-      ...entities.map((e) => ({
-        kind: "entity" as const,
-        id: e.id,
-        title: e.name,
-        body: [e.short, e.description].filter(Boolean).join("\n"),
-        workspaceId: e.projectId,
-      })),
-    ];
-
-    const limitRaw = typeof args.limit === "number" ? args.limit : Number(args.limit);
-    const limit = Number.isFinite(limitRaw)
-      ? Math.min(12, Math.max(1, Math.floor(limitRaw)))
-      : 8;
-    const hits = rankCanonHits(query, rows, limit);
-    return {
-      query,
-      hits,
-      message:
-        hits.length === 0
-          ? "В каноне ничего не нашлось — не выдумывай факты, спроси пользователя."
-          : `Найдено ${hits.length} фрагментов канона.`,
-    };
+const retrieveCode: ToolDef = {
+  name: "retrieve_code",
+  description:
+    "То же, что retrieve_canon с kinds=['file']: код активного воркспейса (в главном чате — файлы всех репозиториев пользователя). Не читает чужие воркспейсы.",
+  argsSchema: {
+    query: "что искать в коде",
+    limit: "сколько фрагментов, 1–12",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    return runRetrieve(args, userId, ctx, ["file"]);
   },
 };
 
@@ -194,4 +200,4 @@ const setReminder: ToolDef = {
   },
 };
 
-export const CANON_TOOLS: ToolDef[] = [retrieveCanon, tagNote, setReminder];
+export const CANON_TOOLS: ToolDef[] = [retrieveCanon, retrieveCode, tagNote, setReminder];

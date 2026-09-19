@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 
 import { PrismaClient } from "@prisma/client";
 
@@ -9,18 +9,28 @@ import { resolveToolRoute } from "./resolve";
 import { UNCONFIGURED_TOOL_MESSAGE } from "./tools";
 
 const db = new PrismaClient();
+const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 
-describe("resolveToolRoute unconfigured", () => {
+describe.skipIf(SKIP_PG)("resolveToolRoute unconfigured", () => {
   test("throws the Russian admin message when no default exists", async () => {
-    const user = await db.user.findFirst({ select: { id: true } });
-    expect(user).toBeTruthy();
+    const email = `resolve-unconfigured-${Date.now().toString(36)}@example.test`;
+    const user = await db.user.create({
+      data: {
+        email,
+        name: "Resolve",
+        passwordHash: "x",
+        role: "client",
+      },
+    });
     try {
-      await resolveToolRoute(db, user!.id, "image");
+      await resolveToolRoute(db, user.id, "image");
       throw new Error("expected throw");
     } catch (err) {
       expect(err).toBeInstanceOf(GatewayError);
       expect((err as GatewayError).message).toBe(UNCONFIGURED_TOOL_MESSAGE);
       expect((err as GatewayError).status).toBe(400);
+    } finally {
+      await db.user.delete({ where: { id: user.id } }).catch(() => {});
     }
   });
 });
@@ -37,7 +47,7 @@ describe("provider URL validation", () => {
   });
 });
 
-describe("platform provider CRUD (db)", () => {
+describe.skipIf(SKIP_PG)("platform provider CRUD (db)", () => {
   test("creates a provider with encrypted key and masked last4", async () => {
     const row = await db.aiProvider.create({
       data: {
@@ -56,4 +66,8 @@ describe("platform provider CRUD (db)", () => {
     expect(row.apiKeyLast4).toBe("xyz9");
     await db.aiProvider.delete({ where: { id: row.id } });
   });
+});
+
+afterAll(async () => {
+  await db.$disconnect().catch(() => {});
 });

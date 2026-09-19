@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { snapshotSection } from "@/lib/section-revisions";
 import { ensureOwned } from "@/lib/workspace-api";
 import { sectionDto } from "@/lib/workspace-shapes";
+import { scheduleIndexSection } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -108,6 +109,8 @@ export async function POST(req: Request) {
         data: { updatedAt: new Date() },
       }),
     ]);
+
+    scheduleIndexSection(db, updated.id);
 
     return NextResponse.json({ section: sectionDto(updated) });
   } catch (err) {

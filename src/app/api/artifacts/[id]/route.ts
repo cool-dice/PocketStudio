@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { scheduleIndexArtifact, scheduleRemove } from "@/lib/rag";
 import { ensureOwned } from "@/lib/workspace-api";
 import { artifactDto } from "@/lib/workspace-shapes";
 
@@ -38,6 +39,8 @@ export async function PATCH(req: Request, { params }: Params) {
     data: parsed.data,
   });
 
+  scheduleIndexArtifact(db, updated.id);
+
   return NextResponse.json({ artifact: artifactDto(updated) });
 }
 
@@ -51,5 +54,6 @@ export async function DELETE(req: Request, { params }: Params) {
   const artifact = check.row;
 
   await db.artifact.delete({ where: { id } });
+  scheduleRemove(db, check.userId, "artifact", id);
   return NextResponse.json({ ok: true });
 }

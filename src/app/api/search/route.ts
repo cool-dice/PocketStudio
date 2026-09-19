@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const MIN_QUERY = 2;
 const PER_GROUP = 5;
 
-/** Case-insensitive substring test (SQLite LIKE is ASCII-only, JS is honest). */
+/** Case-insensitive substring test (JS — honest for ASCII and Cyrillic). */
 function matches(haystack: string | null | undefined, needle: string): boolean {
   if (!haystack) return false;
   return haystack.toLowerCase().includes(needle);
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
   const needle = q.toLowerCase();
 
   // Personal-workspace scale: fetch bounded slices and match in JS —
-  // case-insensitive both for ASCII and Cyrillic (unlike SQLite LIKE).
+  // case-insensitive both for ASCII and Cyrillic.
   const [threads, notes, projects] = await Promise.all([
     db.thread.findMany({
       where: { userId: session.sub, archived: false },

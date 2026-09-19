@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { artifactDto } from "@/lib/workspace-shapes";
+import { scheduleIndexArtifact } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,8 @@ export async function POST(req: Request, { params }: Params) {
       meta: data.meta ? JSON.stringify(data.meta) : null,
     },
   });
+
+  scheduleIndexArtifact(db, artifact.id);
 
   return NextResponse.json({ artifact: artifactDto(artifact) }, { status: 201 });
 }

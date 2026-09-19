@@ -14,6 +14,7 @@ export const AI_TOOL_IDS = [
   "image",
   "tts",
   "asr",
+  "embeddings",
 ] as const;
 
 export type AiToolId = (typeof AI_TOOL_IDS)[number];
@@ -88,6 +89,12 @@ export const AI_TOOLS: readonly AiToolDef[] = [
     description: "Голосовые заметки → текст",
     capability: "asr",
   },
+  {
+    id: "embeddings",
+    label: "Эмбеддинги",
+    description: "Векторы для RAG: поиск по канону всех воркспейсов",
+    capability: "embeddings",
+  },
 ];
 
 export const AI_TOOL_BY_ID: Record<AiToolId, AiToolDef> = Object.fromEntries(
@@ -119,3 +126,6 @@ export const ANTHROPIC_NO_TTS_MESSAGE =
 
 export const ANTHROPIC_NO_ASR_MESSAGE =
   "Провайдер Anthropic не умеет распознавать речь. Выберите OpenAI-совместимую модель для этого инструмента.";
+
+export const ANTHROPIC_NO_EMBEDDINGS_MESSAGE =
+  "Провайдер Anthropic не умеет считать эмбеддинги. Выберите OpenAI-совместимую модель для инструмента «Эмбеддинги».";
