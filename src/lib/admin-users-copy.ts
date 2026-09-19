@@ -42,6 +42,7 @@ export type AdminUsersListView =
   | "ready";
 
 export type RoleChangeBlock = "self" | "last-admin" | null;
+export type UserDeleteBlock = "self" | "last-admin" | null;
 
 export function adminUsersListView(
   loading: boolean,
@@ -90,6 +91,30 @@ export function roleChangeError(
   block: Exclude<RoleChangeBlock, null>,
 ): string {
   return block === "last-admin" ? LAST_ADMIN_DEMOTE : SELF_ROLE_CHANGE;
+}
+
+/**
+ * Self-delete wins: the panel copy is «свой аккаунт», even if that
+ * row is also the last admin. Last-admin still blocks deleting a peer
+ * when the locked count is 1 (the parallel-delete race).
+ */
+export function userDeleteBlock(input: {
+  actorId: string;
+  targetId: string;
+  targetRole: string;
+  adminCount: number;
+}): UserDeleteBlock {
+  if (input.targetId === input.actorId) return "self";
+  if (input.targetRole === "admin" && input.adminCount <= 1) {
+    return "last-admin";
+  }
+  return null;
+}
+
+export function userDeleteError(
+  block: Exclude<UserDeleteBlock, null>,
+): string {
+  return block === "last-admin" ? LAST_ADMIN_DELETE : SELF_USER_DELETE;
 }
 
 export function roleChangedToast(name: string, role: Role): string {

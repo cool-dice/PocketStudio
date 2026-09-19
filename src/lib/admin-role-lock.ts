@@ -1,8 +1,9 @@
 /**
- * Last-admin demotion must serialize: two PATCHes that each see
- * adminCount=2 can otherwise both commit and leave zero admins.
- * SELECT … FOR UPDATE on current admin rows; the second tx waits,
- * then recounts. Isolation stays the Prisma default (not SERIALIZABLE).
+ * Last-admin demotion/deletion must serialize: two PATCHes or DELETEs
+ * that each see adminCount=2 can otherwise both commit and leave zero
+ * admins. SELECT … FOR UPDATE on current admin rows; the second tx
+ * waits, then recounts. Isolation stays the Prisma default (not
+ * SERIALIZABLE).
  */
 import type { Prisma } from "@prisma/client";
 
@@ -15,7 +16,7 @@ export async function lockAndCountAdmins(
   return rows.length;
 }
 
-/** After demoting one locked admin, this many must remain. */
+/** After demoting or deleting one locked admin, this many must remain. */
 export function remainingAdminsAfterDemote(lockedCount: number): number {
   return lockedCount - 1;
 }

@@ -7,6 +7,7 @@ import {
   MAX_ADMIN_USERS,
   ROLE_CHANGE_FAILED,
   SELF_ROLE_CHANGE,
+  SELF_USER_DELETE,
   USERS_EMPTY,
   USERS_EMPTY_FILTER,
   USERS_FORBIDDEN,
@@ -21,6 +22,8 @@ import {
   roleChangeError,
   roleChangedToast,
   toPublicAdminUserListItem,
+  userDeleteBlock,
+  userDeleteError,
   usersPageHasMore,
 } from "./admin-users-copy";
 
@@ -142,6 +145,49 @@ describe("last-admin demotion guard", () => {
     expect(roleChangedToast("Анна", "admin")).toMatch(/администратор/);
     expect(roleChangedToast("Анна", "client")).toMatch(/обычный/);
     expect(ROLE_CHANGE_FAILED).not.toBe(roleChangedToast("Анна", "admin"));
+  });
+});
+
+describe("last-admin deletion guard", () => {
+  test("self-delete is blocked even when that row is the last admin", () => {
+    expect(
+      userDeleteBlock({
+        actorId: "a1",
+        targetId: "a1",
+        targetRole: "admin",
+        adminCount: 1,
+      }),
+    ).toBe("self");
+    expect(userDeleteError("self")).toBe(SELF_USER_DELETE);
+    expect(SELF_USER_DELETE).not.toBe(LAST_ADMIN_DELETE);
+  });
+
+  test("peer delete of the last admin is blocked; extra admin can be deleted", () => {
+    expect(
+      userDeleteBlock({
+        actorId: "a1",
+        targetId: "a2",
+        targetRole: "admin",
+        adminCount: 1,
+      }),
+    ).toBe("last-admin");
+    expect(userDeleteError("last-admin")).toBe(LAST_ADMIN_DELETE);
+    expect(
+      userDeleteBlock({
+        actorId: "a1",
+        targetId: "a2",
+        targetRole: "admin",
+        adminCount: 2,
+      }),
+    ).toBeNull();
+    expect(
+      userDeleteBlock({
+        actorId: "a1",
+        targetId: "c1",
+        targetRole: "client",
+        adminCount: 1,
+      }),
+    ).toBeNull();
   });
 });
 

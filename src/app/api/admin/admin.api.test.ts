@@ -4,8 +4,10 @@ import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { lockAndCountAdmins, remainingAdminsAfterDemote } from "@/lib/admin-role-lock";
 import {
+  LAST_ADMIN_DELETE,
   LAST_ADMIN_DEMOTE,
   SELF_ROLE_CHANGE,
+  SELF_USER_DELETE,
 } from "@/lib/admin-users-copy";
 
 import { GET as adminStats } from "./stats/route";
@@ -536,6 +538,127 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
       expect(winnerJson.user.role).toBe("client");
       const loserJson = (await loser.json()) as { error: string };
       expect(loserJson.error).toBe(LAST_ADMIN_DEMOTE);
+    } else {
+      expect(remaining).toBeGreaterThanOrEqual(others);
+    }
+  });
+
+  test("sequential last-two deletes: first 200, second 409, unique admin count stays >= 1", async () => {
+    const passwordHash = await hashPassword("password-ok");
+    const adminA = await db.user.create({
+      data: {
+        name: "Админ del A",
+        email: `admin-del-a-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminA.id);
+    const adminB = await db.user.create({
+      data: {
+        name: "Админ del B",
+        email: `admin-del-b-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminB.id);
+
+    const tokenA = await tokenFor(adminA);
+    const before = await db.$transaction((tx) => lockAndCountAdmins(tx));
+    expect(before).toBeGreaterThanOrEqual(2);
+
+    const first = await adminDeleteUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminB.id}`, tokenA, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: adminB.id }) },
+    );
+    expect(first.status).toBe(200);
+    expect(await db.user.findUnique({ where: { id: adminB.id } })).toBeNull();
+
+    const afterFirst = await db.$transaction((tx) => lockAndCountAdmins(tx));
+    expect(afterFirst).toBe(remainingAdminsAfterDemote(before));
+    expect(afterFirst).toBeGreaterThanOrEqual(1);
+
+    const second = await adminDeleteUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, tokenA, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: adminA.id }) },
+    );
+    expect(second.status).toBe(409);
+    const secondJson = (await second.json()) as { ok?: unknown; error: string };
+    expect(secondJson.ok).toBeUndefined();
+    expect(secondJson.error).toBe(SELF_USER_DELETE);
+    expect(
+      (await db.user.findUnique({ where: { id: adminA.id }, select: { role: true } }))
+        ?.role,
+    ).toBe("admin");
+
+    const afterSecond = await db.$transaction((tx) => lockAndCountAdmins(tx));
+    expect(afterSecond).toBe(afterFirst);
+    expect(afterSecond).toBeGreaterThanOrEqual(1);
+  });
+
+  test("parallel peer deletes cannot leave zero admins", async () => {
+    const passwordHash = await hashPassword("password-ok");
+    const adminA = await db.user.create({
+      data: {
+        name: "Админ del-race A",
+        email: `admin-del-race-a-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminA.id);
+    const adminB = await db.user.create({
+      data: {
+        name: "Админ del-race B",
+        email: `admin-del-race-b-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminB.id);
+
+    const tokenA = await tokenFor(adminA);
+    const tokenB = await tokenFor(adminB);
+    const others = await db.user.count({
+      where: { role: "admin", id: { notIn: [adminA.id, adminB.id] } },
+    });
+
+    const [r1, r2] = await Promise.all([
+      adminDeleteUser(
+        jsonRequest(`http://localhost/api/admin/users/${adminB.id}`, tokenA, {
+          method: "DELETE",
+        }),
+        { params: Promise.resolve({ id: adminB.id }) },
+      ),
+      adminDeleteUser(
+        jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, tokenB, {
+          method: "DELETE",
+        }),
+        { params: Promise.resolve({ id: adminA.id }) },
+      ),
+    ]);
+
+    const remaining = await db.$transaction((tx) => lockAndCountAdmins(tx));
+    expect(remaining).toBeGreaterThanOrEqual(1);
+
+    const pairAdmins = await db.user.count({
+      where: { role: "admin", id: { in: [adminA.id, adminB.id] } },
+    });
+    if (others === 0) {
+      expect(pairAdmins).toBe(1);
+      const statuses = [r1.status, r2.status].sort((a, b) => a - b);
+      expect(statuses).toEqual([200, 409]);
+      const winner = r1.status === 200 ? r1 : r2;
+      const loser = r1.status === 409 ? r1 : r2;
+      const winnerJson = (await winner.json()) as { ok: boolean };
+      expect(winnerJson.ok).toBe(true);
+      const loserJson = (await loser.json()) as { error: string };
+      expect(loserJson.error).toBe(LAST_ADMIN_DELETE);
     } else {
       expect(remaining).toBeGreaterThanOrEqual(others);
     }
