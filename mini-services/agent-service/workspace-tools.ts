@@ -58,6 +58,7 @@ interface WorkspaceRow {
 async function resolveWorkspace(
   userId: string,
   args: Record<string, unknown>,
+  ctx?: ToolContext,
 ): Promise<WorkspaceRow | { error: string }> {
   const idArg = pickString(args, ["workspaceId", "projectId"]);
   if (idArg) {
@@ -70,26 +71,34 @@ async function resolveWorkspace(
   }
 
   const name = pickString(args, ["workspaceName", "projectName"]);
-  if (!name) {
+  if (name) {
+    const all = await db.project.findMany({
+      where: { userId },
+      select: { id: true, name: true, type: true },
+      orderBy: { updatedAt: "desc" },
+    });
+    const lower = name.toLowerCase();
+    const found =
+      all.find((p) => p.name.toLowerCase() === lower) ??
+      all.find((p) => p.name.toLowerCase().startsWith(lower)) ??
+      all.find((p) => p.name.toLowerCase().includes(lower));
+    if (found) return found;
     return {
-      error:
-        "Укажите воркспейс: передайте workspaceId или workspaceName (название)",
+      error: `Воркспейс «${name}» не найден — проверьте название или передайте workspaceId`,
     };
   }
 
-  const all = await db.project.findMany({
-    where: { userId, origin: "workspace" },
-    select: { id: true, name: true, type: true },
-    orderBy: { updatedAt: "desc" },
-  });
-  const lower = name.toLowerCase();
-  const found =
-    all.find((p) => p.name.toLowerCase() === lower) ??
-    all.find((p) => p.name.toLowerCase().startsWith(lower)) ??
-    all.find((p) => p.name.toLowerCase().includes(lower));
-  if (found) return found;
+  if (ctx?.projectId) {
+    const byCtx = await db.project.findFirst({
+      where: { id: ctx.projectId, userId },
+      select: { id: true, name: true, type: true },
+    });
+    if (byCtx) return byCtx;
+  }
+
   return {
-    error: `Воркспейс «${name}» не найден — проверьте название или передайте workspaceId`,
+    error:
+      "Укажите воркспейс: откройте чат внутри воркспейса или передайте workspaceId / workspaceName",
   };
 }
 
@@ -171,7 +180,7 @@ const createEntity: ToolDef = {
     setId: "идентификатор набора сущностей (необязательно, по умолчанию main)",
     setName: "название набора (необязательно)",
   },
-  async execute(args: any, userId: string, _ctx: ToolContext) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -200,7 +209,7 @@ const createEntity: ToolDef = {
     const setId = optString(args.setId, 60);
     const setName = optString(args.setName, 120);
 
-    const ws = await resolveWorkspace(userId, args);
+    const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
 
     const entity = await db.entity.create({
@@ -219,6 +228,7 @@ const createEntity: ToolDef = {
 
     return {
       message: `Сущность создана: ${entity.name} (${entity.kind})`,
+      workspaceId: ws.id,
       entity: {
         id: entity.id,
         name: entity.name,
@@ -226,6 +236,7 @@ const createEntity: ToolDef = {
         domain: entity.domain,
         setName: entity.setName,
         workspace: ws.name,
+        workspaceId: ws.id,
       },
     };
   },
@@ -293,7 +304,7 @@ const checkDocument: ToolDef = {
     workspaceName: "название воркспейса, если id нет",
     documentTitle: "название документа (с workspaceId/workspaceName)",
   },
-  async execute(args: any, userId: string, _ctx: ToolContext) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -323,7 +334,7 @@ const checkDocument: ToolDef = {
       const lower = title.toLowerCase();
       const candidates: { id: string; projectId: string }[] = [];
 
-      const ws = await resolveWorkspace(userId, args);
+      const ws = await resolveWorkspace(userId, args, ctx);
       if (!("error" in ws)) {
         const docs = await db.document.findMany({
           where: { projectId: ws.id },
@@ -410,6 +421,7 @@ const checkDocument: ToolDef = {
         (created.length === 0
           ? "проблем не найдено"
           : `нашёл ${created.length} ${created.length === 1 ? "находку" : "находок"}`),
+      workspaceId: document.projectId,
       document: { id: document.id, title: document.title },
       findings: created.map((f) => ({
         type: f.type,
@@ -437,7 +449,7 @@ const generateImage: ToolDef = {
     title: "название артефакта (необязательно)",
     size: "размер: 1024x1024|1152x864|864x1152|1440x720|720x1440 (по умолчанию 1024x1024)",
   },
-  async execute(args: any, userId: string, _ctx: ToolContext) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -450,7 +462,7 @@ const generateImage: ToolDef = {
     const sizeRaw = optString(args.size, 20);
     const size = sizeRaw && IMAGE_SIZES.has(sizeRaw) ? sizeRaw : "1024x1024";
 
-    const ws = await resolveWorkspace(userId, args);
+    const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
 
     try {
@@ -469,6 +481,7 @@ const generateImage: ToolDef = {
       return {
         message: `Изображение готово: ${artifact.title}`,
         url,
+        workspaceId: ws.id,
         artifact: { id: artifact.id, title: artifact.title, type: "image" },
         workspace: ws.name,
       };
@@ -500,7 +513,7 @@ const ttsNarration: ToolDef = {
     title: "название озвучки (необязательно)",
     voice: "голос: tongtong|chuichui|xiaochen|jam|kazi|douji|luodo (по умолчанию tongtong)",
   },
-  async execute(args: any, userId: string, _ctx: ToolContext) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -515,7 +528,7 @@ const ttsNarration: ToolDef = {
       ? voiceRaw!
       : "tongtong";
 
-    const ws = await resolveWorkspace(userId, args);
+    const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
 
     try {
@@ -540,6 +553,7 @@ const ttsNarration: ToolDef = {
       return {
         message: `Озвучка готова: ${artifact.title}`,
         url,
+        workspaceId: ws.id,
         artifact: { id: artifact.id, title: artifact.title, type: "audio" },
         workspace: ws.name,
       };
@@ -553,6 +567,123 @@ const ttsNarration: ToolDef = {
   },
 };
 
+const DOC_KINDS = ["manuscript", "spec", "article", "script"] as const;
+
+const createDocument: ToolDef = {
+  name: "create_document",
+  description:
+    "Создать документ (рукопись/спека/статья/сценарий) в воркспейсе с первой главой. Если чат открыт внутри воркспейса, id можно не передавать.",
+  argsSchema: {
+    title: "название документа (обязательно, 1–120 символов)",
+    content: "текст первой главы (необязательно)",
+    sectionTitle: "заголовок первой главы (необязательно, по умолчанию Глава 1)",
+    kind: "manuscript|spec|article|script (необязательно)",
+    workspaceId: "id воркспейса, если чат не привязан",
+    workspaceName: "название воркспейса",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    const title = optString(args.title, 120);
+    if (!title) return { error: "Аргумент title обязателен (название документа)" };
+    const kindRaw = optString(args.kind, 20);
+    const kind =
+      kindRaw && (DOC_KINDS as readonly string[]).includes(kindRaw)
+        ? kindRaw
+        : null;
+    const sectionTitle = optString(args.sectionTitle, 120) ?? "Глава 1";
+    const content = optString(args.content, 50_000) ?? "";
+
+    const ws = await resolveWorkspace(userId, args, ctx);
+    if ("error" in ws) return { error: ws.error };
+
+    const document = await db.document.create({
+      data: {
+        projectId: ws.id,
+        title,
+        kind: kind ?? (ws.type === "app" ? "spec" : ws.type === "film" ? "script" : "manuscript"),
+        sections: {
+          create: { title: sectionTitle, order: 0, content },
+        },
+      },
+      include: { sections: { orderBy: { order: "asc" } } },
+    });
+    const first = document.sections[0];
+    return {
+      message: `Документ создан: ${document.title}`,
+      workspaceId: ws.id,
+      document: {
+        id: document.id,
+        title: document.title,
+        kind: document.kind,
+        sectionId: first?.id ?? null,
+      },
+    };
+  },
+};
+
+const appendSection: ToolDef = {
+  name: "append_section",
+  description:
+    "Добавить главу/раздел в существующий документ воркспейса.",
+  argsSchema: {
+    documentId: "id документа (обязательно, если нет title)",
+    documentTitle: "название документа, если id неизвестен",
+    title: "заголовок главы (обязательно)",
+    content: "текст главы (необязательно)",
+    workspaceId: "id воркспейса, если чат не привязан",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    const sectionTitle = optString(args.title, 120);
+    if (!sectionTitle) return { error: "Аргумент title обязателен (заголовок главы)" };
+    const content = optString(args.content, 50_000) ?? "";
+
+    let documentId = pickString(args, ["documentId"]);
+    if (!documentId) {
+      const ws = await resolveWorkspace(userId, args, ctx);
+      if ("error" in ws) return { error: ws.error };
+      const want = pickString(args, ["documentTitle"]);
+      const docs = await db.document.findMany({
+        where: { projectId: ws.id },
+        select: { id: true, title: true },
+        orderBy: { updatedAt: "desc" },
+      });
+      const found = want
+        ? docs.find((d) => d.title.toLowerCase().includes(want.toLowerCase()))
+        : docs[0];
+      if (!found) return { error: "В воркспейсе нет документа — сначала create_document" };
+      documentId = found.id;
+    }
+
+    const document = await db.document.findFirst({
+      where: { id: documentId },
+      include: { project: { select: { userId: true } }, sections: { select: { order: true } } },
+    });
+    if (!document || document.project.userId !== userId) {
+      return { error: "Документ не найден" };
+    }
+    const nextOrder =
+      document.sections.reduce((m, s) => Math.max(m, s.order), -1) + 1;
+    const section = await db.documentSection.create({
+      data: {
+        documentId: document.id,
+        title: sectionTitle,
+        order: nextOrder,
+        content,
+      },
+    });
+    return {
+      message: `Глава добавлена: ${section.title}`,
+      workspaceId: document.projectId,
+      section: { id: section.id, title: section.title, documentId: document.id },
+    };
+  },
+};
+
 // ─────────────────────────── registry export ───────────────────────────
 
 /** Инструменты контента воркспейсов (Фаза A) — добавляются в TOOLS tools.ts. */
@@ -561,4 +692,6 @@ export const WORKSPACE_TOOLS: ToolDef[] = [
   checkDocument,
   generateImage,
   ttsNarration,
+  createDocument,
+  appendSection,
 ];

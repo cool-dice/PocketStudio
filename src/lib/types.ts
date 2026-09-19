@@ -252,7 +252,7 @@ export interface WsProjectCreatedPayload {
 
 export interface WsProjectUpdatedPayload {
   projectId: string;
-  reason: "files" | "checkpoint";
+  reason: "files" | "checkpoint" | "workspace";
 }
 
 /* ── Checkpoint diff (Stage 4) ── */

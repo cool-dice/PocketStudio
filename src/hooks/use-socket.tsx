@@ -36,6 +36,7 @@ import { api } from "@/lib/api";
 import { textPreview } from "@/lib/format";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
+import { invalidateWorkspaces } from "@/hooks/use-workspaces";
 import type {
   Note,
   WsNoteAnalyzedPayload,
@@ -274,6 +275,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const { projectId, reason } = (payload ?? {}) as WsProjectUpdatedPayload;
       if (typeof projectId !== "string") return;
       const ui = useAppUi.getState();
+      if (reason === "workspace") {
+        ui.bumpNotes();
+        invalidateWorkspaces();
+        return;
+      }
       if (ui.activeProjectId !== projectId) return;
       ui.bumpProjectFiles();
       if (reason === "checkpoint") {

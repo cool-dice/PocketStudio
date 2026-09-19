@@ -155,7 +155,7 @@ function feedShape(n: NoteWithCategory) {
 const createNote: ToolDef = {
   name: "create_note",
   description:
-    "Записать заметку пользователя в блокнот. Возвращает созданную заметку и её категорию.",
+    "Записать заметку. Если диалог привязан к воркспейсу — заметка появится во вкладке Заметки этого воркспейса.",
   argsSchema: {
     text: "полный текст заметки (обязательно, 1–5000 символов)",
     category_name: "название категории (необязательно, 1–40 символов)",
@@ -163,8 +163,10 @@ const createNote: ToolDef = {
       "цвет категории: emerald|amber|rose|sky|violet|stone|teal|orange|pink|cyan (по умолчанию stone)",
     category_icon:
       "иконка категории: lightbulb|briefcase|shopping-cart|heart|brain|zap|star|book|code|rocket|wallet|coffee (по умолчанию lightbulb)",
+    workspaceId: "id воркспейса (необязательно, если чат уже внутри воркспейса)",
+    workspaceName: "название воркспейса",
   },
-  async execute(args: any, userId: string) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -238,6 +240,30 @@ const createNote: ToolDef = {
       },
     });
 
+    let workspaceId: string | null = null;
+    const explicitWs =
+      typeof args.workspaceId === "string" && args.workspaceId.trim()
+        ? args.workspaceId.trim()
+        : typeof args.projectId === "string" && args.projectId.trim()
+          ? args.projectId.trim()
+          : ctx.projectId;
+    if (explicitWs) {
+      const owned = await db.project.findFirst({
+        where: { id: explicitWs, userId },
+        select: { id: true },
+      });
+      if (owned) {
+        try {
+          await db.noteLink.create({
+            data: { noteId: note.id, projectId: owned.id, kind: "context" },
+          });
+          workspaceId = owned.id;
+        } catch {
+          workspaceId = owned.id;
+        }
+      }
+    }
+
     return {
       note: {
         id: note.id,
@@ -247,6 +273,7 @@ const createNote: ToolDef = {
       },
       category: category ? categoryShape(category) : null,
       createdNewCategory,
+      workspaceId,
     };
   },
 };

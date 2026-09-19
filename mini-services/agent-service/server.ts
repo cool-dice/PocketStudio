@@ -658,6 +658,27 @@ async function executeToolCall(opts: {
       const commitMsg =
         cp && typeof cp.message === "string" ? cp.message : "контрольная точка";
       await notifyCheckpoint(userId, thread.projectId, commitMsg);
+    } else if (
+      [
+        "create_note",
+        "create_entity",
+        "create_document",
+        "append_section",
+        "generate_image",
+        "tts_narration",
+        "check_document",
+      ].includes(call.tool)
+    ) {
+      const wsId =
+        typeof r.workspaceId === "string"
+          ? r.workspaceId
+          : thread.projectId;
+      if (wsId) {
+        io.to(userRoom).emit("project:updated", {
+          projectId: wsId,
+          reason: "workspace",
+        });
+      }
     }
   }
 
