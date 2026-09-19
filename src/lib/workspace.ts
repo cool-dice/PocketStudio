@@ -17,10 +17,11 @@ import path from "node:path";
 // ─────────────────────────── roots ───────────────────────────
 
 export const WORKSPACE_ROOT =
-  process.env.VIBEFLOW_WORKSPACE_ROOT ?? "/home/z/my-project/workspace";
+  process.env.VIBEFLOW_WORKSPACE_ROOT ?? path.resolve(process.cwd(), "workspace");
 
 export const TEMPLATE_ROOT =
-  process.env.VIBEFLOW_TEMPLATE_ROOT ?? "/home/z/my-project/templates/nextjs-basic";
+  process.env.VIBEFLOW_TEMPLATE_ROOT ??
+  path.resolve(process.cwd(), "templates/nextjs-basic");
 
 const GIT_IDENTITY = [
   "-c",

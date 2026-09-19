@@ -18,6 +18,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
@@ -27,8 +28,12 @@ import type { ToolContext, ToolDef } from "./tools";
 
 // ─────────────────────────── shared helpers ───────────────────────────
 
-/** Абсолютный путь до public/gen основного Next-приложения. */
-const GEN_DIR = "/home/z/my-project/public/gen";
+/** Абсолютный путь до public/gen основного Next-приложения (корень репо). */
+const REPO_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const GEN_DIR = path.join(REPO_ROOT, "public", "gen");
 
 /** Сохранить бинарник в public/gen и вернуть публичный URL. */
 function saveGenFile(data: Buffer, ext: "png" | "wav"): string {

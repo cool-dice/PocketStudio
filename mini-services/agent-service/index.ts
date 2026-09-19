@@ -3,9 +3,15 @@
 // (server.ts → auth.ts reads AUTH_SECRET at module level; db-client.ts →
 // src/lib/db.ts → PrismaClient reads DATABASE_URL at construction time).
 
-process.env.DATABASE_URL ||= "file:/home/z/my-project/db/custom.db";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+process.env.DATABASE_URL ||= `file:${path.join(REPO_ROOT, "db/custom.db")}`;
 process.env.AUTH_SECRET ||= "vf-local-dev-secret-9f2c";
-process.env.VIBEFLOW_WORKSPACE_ROOT ||= "/home/z/my-project/workspace";
+process.env.VIBEFLOW_WORKSPACE_ROOT ||= path.join(REPO_ROOT, "workspace");
+process.env.VIBEFLOW_TEMPLATE_ROOT ||= path.join(REPO_ROOT, "templates/nextjs-basic");
 
 // ── Next.js dev-server watchdog (sandbox self-heal) ─────────────────────
 // The system-managed dev server can still die (OOM / crash) and nothing
@@ -35,9 +41,9 @@ async function ensureNextDev(): Promise<void> {
     console.log("[watchdog] :3000 down — spawning next-supervisor.sh");
     const child = spawn(
       "sh",
-      ["/home/z/my-project/mini-services/agent-service/next-supervisor.sh"],
+      [path.join(REPO_ROOT, "mini-services/agent-service/next-supervisor.sh")],
       {
-        cwd: "/home/z/my-project",
+        cwd: REPO_ROOT,
         detached: true,
         stdio: "ignore",
       },
