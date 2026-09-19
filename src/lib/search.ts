@@ -14,15 +14,16 @@ export function searchMatches(
   needle: string,
 ): boolean {
   if (!haystack) return false;
-  return haystack.toLowerCase().includes(needle);
+  return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
 /** Short preview around the first match, with ellipses when trimmed. */
 export function searchExcerpt(text: string, needle: string, radius = 42): string {
-  const idx = text.toLowerCase().indexOf(needle);
+  const lowerNeedle = needle.toLowerCase();
+  const idx = text.toLowerCase().indexOf(lowerNeedle);
   if (idx < 0) return text.slice(0, radius * 2).trim();
   const start = Math.max(0, idx - radius);
-  const end = Math.min(text.length, idx + needle.length + radius);
+  const end = Math.min(text.length, idx + lowerNeedle.length + radius);
   return `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
 }
 
