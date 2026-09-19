@@ -11,7 +11,9 @@ describe("agent system prompt builder", () => {
     expect(prompt).toContain("ВСЕХ воркспейсов");
     expect(prompt).toContain("apply_patch");
     expect(prompt).toContain("Запрещено: write_file");
-    expect(prompt).not.toMatch(/ChatGLM|z-ai|VibeFlow/i);
+    expect(prompt).toContain("fetch_url");
+    expect(prompt).toContain("web_search");
+    expect(prompt).toContain("browser_read");
   });
 
   test("act mode prefers patch and scopes to project tree", () => {

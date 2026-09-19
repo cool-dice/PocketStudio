@@ -33,6 +33,14 @@ describe("parseToolCall", () => {
     expect(call?.tool).toBe("create_note");
   });
 
+  test("extracts a fenced JSON tool call after stray prose", () => {
+    const call = parseToolCall(
+      'Сначала найду канон.\n```json\n{"tool":"retrieve_canon","args":{"query":"глаза"}}\n```\nГотово.',
+    );
+    expect(call?.tool).toBe("retrieve_canon");
+    expect(call?.args.query).toBe("глаза");
+  });
+
   test("returns null for a plain answer", () => {
     expect(parseToolCall("Готово: глава лежит в документах.")).toBeNull();
   });

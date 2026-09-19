@@ -78,6 +78,11 @@ export async function generateLLMResponse(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+function extractFencedBlock(text: string): string | null {
+  const m = text.match(/```(?:json|javascript|js)?\s*\r?\n?([\s\S]*?)```/i);
+  return m ? m[1]!.trim() : null;
+}
+
 /** Strip a leading ```lang fence and trailing ``` if present. */
 function stripFences(text: string): string {
   const m = text.match(/^```[a-zA-Z0-9_-]*\s*([\s\S]*?)\s*```\s*$/);
@@ -164,7 +169,20 @@ function tryParseToolObject(raw: string): ToolCall | null {
  */
 export function parseToolCall(text: string): ToolCall | null {
   if (typeof text !== "string") return null;
-  let trimmed = stripFences(text.trim());
+  let trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const fenced = extractFencedBlock(trimmed);
+  if (fenced) {
+    const fromFence = tryParseToolObject(fenced);
+    if (fromFence) return fromFence;
+    for (const obj of splitTopLevelObjects(fenced)) {
+      const call = tryParseToolObject(obj);
+      if (call) return call;
+    }
+  }
+
+  trimmed = stripFences(trimmed);
   if (!trimmed) return null;
 
   // Fallback: the model occasionally mimics the legacy bracket format

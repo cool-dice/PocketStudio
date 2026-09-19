@@ -38,8 +38,11 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - delete_file {"path"}
 - checkpoint {"message?"}
 - complete_task {"task":номер 1-based}
+- fetch_url {"url"} — прочитать http(s) страницу (MCP fetch)
+- web_search {"query","num?"} — поиск в сети (MCP fetch)
+- browser_read {"url"} — живой браузер; если CLI нет, инструмент честно откажет
 
-Правила выбора: мысль → create_note; «вспомни/найди в каноне» → retrieve_canon; код → retrieve_code или retrieve_canon kinds file; глава с нуля → rewrite_section action write или create_document; правка существующего файла → apply_patch, новый файл → write_file. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
+Правила выбора: мысль → create_note; «вспомни/найди в каноне» → retrieve_canon; код → retrieve_code или retrieve_canon kinds file; глава с нуля → rewrite_section action write или create_document; правка существующего файла → apply_patch, новый файл → write_file. Ссылка → fetch_url; «найди в интернете» → web_search. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
 
 const MODE_PROMPTS: Record<ThreadModeName, string> = {
   ask: `Режим «Спросить»: отвечай и разбирай. Разрешено: заметки, retrieve_canon, retrieve_code, чтение файлов, документы/сущности/картинка/озвучка/аналитик.
