@@ -8,6 +8,7 @@
 //     {"tool":"<name>","args":{...}} when it wants a tool, and parseToolCall
 //     below detects that shape. The tool-calling loop lives in server.ts.
 
+import { sleepAbortable } from "../../src/lib/abort-flag";
 import { chatCompletion } from "../../src/lib/ai/connector";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
 import type { AiToolId } from "../../src/lib/ai/tools";
@@ -30,10 +31,6 @@ export interface GenerateOpts {
   toolId?: AiToolId;
   jsonMode?: boolean;
   signal?: AbortSignal;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const MAX_ATTEMPTS = 3; // initial call + 2 retries
@@ -74,7 +71,7 @@ export async function generateLLMResponse(
       const status = (err as { status?: number })?.status;
       if (opts.signal?.aborted || status === 499) break;
       if (typeof status === "number" && status < 500) break;
-      if (attempt < MAX_ATTEMPTS) await sleep(RETRY_BACKOFF_MS);
+      if (attempt < MAX_ATTEMPTS) await sleepAbortable(RETRY_BACKOFF_MS, opts.signal);
     }
   }
 

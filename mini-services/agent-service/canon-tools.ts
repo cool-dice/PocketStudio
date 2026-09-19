@@ -3,6 +3,7 @@
  * RAG is scoped from the open thread — never from a model-supplied foreign workspaceId.
  */
 
+import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
 import { db } from "./db-client";
 import { retrieve } from "../../src/lib/rag/retrieve";
 import { resolveRetrieveScope } from "../../src/lib/rag/scope";
@@ -55,7 +56,14 @@ async function runRetrieve(
     : 8;
   const kinds = forcedKinds ?? parseKinds(args.kinds);
 
-  const result = await retrieve(db, { scope, query, kinds, limit });
+  throwIfAborted(ctx.signal);
+  let result;
+  try {
+    result = await retrieve(db, { scope, query, kinds, limit, signal: ctx.signal });
+  } catch (err) {
+    if (isAbortFlag(err) || ctx.signal?.aborted) return abortedToolResult();
+    throw err;
+  }
   const hits = result.hits.map((h) => ({
     kind: h.kind,
     id: h.sourceId,

@@ -4,6 +4,7 @@
  * apply_filter — поставить фильтр в очередь холста (применится в редакторе).
  */
 
+import { throwIfAborted } from "../../src/lib/abort-flag";
 import { db } from "./db-client";
 import {
   emptyRaster,
@@ -28,6 +29,7 @@ async function resolveWorkspace(
   args: Record<string, unknown>,
   ctx?: ToolContext,
 ) {
+  throwIfAborted(ctx?.signal);
   const idArg = pickString(args, ["workspaceId", "projectId"]);
   if (idArg) {
     const byId = await db.project.findFirst({

@@ -14,7 +14,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { ToolDef } from "./tools";
+import {
+  abortedToolResult,
+  isAbortFlag,
+  mergeAbortSignals,
+} from "../../src/lib/abort-flag";
+import type { ToolContext, ToolDef } from "./tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -87,7 +92,7 @@ const fetchUrl: ToolDef = {
   argsSchema: {
     url: "адрес страницы http(s)://… (обязательно)",
   },
-  async execute(args: any) {
+  async execute(args: any, _userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -106,7 +111,7 @@ const fetchUrl: ToolDef = {
             "PocketStudio/1.0 (+https://pocketstudio.local; fetch_url)",
           accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
         },
-        signal: AbortSignal.timeout(20_000),
+        signal: mergeAbortSignals([AbortSignal.timeout(20_000), ctx?.signal]),
       });
       if (!res.ok) {
         return { error: `Страница недоступна (HTTP ${res.status})` };
@@ -126,6 +131,7 @@ const fetchUrl: ToolDef = {
         text,
       };
     } catch (err) {
+      if (isAbortFlag(err) || ctx?.signal?.aborted) return abortedToolResult();
       return {
         error:
           "Не удалось прочитать страницу: " +
@@ -146,7 +152,7 @@ const webSearch: ToolDef = {
     query: "поисковый запрос (обязательно, 2–200 символов)",
     num: "сколько результатов: 1–10 (по умолчанию 5)",
   },
-  async execute(args: any) {
+  async execute(args: any, _userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -171,7 +177,7 @@ const webSearch: ToolDef = {
             "PocketStudio/1.0 (+https://pocketstudio.local; web_search)",
           accept: "text/html",
         },
-        signal: AbortSignal.timeout(15_000),
+        signal: mergeAbortSignals([AbortSignal.timeout(15_000), ctx?.signal]),
       });
       if (!res.ok) {
         return { error: `Поиск недоступен (HTTP ${res.status})` };
@@ -215,6 +221,7 @@ const webSearch: ToolDef = {
         results,
       };
     } catch (err) {
+      if (isAbortFlag(err) || ctx?.signal?.aborted) return abortedToolResult();
       return {
         error:
           "Поиск не удался: " +
@@ -236,10 +243,14 @@ const AGENT_BROWSER_SESSION = "pocketstudio-agent";
 async function runBrowserCli(
   args: string[],
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   const { stdout } = await execFileAsync("agent-browser", args, {
     timeout: timeoutMs,
     maxBuffer: 4 * 1024 * 1024,
+    signal: signal
+      ? mergeAbortSignals([AbortSignal.timeout(timeoutMs), signal])
+      : AbortSignal.timeout(timeoutMs),
     env: {
       ...process.env,
       AGENT_BROWSER_SESSION,
@@ -256,7 +267,7 @@ const browserRead: ToolDef = {
   argsSchema: {
     url: "адрес страницы http(s)://… (обязательно)",
   },
-  async execute(args: any) {
+  async execute(args: any, _userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -269,11 +280,11 @@ const browserRead: ToolDef = {
 
     try {
       // open → read → close (браузерная сессия не должна течь).
-      await runBrowserCli(["open", url], 45_000);
+      await runBrowserCli(["open", url], 45_000, ctx?.signal);
       let text = "";
       let title = url;
       try {
-        const out = await runBrowserCli(["read"], 30_000);
+        const out = await runBrowserCli(["read"], 30_000, ctx?.signal);
         text = out.trim();
         const firstLine = out.split("\n").find((l) => l.trim() !== "") ?? "";
         if (firstLine.startsWith("✓ ")) title = firstLine.slice(2).trim();
@@ -281,7 +292,7 @@ const browserRead: ToolDef = {
         try {
           await runBrowserCli(["close"], 10_000);
         } catch {
-          // close — best effort
+          // close — best effort, even after abort so we don't leak a session
         }
       }
       if (!text) {
@@ -294,6 +305,14 @@ const browserRead: ToolDef = {
         text: text.slice(0, MAX_BROWSER_TEXT),
       };
     } catch (err) {
+      if (isAbortFlag(err) || ctx?.signal?.aborted) {
+        try {
+          await runBrowserCli(["close"], 10_000);
+        } catch {
+          /* ignore */
+        }
+        return abortedToolResult();
+      }
       const missing =
         err instanceof Error &&
         (err.message.includes("ENOENT") || /not found|не найден/i.test(err.message));

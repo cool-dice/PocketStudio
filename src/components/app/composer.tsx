@@ -247,6 +247,7 @@ export function Composer({
   useEffect(() => {
     setSlashIndex(0);
   }, [token]);
+  const submittingRef = useRef(false);
 
   const executeCommand = (cmd: SlashCommand) => {
     setValue("");
@@ -313,10 +314,16 @@ export function Composer({
   const canSend = !blocked && !isRecording && value.trim().length > 0;
 
   const submit = async () => {
-    if (!canSend) return;
+    if (!canSend || submittingRef.current) return;
+    submittingRef.current = true;
     const text = value;
     setValue("");
-    await sendMessage(text);
+    try {
+      await sendMessage(text);
+    } finally {
+      submittingRef.current = false;
+    }
+  };
     taRef.current?.focus();
   };
 

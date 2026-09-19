@@ -125,20 +125,47 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
+  const timeoutMs = init?.timeoutMs;
+  const rest = { ...(init ?? {}) } as RequestInit & { timeoutMs?: number };
+  delete rest.timeoutMs;
+
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer =
+    timeoutMs && controller
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+  if (controller && rest.signal) {
+    if (rest.signal.aborted) controller.abort();
+    else {
+      rest.signal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
+    }
+  }
+
   let res: Response;
   try {
     res = await fetch(path, {
       credentials: "same-origin",
-      ...init,
+      ...rest,
       headers: {
         "content-type": "application/json",
         ...authHeaders(),
-        ...init?.headers,
+        ...rest.headers,
       },
+      signal: controller?.signal ?? rest.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new ApiError("Провайдер не ответил вовремя", 504);
+    }
     throw new ApiError("Нет соединения с сервером", 0);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const data: unknown = await res.json().catch(() => ({}));
@@ -686,7 +713,7 @@ export const api = {
   adminTestAiProvider(id: string): Promise<{ ok: true; detail: string }> {
     return request<{ ok: true; detail: string }>(
       `/api/admin/ai/providers/${encodeURIComponent(id)}/test`,
-      { method: "POST" },
+      { method: "POST", timeoutMs: 25_000 },
     );
   },
 
@@ -758,7 +785,7 @@ export const api = {
   userTestAiProvider(id: string): Promise<{ ok: true; detail: string }> {
     return request<{ ok: true; detail: string }>(
       `/api/settings/ai/providers/${encodeURIComponent(id)}/test`,
-      { method: "POST" },
+      { method: "POST", timeoutMs: 25_000 },
     );
   },
 

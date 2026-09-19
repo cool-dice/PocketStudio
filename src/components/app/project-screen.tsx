@@ -164,6 +164,8 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   const [deleting, setDeleting] = useState(false);
   const [fileDeletePath, setFileDeletePath] = useState<string | null>(null);
   const [deletingFile, setDeletingFile] = useState(false);
+  const [fileDeleteArmed, setFileDeleteArmed] = useState(false);
+  const [deleteArmed, setDeleteArmed] = useState(false);
   const [discussing, setDiscussing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -176,6 +178,24 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   // so they must not invalidate each other's responses.
   const projectSeqRef = useRef(0);
   const treeSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (!deleteOpen) {
+      setDeleteArmed(false);
+      return;
+    }
+    const t = window.setTimeout(() => setDeleteArmed(true), 400);
+    return () => window.clearTimeout(t);
+  }, [deleteOpen]);
+
+  useEffect(() => {
+    if (fileDeletePath === null) {
+      setFileDeleteArmed(false);
+      return;
+    }
+    const t = window.setTimeout(() => setFileDeleteArmed(true), 400);
+    return () => window.clearTimeout(t);
+  }, [fileDeletePath]);
 
   const activeFile = openFiles.find((f) => f.path === activePath) ?? null;
   const activeDirty = activeFile !== null && activeFile.content !== activeFile.original;
@@ -922,7 +942,14 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
           if (!open && !deleting) setDeleteOpen(false);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement)
+              .querySelector<HTMLElement>("[data-alert-cancel]")
+              ?.focus();
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить проект?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -930,10 +957,14 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Отмена</AlertDialogCancel>
+            <AlertDialogCancel data-alert-cancel disabled={deleting}>
+              Отмена
+            </AlertDialogCancel>
             <AlertDialogAction
+              disabled={!deleteArmed || deleting}
               onClick={(e) => {
                 e.preventDefault();
+                if (!deleteArmed) return;
                 void doDelete();
               }}
               className="bg-destructive text-white hover:bg-destructive/90"
@@ -950,7 +981,14 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
           if (!open && !deletingFile) setFileDeletePath(null);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement)
+              .querySelector<HTMLElement>("[data-alert-cancel]")
+              ?.focus();
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить файл?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -958,10 +996,14 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deletingFile}>Отмена</AlertDialogCancel>
+            <AlertDialogCancel data-alert-cancel disabled={deletingFile}>
+              Отмена
+            </AlertDialogCancel>
             <AlertDialogAction
+              disabled={!fileDeleteArmed || deletingFile}
               onClick={(e) => {
                 e.preventDefault();
+                if (!fileDeleteArmed) return;
                 void doDeleteFile();
               }}
               className="bg-destructive text-white hover:bg-destructive/90"

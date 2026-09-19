@@ -62,6 +62,13 @@ import {
   formatPrefetchBlock,
   looksLikeCanonQuestion,
 } from "../../src/lib/rag/prefetch";
+import {
+  abortedToolResult,
+  decideAfterTool,
+  isAbortFlag,
+  sleepAbortable,
+  throwIfAborted,
+} from "../../src/lib/abort-flag";
 
 const PORT = 3003;
 const MAX_CONTENT_LENGTH = 20000;
@@ -97,9 +104,6 @@ const io = new Server(httpServer, {
 
 // ─────────────────────────── helpers ───────────────────────────
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 interface MessageRow {
   id: string;
@@ -127,13 +131,7 @@ function serializeMessage(m: MessageRow) {
 const runningThreads = new Map<string, AbortController>();
 
 function isAbortErr(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { name?: string; status?: number; message?: string };
-  return (
-    e.name === "AbortError" ||
-    e.status === 499 ||
-    e.message === "Генерация остановлена"
-  );
+  return isAbortFlag(err);
 }
 
 /** Thread fields the turn orchestration needs (subset of the Prisma row;
@@ -399,16 +397,33 @@ async function streamFinalResponse(
   room: string,
   threadId: string,
   text: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   let assistantMessage = await db.message.create({
     data: { threadId, role: "assistant", content: "" },
   });
   io.to(room).emit("message:start", { threadId, messageId: assistantMessage.id });
 
-  const chunks = chunkText(text);
-  for (const delta of chunks) {
+  const chunks = signal?.aborted ? [text] : chunkText(text);
+  for (let i = 0; i < chunks.length; i++) {
+    const delta = chunks[i]!;
     io.to(room).emit("message:delta", { threadId, messageId: assistantMessage.id, delta });
-    await sleep(25 + Math.random() * 10); // ~25–35ms per chunk
+    if (signal?.aborted) continue;
+    if (i < chunks.length - 1) {
+      try {
+        await sleepAbortable(25 + Math.random() * 10, signal);
+      } catch {
+        const rest = chunks.slice(i + 1).join("");
+        if (rest) {
+          io.to(room).emit("message:delta", {
+            threadId,
+            messageId: assistantMessage.id,
+            delta: rest,
+          });
+        }
+        break;
+      }
+    }
   }
 
   assistantMessage = await db.message.update({
@@ -559,12 +574,14 @@ async function prefetchCanonContext(
   userId: string,
   thread: ThreadTurnInfo,
   userText: string,
+  signal?: AbortSignal,
 ): Promise<{
   text: string;
   scope: "studio" | "workspace";
   hitCount: number;
 } | null> {
   if (!looksLikeCanonQuestion(userText)) return null;
+  throwIfAborted(signal);
   const scope = resolveRetrieveScope({
     userId,
     threadProjectId: thread.projectId,
@@ -574,6 +591,7 @@ async function prefetchCanonContext(
     scope,
     query: userText.slice(0, 400),
     limit: 6,
+    signal,
   });
   const text = formatPrefetchBlock(result.hits);
   if (!text) return null;
@@ -594,8 +612,10 @@ async function runPlanner(
   content: string,
   existingTree: string[],
   userId: string,
+  signal?: AbortSignal,
 ): Promise<string[] | null> {
   try {
+    throwIfAborted(signal);
     const prompt = buildPlannerPrompt({
       projectName: null,
       projectTree: existingTree,
@@ -603,11 +623,12 @@ async function runPlanner(
     });
     const raw = await generateLLMResponse(prompt, [
       { role: "user", content: content.slice(0, MAX_CONTENT_LENGTH) },
-    ], { userId, toolId: "agent" });
+    ], { userId, toolId: "agent", signal });
     const steps = parsePlannerSteps(raw);
     if (steps && steps.length >= 2) return steps;
     return null;
   } catch (err) {
+    if (isAbortFlag(err)) throw err;
     console.warn(
       "[agent] planner failed (continuing without plan):",
       err instanceof Error ? err.message : String(err),
@@ -630,8 +651,11 @@ async function executeToolCall(opts: {
   thread: ThreadTurnInfo;
   call: { tool: string; args: Record<string, unknown> };
   mcp: TurnMcpState;
+  signal: AbortSignal;
 }): Promise<unknown> {
-  const { room, userRoom, threadId, userId, thread, call, mcp } = opts;
+  const { room, userRoom, threadId, userId, thread, call, mcp, signal } = opts;
+
+  if (signal.aborted) return abortedToolResult();
 
   // Tool call → persist a "pending" tool row first (it becomes the
   // message id reported to the client).
@@ -659,6 +683,7 @@ async function executeToolCall(opts: {
     threadId,
     mode: thread.mode,
     projectId: thread.projectId,
+    signal,
   };
   let result: unknown;
   try {
@@ -672,13 +697,18 @@ async function executeToolCall(opts: {
           (tool.mcpAdapter === "filesystem" ? "Filesystem" : tool.mcpAdapter === "fetch" ? "Fetch" : "Playwright") +
           "» отключён в Инструментах → Интеграции",
       };
+    } else if (signal.aborted) {
+      result = abortedToolResult();
     } else {
       result = tool
         ? await tool.execute(call.args, userId, ctx)
         : { error: `Неизвестный инструмент: ${call.tool}` };
     }
   } catch (err) {
-    result = { error: err instanceof Error ? err.message : String(err) };
+    result =
+      signal.aborted || isAbortErr(err)
+        ? abortedToolResult()
+        : { error: err instanceof Error ? err.message : String(err) };
   }
 
   const resultJson = (JSON.stringify(result) ?? "{}").slice(0, MAX_TOOL_RESULT_CHARS);
@@ -845,7 +875,7 @@ async function runAgentTurn(
           // tree is a nice-to-have for the planner
         }
       }
-      const steps = await runPlanner(thread, content, existingTree, user.sub);
+      const steps = await runPlanner(thread, content, existingTree, user.sub, signal);
       if (steps) {
         orchestrated = true;
         await savePlanTasks(threadId, user.sub, steps);
@@ -858,7 +888,7 @@ async function runAgentTurn(
     }
 
     try {
-      const prefetch = await prefetchCanonContext(user.sub, thread, content);
+      const prefetch = await prefetchCanonContext(user.sub, thread, content, signal);
       if (prefetch) {
         systemPrompt += `\n\n${prefetch.text}`;
         io.to(room).emit("canon:prefetch", {
@@ -868,10 +898,14 @@ async function runAgentTurn(
         });
       }
     } catch (err) {
-      console.warn(
-        "[agent] canon prefetch failed (ignored):",
-        err instanceof Error ? err.message : String(err),
-      );
+      if (signal.aborted || isAbortErr(err)) {
+        // Stop before the tool loop — prefetch is cooperative too.
+      } else {
+        console.warn(
+          "[agent] canon prefetch failed (ignored):",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
 
     // 3. Tool-calling loop.
@@ -926,6 +960,7 @@ async function runAgentTurn(
         thread,
         call,
         mcp,
+        signal,
       });
       const r = resultObject(result);
       if (r && r.error === undefined) {
@@ -936,6 +971,14 @@ async function runAgentTurn(
         ) {
           turnDirty = true;
         }
+      }
+      const decision = decideAfterTool({
+        signalAborted: signal.aborted,
+        result,
+      });
+      if (decision !== "continue") {
+        finalText = ABORT_REPLY;
+        break;
       }
       // Loop continues — the next iteration sees [TOOL_CALL]/[TOOL_RESULT].
     }
@@ -980,7 +1023,12 @@ async function runAgentTurn(
             thread,
             call,
             mcp,
+            signal,
           });
+          if (signal.aborted) {
+            finalText = ABORT_REPLY;
+            break;
+          }
           if (call.tool !== "complete_task") break; // unexpected tool — stop sweeping
         }
         // Restore the phase label after the sweep.
@@ -1073,7 +1121,7 @@ async function runAgentTurn(
       }
     }
 
-    await streamFinalResponse(room, threadId, answerText);
+    await streamFinalResponse(room, threadId, answerText, signal);
     emitPhase(room, threadId, "idle");
 
     // NOTE: nothing slow may happen after the final message:end emit —
@@ -1084,7 +1132,7 @@ async function runAgentTurn(
   } catch (err) {
     if (signal.aborted || isAbortErr(err)) {
       try {
-        await streamFinalResponse(room, threadId, ABORT_REPLY);
+        await streamFinalResponse(room, threadId, ABORT_REPLY, signal);
         emitPhase(room, threadId, "idle");
       } catch {
         socket.emit("error", { message: ABORT_REPLY });
@@ -1163,6 +1211,9 @@ io.on("connection", async (socket: Socket) => {
         return;
       }
       socket.join(`thread:${threadId}`);
+      if (runningThreads.has(threadId)) {
+        socket.emit("agent:thinking", { threadId });
+      }
     } catch (err) {
       console.error("[ws] thread:join failed:", err instanceof Error ? err.message : String(err));
       socket.emit("error", { message: "Диалог не найден" });

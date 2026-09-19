@@ -107,8 +107,7 @@ export function useSectionAutosave(
     }
     const pending = dirtyRef.current;
     if (pending) {
-      dirtyRef.current = null;
-      void saveRef.current(pending.id, { content: pending.content });
+      void doSave(pending.id, pending.content);
     }
     // Только по id: content меняется при сохранении и не должен дёргать драфт.
   }, [sectionId]);
@@ -137,9 +136,10 @@ export function useSectionAutosave(
     }
     const pending = dirtyRef.current;
     if (!pending) return null;
-    dirtyRef.current = null;
-    return saveRef.current(pending.id, { content: pending.content });
-  }, []);
+    doSave(pending.id, pending.content);
+    await chainRef.current;
+    return null;
+  }, [doSave]);
 
   const replaceDraft = useCallback((value: string) => {
     if (timerRef.current !== null) {

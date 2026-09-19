@@ -18,6 +18,7 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
+import { isStaleSectionSave, nextSaveSeq } from "@/lib/section-save-race";
 import type {
   DocumentDto,
   DocumentKind,
@@ -140,6 +141,7 @@ export function useDocument(documentId?: string | null) {
   const [loadError, setLoadError] = useState(false);
   const seqRef = useRef(0);
   const documentRef = useRef<DocumentDto | null>(null);
+  const saveSeqRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     documentRef.current = document;
@@ -191,10 +193,14 @@ export function useDocument(documentId?: string | null) {
 
   /** Автосейв секции: оптимистичный патч + API; ошибка — откат и toast. */
   const saveSection = useCallback(async (id: string, patch: SectionPatch) => {
+    const requestSeq = nextSaveSeq(saveSeqRef.current, id);
     const snapshot = documentRef.current;
     patchSectionLocal(id, patch);
     try {
       const section = await api.updateSection(id, patch);
+      if (isStaleSectionSave(saveSeqRef.current, id, requestSeq)) {
+        return section;
+      }
       setDocument((prev) => {
         if (!prev?.sections) return prev;
         return {
@@ -210,6 +216,9 @@ export function useDocument(documentId?: string | null) {
       });
       return section;
     } catch {
+      if (isStaleSectionSave(saveSeqRef.current, id, requestSeq)) {
+        return null;
+      }
       setDocument(snapshot);
       toast.error("Не удалось сохранить секцию", {
         description: "Проверьте соединение — правки остались в поле ввода.",

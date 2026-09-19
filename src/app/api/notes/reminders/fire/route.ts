@@ -49,6 +49,7 @@ export async function POST(req: Request) {
       title: string;
       body: string | null;
       entityId: string | null;
+      dedupeKey?: string | null;
       read: boolean;
       createdAt: string;
     };
@@ -77,6 +78,7 @@ export async function POST(req: Request) {
           entityId: row.entityId,
           read: row.read,
           createdAt: row.createdAt.toISOString(),
+          dedupeKey: row.dedupeKey,
         },
       });
     } catch {

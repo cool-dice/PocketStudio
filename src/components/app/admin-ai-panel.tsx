@@ -4,7 +4,7 @@
  * Admin AI panel — CRUD platform providers, models, and per-tool defaults.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Loader2,
   PlugZap,
@@ -318,6 +318,13 @@ export function ProviderCard({
   });
   const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const createModel = async () => {
     setBusy(true);
@@ -352,11 +359,13 @@ export function ProviderCard({
       const result = admin
         ? await api.adminTestAiProvider(provider.id)
         : await api.userTestAiProvider(provider.id);
-      toast.success(result.detail);
+      if (mountedRef.current) toast.success(result.detail);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Проверка не удалась");
+      if (mountedRef.current) {
+        toast.error(err instanceof ApiError ? err.message : "Проверка не удалась");
+      }
     } finally {
-      setTesting(false);
+      if (mountedRef.current) setTesting(false);
     }
   };
 

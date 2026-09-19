@@ -298,6 +298,7 @@ export interface Notification {
   title: string;
   body: string | null;
   entityId: string | null;
+  dedupeKey?: string | null;
   read: boolean;
   createdAt: string;
 }

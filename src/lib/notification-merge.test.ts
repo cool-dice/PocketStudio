@@ -34,6 +34,19 @@ describe("mergeNotification", () => {
     expect(echoed.unread).toBe(1);
   });
 
+  test("reminder with a new id but the same note does not duplicate", () => {
+    const first = n("a", { entityId: "note-1", dedupeKey: "reminder:note-1" });
+    const seeded = mergeNotification([], 0, first);
+    const echoed = mergeNotification(
+      seeded.notifications,
+      seeded.unread,
+      n("b", { entityId: "note-1", dedupeKey: "reminder:note-1" }),
+    );
+    expect(echoed.notifications).toHaveLength(1);
+    expect(echoed.notifications[0]?.id).toBe("b");
+    expect(echoed.unread).toBe(1);
+  });
+
   test("reminder dedupe key is stable per note, not per poll", () => {
     expect(reminderDedupeKey("note-1")).toBe("reminder:note-1");
     expect(reminderDedupeKey("note-1")).toBe(reminderDedupeKey("note-1"));

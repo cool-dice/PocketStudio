@@ -21,6 +21,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { db } from "./db-client";
+import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
 import { generateLLMResponse } from "./agent";
 import { generateImage as gatewayGenerateImage, synthesizeSpeech, chatCompletion } from "../../src/lib/ai/connector";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
@@ -69,6 +70,7 @@ async function resolveWorkspace(
   args: Record<string, unknown>,
   ctx?: ToolContext,
 ): Promise<WorkspaceRow | { error: string }> {
+  throwIfAborted(ctx?.signal);
   const idArg = pickString(args, ["workspaceId", "projectId"]);
   if (idArg) {
     const byId = await db.project.findFirst({
@@ -391,9 +393,10 @@ const checkDocument: ToolDef = {
     try {
       const raw = await generateLLMResponse(DOCUMENT_ANALYST_SYSTEM, [
         { role: "user", content: docText },
-      ], { userId, toolId: "document_check", jsonMode: true });
+      ], { userId, toolId: "document_check", jsonMode: true, signal: ctx.signal });
       drafts = parseFindings(raw);
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return {
         error:
           "Аналитик не справился: " +
@@ -474,6 +477,7 @@ const generateImage: ToolDef = {
       const { buffer } = await gatewayGenerateImage(route, {
         prompt: composeImagePrompt(prompt),
         size,
+        signal: ctx.signal,
       });
       const url = saveGenFile(buffer, "png");
       const artifact = await db.artifact.create({
@@ -494,6 +498,7 @@ const generateImage: ToolDef = {
         workspace: ws.name,
       };
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return {
         error:
           "Не удалось сгенерировать изображение: " +
@@ -542,7 +547,12 @@ const ttsNarration: ToolDef = {
 
     try {
       const route = await resolveToolRoute(db, userId, "tts");
-      const buffer = await synthesizeSpeech(route, { text, voice, speed: 1.0 });
+      const buffer = await synthesizeSpeech(route, {
+        text,
+        voice,
+        speed: 1.0,
+        signal: ctx.signal,
+      });
       if (buffer.length === 0) {
         return { error: "Озвучка вернула пустой файл — попробуйте ещё раз" };
       }
@@ -568,6 +578,7 @@ const ttsNarration: ToolDef = {
         workspace: ws.name,
       };
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return {
         error:
           "Не удалось озвучить текст: " +
@@ -773,7 +784,7 @@ const rewriteSection: ToolDef = {
       const result = await chatCompletion(route, [
         { role: "system", content: system },
         { role: "user", content: user },
-      ]);
+      ], { signal: ctx.signal });
       const generated = result.text.trim();
       if (!generated) return { error: "Модель вернула пустой текст" };
       const nextContent =
@@ -807,6 +818,7 @@ const rewriteSection: ToolDef = {
         section: { id: section.id, title: section.title, documentId: document.id },
       };
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       const msg = err instanceof Error ? err.message : "Не удалось переписать главу";
       return { error: msg };
     }

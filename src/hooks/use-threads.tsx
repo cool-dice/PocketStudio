@@ -24,6 +24,11 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
+import {
+  isEmptyAssistantBubble,
+  shouldBlockSend,
+  shouldKeepBusyOnSocketError,
+} from "@/lib/chat-send-guard";
 import type {
   ChatMessage,
   Message,
@@ -164,6 +169,9 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   /** Thread whose messages finished loading — required for safe empty-thread cleanup. */
   const loadedRef = useRef<string | null>(null);
   const selectSeqRef = useRef(0);
+  const sendLockRef = useRef(false);
+  const abortingRef = useRef<string | null>(null);
+  const busyRef = useRef(false);
 
   useEffect(() => {
     socketRef.current = socket;
@@ -432,6 +440,16 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     async (content: string) => {
       const trimmed = content.trim();
       if (!trimmed) return;
+      if (
+        shouldBlockSend({
+          sending: sendLockRef.current,
+          busy: busyRef.current,
+          aborting: abortingRef.current !== null,
+        })
+      ) {
+        return;
+      }
+      sendLockRef.current = true;
 
       // No active thread yet (fresh account / all deleted) — create one
       // transparently so the first message always works (Cursor-style).
@@ -450,6 +468,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
           threadId = thread.id;
         } catch {
           toast.error("Не удалось создать диалог");
+          sendLockRef.current = false;
           return;
         }
       }
@@ -481,11 +500,15 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       if (!ok || !s) {
         toast.error("Нет соединения — сообщение не отправлено");
         setMessages((prev) => prev.filter((m) => m.id !== id));
+        sendLockRef.current = false;
         return;
       }
       // Make sure we are in the room before sending (idempotent on server).
       s.emit("thread:join", { threadId });
+      setThinkingThreadId(threadId);
+      busyRef.current = true;
       s.emit("message:send", { threadId, content: trimmed });
+      sendLockRef.current = false;
     },
     [bumpThread, ensureConnected],
   );
@@ -494,11 +517,14 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     const id = activeIdRef.current;
     const s = socketRef.current;
     if (id && s?.connected) s.emit("turn:abort", { threadId: id });
-    setThinkingThreadId(null);
-    setStreaming(null);
-    setPhase(null);
+    abortingRef.current = id;
+    if (id) {
+      setThinkingThreadId(id);
+      busyRef.current = true;
+    }
+    // Keep busy until message:end so a second send cannot race the in-flight tool.
     setMessages((prev) =>
-      prev.map((m) => (m.toolPending ? { ...m, toolPending: false } : m)),
+      prev.filter((m) => !isEmptyAssistantBubble(m)),
     );
   }, []);
 
@@ -508,6 +534,31 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     const handleConnect = () => {
       const id = activeIdRef.current;
       if (id) socket.emit("thread:join", { threadId: id });
+      if (!id) return;
+      void (async () => {
+        try {
+          const { messages: loaded } = await api.getThread(id);
+          if (activeIdRef.current !== id) return;
+          setMessages((prev) => {
+            const pending = prev.filter(
+              (m) => m.pending && m.id.startsWith("temp-"),
+            );
+            const extra = pending.filter(
+              (p) =>
+                !loaded.some(
+                  (l) => l.role === "user" && l.content === p.content,
+                ),
+            );
+            return [...loaded.map((m) => ({ ...m })), ...extra];
+          });
+          const st = streamingRef.current;
+          if (st && loaded.some((m) => m.id === st.messageId && m.content)) {
+            setStreaming(null);
+          }
+        } catch {
+          // next event or the 130s watchdog unlocks
+        }
+      })();
     };
     socket.on("connect", handleConnect);
     if (socket.connected) handleConnect();
@@ -684,6 +735,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     };
 
     const onMessageEnd = ({ threadId, message }: WsMessageEndPayload) => {
+      if (abortingRef.current === threadId) abortingRef.current = null;
       setStreaming((cur) =>
         cur && cur.threadId === threadId ? null : cur,
       );
@@ -691,13 +743,20 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       setPhase((cur) => (cur && cur.threadId === threadId ? null : cur));
       if (threadId === activeIdRef.current) {
         setMessages((prev) => {
-          const idx = prev.findIndex((m) => m.id === message.id);
+          const withoutEmpty = prev.filter(
+            (m) =>
+              !(
+                isEmptyAssistantBubble(m) &&
+                m.id !== message.id
+              ),
+          );
+          const idx = withoutEmpty.findIndex((m) => m.id === message.id);
           if (idx >= 0) {
-            const copy = [...prev];
+            const copy = [...withoutEmpty];
             copy[idx] = { ...message };
             return copy;
           }
-          return [...prev, { ...message }];
+          return [...withoutEmpty, { ...message }];
         });
       }
       bumpThread(threadId, message);
@@ -715,6 +774,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
 
     const onError = ({ message }: WsErrorPayload) => {
       toast.error(message);
+      if (shouldKeepBusyOnSocketError(message)) return;
+      abortingRef.current = null;
       setThinkingThreadId(null);
       setPhase(null);
       // A failed turn can leave tool cards stuck in the running state —
@@ -787,10 +848,21 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     thinking || streaming?.threadId === activeThreadId || toolBusy;
 
   useEffect(() => {
+    busyRef.current = activeBusy;
+  }, [activeBusy]);
+
+  useEffect(() => {
     if (!activeBusy) return;
     const t = window.setTimeout(() => {
       toast.error("Агент завис — остановите генерацию или отправьте снова");
       abortTurn();
+      abortingRef.current = null;
+      setThinkingThreadId(null);
+      setStreaming(null);
+      setPhase(null);
+      setMessages((prev) =>
+        prev.map((m) => (m.toolPending ? { ...m, toolPending: false } : m)),
+      );
     }, 130_000);
     return () => window.clearTimeout(t);
   }, [activeBusy, abortTurn]);

@@ -16,6 +16,7 @@
 // Allowlists MUST stay in sync with the main app's notes REST contract
 // (worklog Task 4, Task 1-a).
 
+import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
 import { db } from "./db-client";
 import { scheduleIndexFile, scheduleIndexNote } from "../../src/lib/rag/hooks";
 import { removeFileChunks } from "../../src/lib/rag/indexer";
@@ -41,6 +42,8 @@ export interface ToolContext {
   threadId: string;
   mode: string;
   projectId: string | null;
+  /** Turn abort from client `turn:abort` — long tools must check this. */
+  signal?: AbortSignal;
 }
 
 export interface ToolDef {
@@ -668,11 +671,13 @@ const writeFile: ToolDef = {
 
     // Write guard: only the «act» mode may mutate files.
     if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+    throwIfAborted(ctx.signal);
 
     const loaded = await loadProject(userId, ctx);
     if ("error" in loaded) return { error: loaded.error };
 
     try {
+      throwIfAborted(ctx.signal);
       const root = projectRoot(loaded.project.id);
       const written = await writeWorkspaceFile(root, args.path.trim(), args.content, MAX_AGENT_FILE_BYTES);
       if (!shouldSkipPath(written.path)) {
@@ -685,6 +690,7 @@ const writeFile: ToolDef = {
       }
       return written;
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return { error: err instanceof Error ? err.message : String(err) };
     }
   },
@@ -712,11 +718,13 @@ const applyPatch: ToolDef = {
       return { error: "Аргумент path обязателен и должен быть строкой" };
     }
     if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+    throwIfAborted(ctx.signal);
 
     const loaded = await loadProject(userId, ctx);
     if ("error" in loaded) return { error: loaded.error };
 
     try {
+      throwIfAborted(ctx.signal);
       const { applyPatchArgs } = await import("../../src/lib/apply-patch");
       const root = projectRoot(loaded.project.id);
       const file = await readWorkspaceFile(
@@ -736,6 +744,7 @@ const applyPatch: ToolDef = {
         patch,
         replaceAll: Boolean(args.replaceAll),
       });
+      throwIfAborted(ctx.signal);
       const written = await writeWorkspaceFile(
         root,
         args.path.trim(),
@@ -757,6 +766,7 @@ const applyPatch: ToolDef = {
         message: `Правка ${written.path}: ${replacements} замен`,
       };
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return { error: err instanceof Error ? err.message : String(err) };
     }
   },
@@ -782,16 +792,19 @@ const deleteFile: ToolDef = {
 
     // Write guard: only the «act» mode may mutate files.
     if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+    throwIfAborted(ctx.signal);
 
     const loaded = await loadProject(userId, ctx);
     if ("error" in loaded) return { error: loaded.error };
 
     try {
+      throwIfAborted(ctx.signal);
       const root = projectRoot(loaded.project.id);
       const deleted = await deleteWorkspacePath(root, args.path.trim());
       await removeFileChunks(db, userId, loaded.project.id, deleted.path);
       return deleted;
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return { error: err instanceof Error ? err.message : String(err) };
     }
   },
@@ -828,6 +841,7 @@ const checkpointTool: ToolDef = {
 
     // Write guard: only the «act» mode may commit.
     if (ctx.mode !== "act") return { error: CHECKPOINT_MODE_ERROR };
+    throwIfAborted(ctx.signal);
 
     const loaded = await loadProject(userId, ctx);
     if ("error" in loaded) return { error: loaded.error };
@@ -837,6 +851,7 @@ const checkpointTool: ToolDef = {
       const cp = await checkpointProject(root, message);
       return { noop: cp.noop, commit: cp.commit, filesChanged: cp.filesChanged };
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return { error: err instanceof Error ? err.message : String(err) };
     }
   },

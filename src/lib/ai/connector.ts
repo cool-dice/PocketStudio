@@ -267,7 +267,7 @@ function decodeImagePayload(payload: unknown): Buffer {
 
 export async function generateImage(
   route: ResolvedRoute,
-  opts: { prompt: string; size?: string },
+  opts: { prompt: string; size?: string; signal?: AbortSignal },
 ): Promise<{ buffer: Buffer }> {
   requireOpenai(route, ANTHROPIC_NO_IMAGE_MESSAGE);
   const url = joinUrl(route.provider.baseUrl, "images/generations");
@@ -286,6 +286,7 @@ export async function generateImage(
         n: 1,
         response_format: "b64_json",
       }),
+      signal: opts.signal,
     },
     IMAGE_TIMEOUT_MS,
   );
@@ -296,7 +297,7 @@ export async function generateImage(
     return { buffer: Buffer.from(first.b64_json, "base64") };
   }
   if (first?.url) {
-    const img = await fetchWithTimeout(first.url, {}, IMAGE_TIMEOUT_MS);
+    const img = await fetchWithTimeout(first.url, { signal: opts.signal }, IMAGE_TIMEOUT_MS);
     await throwIfNotOk(img);
     return { buffer: Buffer.from(await img.arrayBuffer()) };
   }
@@ -334,7 +335,7 @@ export function mapTtsVoice(voice: string | undefined): string {
 
 export async function synthesizeSpeech(
   route: ResolvedRoute,
-  opts: { text: string; voice?: string; speed?: number },
+  opts: { text: string; voice?: string; speed?: number; signal?: AbortSignal },
 ): Promise<Buffer> {
   requireOpenai(route, ANTHROPIC_NO_TTS_MESSAGE);
   const url = joinUrl(route.provider.baseUrl, "audio/speech");
@@ -353,6 +354,7 @@ export async function synthesizeSpeech(
         speed: opts.speed ?? 1,
         response_format: "wav",
       }),
+      signal: opts.signal,
     },
     SPEECH_TIMEOUT_MS,
   );
@@ -457,7 +459,7 @@ export interface EmbeddingsResult {
 export async function createEmbeddings(
   route: ResolvedRoute,
   inputs: string[],
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<EmbeddingsResult> {
   requireOpenai(route, ANTHROPIC_NO_EMBEDDINGS_MESSAGE);
   const texts = inputs.map((t) => t.slice(0, 24_000));
@@ -475,6 +477,7 @@ export async function createEmbeddings(
         model: route.model.modelId,
         input: texts.length === 1 ? texts[0] : texts,
       }),
+      signal: opts.signal,
     },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   );

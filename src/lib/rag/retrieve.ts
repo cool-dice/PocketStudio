@@ -7,6 +7,7 @@ import { promises as fsp } from "node:fs";
 
 import type { PrismaClient } from "@prisma/client";
 
+import { throwIfAborted } from "../abort-flag";
 import { rankCanonHits } from "../retrieve";
 import { projectRoot, safeJoin, WorkspaceError } from "../workspace";
 import { tryEmbedTexts } from "./embed";
@@ -21,7 +22,9 @@ async function filterLiveChunks(
   db: PrismaClient,
   scope: RagScope,
   rows: RagChunkRow[],
+  signal?: AbortSignal,
 ): Promise<RagChunkRow[]> {
+  throwIfAborted(signal);
   if (rows.length === 0) return rows;
   let next = rows;
   if (scope.kind === "global") {
@@ -66,21 +69,25 @@ async function filterLiveChunks(
           ).map((s) => s.id),
         );
   if (!liveNotes && !liveSections) {
-    return filterLiveFiles(next);
+    return filterLiveFiles(next, signal);
   }
   const withSources = next.filter((r) => {
     if (r.sourceType === "note" && liveNotes) return liveNotes.has(r.sourceId);
     if (r.sourceType === "section" && liveSections) return liveSections.has(r.sourceId);
     return true;
   });
-  return filterLiveFiles(withSources);
+  return filterLiveFiles(withSources, signal);
 }
 
-async function filterLiveFiles(rows: RagChunkRow[]): Promise<RagChunkRow[]> {
+async function filterLiveFiles(
+  rows: RagChunkRow[],
+  signal?: AbortSignal,
+): Promise<RagChunkRow[]> {
   const files = rows.filter((r) => r.sourceType === "file");
   if (files.length === 0) return rows;
   const exists = new Map<string, boolean>();
   for (const row of files) {
+    throwIfAborted(signal);
     if (!row.path || !row.projectId) continue;
     const key = `${row.projectId}:${row.path}`;
     if (!exists.has(key)) {
@@ -119,10 +126,12 @@ export async function retrieve(
     query: string;
     kinds?: string[];
     limit?: number;
+    signal?: AbortSignal;
   },
 ): Promise<RetrieveResult> {
   const query = opts.query.trim();
   const limit = Math.min(12, Math.max(1, opts.limit ?? 8));
+  throwIfAborted(opts.signal);
   if (!query) {
     return {
       query,
@@ -133,14 +142,15 @@ export async function retrieve(
     };
   }
 
-  const embedded = await tryEmbedTexts(db, opts.scope.userId, [query]);
+  const embedded = await tryEmbedTexts(db, opts.scope.userId, [query], opts.signal);
+  throwIfAborted(opts.signal);
   if (embedded.vectors?.[0]) {
     const rows = await searchVector(db, opts.scope, embedded.vectors[0], {
       kinds: opts.kinds,
       limit: limit * 2,
     });
     const scoped = rows.filter((r) => chunkMatchesScope(r, opts.scope));
-    const live = await filterLiveChunks(db, opts.scope, scoped);
+    const live = await filterLiveChunks(db, opts.scope, scoped, opts.signal);
     const hits = live.slice(0, limit).map(rowToHit);
     if (hits.length > 0) {
       return {
@@ -156,6 +166,7 @@ export async function retrieve(
   const fallback = await keywordRetrieve(db, opts.scope, query, {
     kinds: opts.kinds,
     limit,
+    signal: opts.signal,
   });
   return {
     query,
@@ -170,14 +181,15 @@ export async function keywordRetrieve(
   db: PrismaClient,
   scope: RagScope,
   query: string,
-  opts: { kinds?: string[]; limit: number },
+  opts: { kinds?: string[]; limit: number; signal?: AbortSignal },
 ): Promise<RagHit[]> {
+  throwIfAborted(opts.signal);
   const rows = await loadScopedChunks(db, scope, {
     kinds: opts.kinds,
     take: 400,
   });
   const scoped = rows.filter((r) => chunkMatchesScope(r, scope));
-  const live = await filterLiveChunks(db, scope, scoped);
+  const live = await filterLiveChunks(db, scope, scoped, opts.signal);
   const ranked = rankCanonHits(
     query,
     live.map((r) => ({
