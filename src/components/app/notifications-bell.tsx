@@ -22,6 +22,7 @@ import {
   GitCommitHorizontal,
   Sparkles,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { relativeTime, textPreview } from "@/lib/format";
+import {
+  BELL_CLEAR,
+  BELL_CLEARED,
+  BELL_EMPTY,
+  BELL_EMPTY_HINT,
+  BELL_LOAD_ERROR,
+  BELL_LOAD_ERROR_HINT,
+  BELL_MARK_ALL_READ,
+  BELL_RETRY,
+  bellListView,
+} from "@/lib/notification-copy";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
 import type { Notification, NotificationType } from "@/lib/types";
@@ -68,7 +80,7 @@ const TYPE_META: Record<
 };
 
 export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom" }) {
-  const { notifications, unread, loaded } = useNotifications();
+  const { notifications, unread, loaded, loadError } = useNotifications();
   const markRead = useNotifications((s) => s.markRead);
   const markAllRead = useNotifications((s) => s.markAllRead);
   const clearAll = useNotifications((s) => s.clearAll);
@@ -76,12 +88,13 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
 
   const [open, setOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const listView = bellListView(loaded, loadError, notifications.length);
 
   // Stale resync: a popover open with an empty/unloaded list (e.g. the socket
-  // never connected) still deserves fresh data.
+  // never connected) still deserves fresh data. A previous load error retries.
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    if (next && !loaded) void refresh();
+    if (next && (!loaded || loadError)) void refresh();
   };
 
   const handleItemClick = (n: Notification) => {
@@ -108,7 +121,7 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
     setClearing(true);
     try {
       await clearAll();
-      toast.success("История уведомлений очищена");
+      toast.success(BELL_CLEARED);
     } finally {
       setClearing(false);
     }
@@ -164,7 +177,7 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
                 variant="ghost"
                 size="icon"
                 className="size-8"
-                aria-label="Отметить все прочитанными"
+                aria-label={BELL_MARK_ALL_READ}
                 onClick={() => void markAllRead()}
               >
                 <CheckCheck className="size-4" aria-hidden="true" />
@@ -175,7 +188,7 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
                 variant="ghost"
                 size="icon"
                 className="size-8 hover:text-destructive"
-                aria-label="Очистить историю уведомлений"
+                aria-label={BELL_CLEAR}
                 disabled={clearing}
                 onClick={() => void handleClear()}
               >
@@ -188,7 +201,7 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
 
         {/* ── List ── */}
         <div className="vf-scroll max-h-96 overflow-y-auto">
-          {!loaded ? (
+          {listView === "loading" ? (
             <div className="space-y-3 p-4">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="flex gap-3">
@@ -200,15 +213,30 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
                 </div>
               ))}
             </div>
-          ) : notifications.length === 0 ? (
+          ) : listView === "error" ? (
+            <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+              <p className="text-sm font-medium">{loadError ?? BELL_LOAD_ERROR}</p>
+              <p className="max-w-56 text-xs leading-relaxed text-muted-foreground">
+                {BELL_LOAD_ERROR_HINT}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-1"
+                onClick={() => void refresh()}
+              >
+                <RefreshCw className="size-4" aria-hidden="true" />
+                {BELL_RETRY}
+              </Button>
+            </div>
+          ) : listView === "empty" ? (
             <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
               <span className="flex size-11 items-center justify-center rounded-full bg-muted">
                 <BellOff className="size-5 text-muted-foreground" aria-hidden="true" />
               </span>
-              <p className="text-sm font-medium">Пока тихо</p>
+              <p className="text-sm font-medium">{BELL_EMPTY}</p>
               <p className="max-w-56 text-xs leading-relaxed text-muted-foreground">
-                Здесь появятся готовые анализы, напоминания из блокнота,
-                новые проекты агента и чекпоинты
+                {BELL_EMPTY_HINT}
               </p>
             </div>
           ) : (

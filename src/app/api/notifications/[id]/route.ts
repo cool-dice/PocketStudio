@@ -20,6 +20,7 @@ function serialize(n: {
   title: string;
   body: string | null;
   entityId: string | null;
+  dedupeKey?: string | null;
   read: boolean;
   createdAt: Date;
 }) {
@@ -29,6 +30,7 @@ function serialize(n: {
     title: n.title,
     body: n.body,
     entityId: n.entityId,
+    dedupeKey: n.dedupeKey ?? null,
     read: n.read,
     createdAt: n.createdAt.toISOString(),
   };

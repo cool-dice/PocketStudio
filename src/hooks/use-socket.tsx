@@ -248,7 +248,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     /* ── Notifications (Stage 4b) ── */
 
-    // Live bell push. NO toast here — the underlying events
+    // Live bell push. NO toast here — reminders toast from the due-notes
+    // poller only (`shouldToastNewReminder("ws")` is false). Other events
     // (note:analyzed / project:created / project:updated) already toast
     // from their own handlers; this only updates the persistent history.
     const handleNotificationNew = (payload: unknown) => {

@@ -19,6 +19,7 @@
 import { create } from "zustand";
 
 import { api } from "@/lib/api";
+import { BELL_LOAD_ERROR } from "@/lib/notification-copy";
 import { mergeNotification } from "@/lib/notification-merge";
 import type { Notification } from "@/lib/types";
 
@@ -27,6 +28,8 @@ interface NotificationsState {
   unread: number;
   /** At least one successful REST/WS sync has happened. */
   loaded: boolean;
+  /** Failed REST list — never paint this as «Пока тихо». */
+  loadError: string | null;
   /** Incremented on every change → subscribers (bell) re-render. */
   version: number;
 
@@ -46,14 +49,24 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
   notifications: [],
   unread: 0,
   loaded: false,
+  loadError: null,
   version: 0,
 
   refresh: async () => {
     try {
       const { notifications, unread } = await api.listNotifications();
-      set((s) => ({ notifications, unread, loaded: true, version: s.version + 1 }));
+      set((s) => ({
+        notifications,
+        unread,
+        loaded: true,
+        loadError: null,
+        version: s.version + 1,
+      }));
     } catch {
-      // keep the previous state — a later refresh will resync
+      set((s) => ({
+        loadError: BELL_LOAD_ERROR,
+        version: s.version + 1,
+      }));
     }
   },
 
@@ -64,6 +77,7 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
         notifications: next.notifications,
         unread: next.unread,
         loaded: true,
+        loadError: null,
         version: s.version + 1,
       };
     });

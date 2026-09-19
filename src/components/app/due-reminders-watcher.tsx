@@ -9,6 +9,10 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import {
+  reminderToastId,
+  shouldToastNewReminder,
+} from "@/lib/notification-copy";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
 
@@ -38,8 +42,9 @@ export function DueRemindersWatcher() {
           void store.refresh();
         }
         for (const note of res.notes.slice(0, 3)) {
+          if (!shouldToastNewReminder("poll")) continue;
           toast("Напоминание", {
-            id: `reminder-${note.id}`,
+            id: reminderToastId(note.id),
             description: note.preview,
             action: {
               label: "Открыть",

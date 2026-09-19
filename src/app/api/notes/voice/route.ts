@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { getUserFromRequest } from "@/lib/auth";
-import { aiErrorResponse, aiTranscribe } from "@/lib/ai";
+import {
+  aiErrorResponse,
+  aiTranscribe,
+  isUnconfiguredToolError,
+  resolveToolRoute,
+  UNCONFIGURED_TOOL_MESSAGE,
+} from "@/lib/ai";
+import { db } from "@/lib/db";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
 import { ASR_EMPTY, ASR_UNAVAILABLE, isUsableTranscript } from "@/lib/voice-copy";
 
@@ -10,6 +17,9 @@ import { ASR_EMPTY, ASR_UNAVAILABLE, isUsableTranscript } from "@/lib/voice-copy
  * Body: {audioBase64, mime} → ASR (OpenAI-compatible /v1/audio/transcriptions)
  * → 200 { text }. Does not create a Note, NoteLink, or RAG chunk — the client
  * puts the text in the composer and POSTs /api/notes once on save.
+ *
+ * Unconfigured `asr` fails immediately (400 UNCONFIGURED_TOOL_MESSAGE) after
+ * auth — before reading the audio body and before calling the provider.
  */
 
 export const dynamic = "force-dynamic";
@@ -24,6 +34,25 @@ export async function POST(req: Request) {
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
+  }
+
+  try {
+    await resolveToolRoute(db, session.sub, "asr");
+  } catch (err) {
+    if (isUnconfiguredToolError(err)) {
+      return NextResponse.json(
+        { error: UNCONFIGURED_TOOL_MESSAGE },
+        { status: 400 },
+      );
+    }
+    const mapped = aiErrorResponse(err, ASR_UNAVAILABLE);
+    if (mapped.status >= 500) {
+      console.error(
+        "[voice] ASR resolve failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 
   let body: unknown;

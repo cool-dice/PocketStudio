@@ -22,6 +22,9 @@ import {
 import { GET as listLibrary } from "./artifacts/route";
 import { PATCH as patchArtifact, DELETE as deleteArtifact } from "./artifacts/[id]/route";
 import { PATCH as patchFinding } from "./findings/[id]/route";
+import { GET as listNotifications, DELETE as clearNotifications } from "./notifications/route";
+import { PATCH as patchNotification } from "./notifications/[id]/route";
+import { POST as markAllRead } from "./notifications/read-all/route";
 
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 const stamp = Date.now().toString(36);
@@ -350,6 +353,67 @@ describe.skipIf(SKIP_PG)("IDOR: other user's ids are 404", () => {
     expect(stillEnt?.name).toBe("Марина");
     expect(stillArt?.title).toBe("портрет");
     expect(stillFind?.status).not.toBe("fixed");
+  });
+
+  test("notification GET/PATCH/read-all/DELETE do not leak another user", async () => {
+    await seedAttacker();
+    const secret = await db.notification.create({
+      data: {
+        userId: ownerId!,
+        type: "system",
+        title: "Секрет колокола",
+        body: "только владельцу",
+        read: false,
+      },
+    });
+
+    const list = await listNotifications(
+      jsonRequest("http://localhost/api/notifications", "GET", undefined, attackerToken!),
+    );
+    expect(list.status).toBe(200);
+    const listJson = (await list.json()) as {
+      notifications: { id: string; title: string }[];
+    };
+    expect(listJson.notifications.some((n) => n.id === secret.id)).toBe(false);
+    expect(JSON.stringify(listJson)).not.toContain("Секрет колокола");
+    expect(JSON.stringify(listJson)).not.toContain(secret.id);
+
+    const patched = await patchNotification(
+      jsonRequest(
+        `http://localhost/api/notifications/${secret.id}`,
+        "PATCH",
+        { read: true },
+        attackerToken!,
+      ),
+      { params: Promise.resolve({ id: secret.id }) },
+    );
+    expect(patched.status).toBe(404);
+    const patchedJson = (await patched.json()) as { notification?: unknown };
+    expect(patchedJson.notification).toBeUndefined();
+
+    const all = await markAllRead(
+      jsonRequest(
+        "http://localhost/api/notifications/read-all",
+        "POST",
+        {},
+        attackerToken!,
+      ),
+    );
+    expect(all.status).toBe(200);
+
+    const cleared = await clearNotifications(
+      jsonRequest(
+        "http://localhost/api/notifications",
+        "DELETE",
+        undefined,
+        attackerToken!,
+      ),
+    );
+    expect(cleared.status).toBe(200);
+
+    const still = await db.notification.findUnique({ where: { id: secret.id } });
+    expect(still?.title).toBe("Секрет колокола");
+    expect(still?.read).toBe(false);
   });
 
   afterAll(async () => {

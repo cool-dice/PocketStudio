@@ -108,7 +108,7 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
   });
 
   test("400 on missing audio or bad mime", async () => {
-    await seedUser();
+    await seedAsrOverride();
     const missing = await voice(jsonRequest({ mime: "audio/wav" }, token!));
     expect(missing.status).toBe(400);
     const missingJson = (await missing.json()) as { error: string };
@@ -136,6 +136,11 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
       return;
     }
     const before = await db.note.count({ where: { userId: userId! } });
+    let providerCalled = false;
+    globalThis.fetch = (async () => {
+      providerCalled = true;
+      return new Response("should not run", { status: 500 });
+    }) as typeof fetch;
     const res = await voice(
       jsonRequest({ audioBase64: AUDIO, mime: "audio/wav" }, token!),
     );
@@ -143,6 +148,48 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
     const json = (await res.json()) as { error: string; note?: unknown };
     expect(json.error).toBe(UNCONFIGURED_TOOL_MESSAGE);
     expect(json.note).toBeUndefined();
+    expect(providerCalled).toBe(false);
+    expect(await db.note.count({ where: { userId: userId! } })).toBe(before);
+  });
+
+  test("unconfigured ASR fails before reading the audio body", async () => {
+    await seedUser();
+    let unconfigured = false;
+    try {
+      await resolveToolRoute(db, userId!, "asr");
+    } catch (err) {
+      unconfigured = err instanceof GatewayError
+        && err.message === UNCONFIGURED_TOOL_MESSAGE;
+    }
+    if (!unconfigured) {
+      expect(UNCONFIGURED_TOOL_MESSAGE).toMatch(/Администратор ещё не настроил/);
+      return;
+    }
+
+    let jsonCalled = false;
+    const req = jsonRequest(
+      { audioBase64: AUDIO, mime: "audio/wav" },
+      token!,
+    );
+    req.json = (async () => {
+      jsonCalled = true;
+      throw new Error("ASR must fail-fast before reading the audio body");
+    }) as typeof req.json;
+
+    let providerCalled = false;
+    globalThis.fetch = (async () => {
+      providerCalled = true;
+      return new Response("should not run", { status: 500 });
+    }) as typeof fetch;
+
+    const before = await db.note.count({ where: { userId: userId! } });
+    const res = await voice(req);
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string; note?: unknown };
+    expect(json.error).toBe(UNCONFIGURED_TOOL_MESSAGE);
+    expect(json.note).toBeUndefined();
+    expect(jsonCalled).toBe(false);
+    expect(providerCalled).toBe(false);
     expect(await db.note.count({ where: { userId: userId! } })).toBe(before);
   });
 
