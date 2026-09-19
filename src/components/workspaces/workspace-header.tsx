@@ -69,6 +69,12 @@ import { api, ApiError } from "@/lib/api";
 import { invalidateWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
 import {
+  WORKSPACES_ARCHIVE_ACTION,
+  WORKSPACES_FAVORITE_FAILED,
+  WORKSPACES_UNARCHIVE_ACTION,
+  workspaceArchiveToast,
+} from "@/lib/workspace-copy";
+import {
   WORKSPACE_TAB_META,
   WORKSPACE_TYPE_META,
   type WorkspaceTab,
@@ -203,15 +209,20 @@ export function WorkspaceHeader({
   }
 
   async function toggleArchive() {
+    const next = !workspace.archived;
     try {
-      await api.updateWorkspace(workspace.id, { archived: !workspace.archived });
-      toast.success(workspace.archived ? "Воркспейс возвращён" : "Воркспейс в архиве");
+      const updated = await api.updateWorkspace(workspace.id, {
+        archived: next,
+      });
+      const result = workspaceArchiveToast(true, updated.archived);
+      toast.success(result.message);
       invalidateWorkspaces();
-      if (!workspace.archived) onDeleted?.();
+      if (updated.archived) onDeleted?.();
       else onUpdated?.();
     } catch (err) {
+      const failed = workspaceArchiveToast(false, next);
       toast.error(
-        err instanceof ApiError ? err.message : "Не удалось изменить архив",
+        err instanceof ApiError ? err.message : failed.message,
       );
     }
   }
@@ -223,7 +234,7 @@ export function WorkspaceHeader({
       onUpdated?.();
     } catch (err) {
       toast.error(
-        err instanceof ApiError ? err.message : "Не удалось обновить избранное",
+        err instanceof ApiError ? err.message : WORKSPACES_FAVORITE_FAILED,
       );
     }
   }
@@ -418,7 +429,9 @@ export function WorkspaceHeader({
                   onClick={() => void toggleArchive()}
                 >
                   <Archive aria-hidden="true" />
-                  {workspace.archived ? "Вернуть из архива" : "Архивировать"}
+                  {workspace.archived
+                    ? WORKSPACES_UNARCHIVE_ACTION
+                    : WORKSPACES_ARCHIVE_ACTION}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

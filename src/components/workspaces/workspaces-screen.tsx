@@ -5,6 +5,7 @@
  * (/api/workspaces) с каталогизацией (чипы типов, поиск, фильтр стадии,
  * сортировка), сетка карточек, скелетоны загрузки,
  * состояние ошибки с повтором и мастер создания воркспейса.
+ * Default list hides archived; «Показать архив» loads `?archived=1`.
  */
 
 import { useMemo, useState } from "react";
@@ -24,9 +25,22 @@ import {
   type WorkspacesSort,
   type WorkspacesTypeFilter,
 } from "@/components/workspaces/workspaces-data";
-import { useWorkspaces, invalidateWorkspaces } from "@/hooks/use-workspaces";
+import {
+  patchCachedWorkspace,
+  useWorkspacesGrid,
+} from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
 import { api, ApiError } from "@/lib/api";
+import {
+  WORKSPACES_FAVORITE_FAILED,
+  WORKSPACES_HIDE_ARCHIVE,
+  WORKSPACES_LOAD_ERROR,
+  WORKSPACES_LOAD_ERROR_HINT,
+  WORKSPACES_RETRY,
+  WORKSPACES_SHOW_ARCHIVE,
+  workspacesEmptyCopy,
+  workspacesListView,
+} from "@/lib/workspace-copy";
 import { toast } from "sonner";
 
 export function WorkspacesScreen({
@@ -35,7 +49,14 @@ export function WorkspacesScreen({
   onOpenMobileNav: () => void;
 }) {
   const openWorkspace = useAppUi((s) => s.openWorkspace);
-  const { workspaces, loading, error, load } = useWorkspaces();
+  const {
+    workspaces,
+    loading,
+    error,
+    load,
+    showArchived,
+    toggleShowArchived,
+  } = useWorkspacesGrid();
 
   const [query, setQuery] = useState("");
   const [type, setType] = useState<WorkspacesTypeFilter>("all");
@@ -91,8 +112,10 @@ export function WorkspacesScreen({
     setStage("all");
   }
 
-  const showSkeleton = loading && workspaces.length === 0;
-  const showError = error && !loading && workspaces.length === 0;
+  const listView = workspacesListView(loading, error, workspaces.length);
+  const emptyCopy = workspacesEmptyCopy(showArchived);
+  const showSkeleton = listView === "loading" && workspaces.length === 0;
+  const showError = listView === "error" && workspaces.length === 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -124,6 +147,7 @@ export function WorkspacesScreen({
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <p className="text-xs text-muted-foreground">
+            {showArchived ? "Архив · " : null}
             Показано{" "}
             <span className="font-medium tabular-nums text-foreground">
               {visible.length}
@@ -142,6 +166,14 @@ export function WorkspacesScreen({
               Сбросить фильтры
             </Button>
           ) : null}
+          <button
+            type="button"
+            aria-pressed={showArchived}
+            onClick={() => void toggleShowArchived()}
+            className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            {showArchived ? WORKSPACES_HIDE_ARCHIVE : WORKSPACES_SHOW_ARCHIVE}
+          </button>
         </div>
 
         {showSkeleton ? (
@@ -152,7 +184,14 @@ export function WorkspacesScreen({
           <WorkspacesEmptyState
             onReset={resetFilters}
             filtered={hasActiveFilters}
-            total={workspaces.length}
+            title={
+              hasActiveFilters ? "Ничего не найдено" : emptyCopy.title
+            }
+            hint={
+              hasActiveFilters
+                ? `Под текущие фильтры не попал ни один воркспейс из ${workspaces.length}.`
+                : emptyCopy.hint
+            }
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -163,12 +202,14 @@ export function WorkspacesScreen({
                 onOpen={(id) => openWorkspace(id)}
                 onToggleFavorite={(id, next) => {
                   void api.updateWorkspace(id, { favorite: next }).then(
-                    () => {
-                      invalidateWorkspaces();
+                    (updated) => {
+                      patchCachedWorkspace(id, { favorite: updated.favorite });
                     },
                     (err) => {
                       toast.error(
-                        err instanceof ApiError ? err.message : "Не удалось обновить избранное",
+                        err instanceof ApiError
+                          ? err.message
+                          : WORKSPACES_FAVORITE_FAILED,
                       );
                     },
                   );
@@ -230,14 +271,14 @@ function WorkspacesErrorState({ onRetry }: { onRetry: () => void }) {
         <SearchX className="size-6" />
       </span>
       <div>
-        <p className="text-sm font-medium">Не удалось загрузить воркспейсы</p>
+        <p className="text-sm font-medium">{WORKSPACES_LOAD_ERROR}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Проверьте соединение со студией и попробуйте ещё раз.
+          {WORKSPACES_LOAD_ERROR_HINT}
         </p>
       </div>
       <Button type="button" variant="outline" size="sm" onClick={onRetry}>
         <RotateCcw className="size-3.5" aria-hidden="true" />
-        Повторить
+        {WORKSPACES_RETRY}
       </Button>
     </div>
   );
@@ -246,11 +287,13 @@ function WorkspacesErrorState({ onRetry }: { onRetry: () => void }) {
 function WorkspacesEmptyState({
   onReset,
   filtered,
-  total,
+  title,
+  hint,
 }: {
   onReset: () => void;
   filtered: boolean;
-  total: number;
+  title: string;
+  hint: string;
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
@@ -261,14 +304,8 @@ function WorkspacesEmptyState({
         <SearchX className="size-6" />
       </span>
       <div>
-        <p className="text-sm font-medium">
-          {filtered ? "Ничего не найдено" : "Пока нет ни одного воркспейса"}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {filtered
-            ? `Под текущие фильтры не попал ни один воркспейс из ${total}.`
-            : "Создайте первый — тип и название, остальное соберёт оркестратор."}
-        </p>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
       </div>
       {filtered ? (
         <Button type="button" variant="outline" size="sm" onClick={onReset}>
