@@ -7,6 +7,8 @@ import {
   CATEGORIES_LOAD_ERROR_HINT,
   CATEGORY_CREATED,
   CATEGORY_CREATE_FAILED,
+  CATEGORY_DEFAULT_COLOR,
+  CATEGORY_DEFAULT_ICON,
   CATEGORY_DELETED,
   CATEGORY_DELETE_FAILED,
   CATEGORY_NAME_EMPTY,
@@ -14,6 +16,11 @@ import {
   CATEGORY_NAME_TOO_LONG,
   CATEGORY_RENAMED,
   CATEGORY_RENAME_FAILED,
+  CATEGORY_UPDATED,
+  CATEGORY_UPDATE_FAILED,
+  categoryStylePayload,
+  parseCategoryColor,
+  parseCategoryIcon,
   TAGS_EMPTY,
   TAGS_LOAD_ERROR,
   TAGS_LOAD_ERROR_HINT,
@@ -29,6 +36,7 @@ import {
   TAXONOMY_RETRY,
   taxonomyAfterCreate,
   taxonomyAfterDelete,
+  taxonomyCategoryPatched,
   taxonomyEmptyCopy,
   taxonomyListView,
   taxonomyLoadErrorCopy,
@@ -131,6 +139,14 @@ describe("taxonomy toast after API, list follows outcome", () => {
       kind: "success",
       message: CATEGORY_DELETED,
     });
+    expect(taxonomyToast(false, "category", "update")).toEqual({
+      kind: "error",
+      message: CATEGORY_UPDATE_FAILED,
+    });
+    expect(taxonomyToast(true, "category", "update")).toEqual({
+      kind: "success",
+      message: CATEGORY_UPDATED,
+    });
     expect(taxonomyToast(false, "tag", "create").message).toBe(TAG_CREATE_FAILED);
     expect(taxonomyToast(true, "tag", "create").message).toBe(TAG_CREATED);
     expect(taxonomyToast(false, "tag", "rename").message).toBe(TAG_RENAME_FAILED);
@@ -162,5 +178,46 @@ describe("taxonomy toast after API, list follows outcome", () => {
     expect(taxonomyAfterCreate(rows, created, false)).toEqual(rows);
     expect(taxonomyAfterCreate(rows, null, true)).toEqual(rows);
     expect(taxonomyAfterCreate(rows, created, true)).toEqual([...rows, created]);
+  });
+});
+
+describe("category color/icon persist after API", () => {
+  test("allowlist stays; junk falls back to POST defaults", () => {
+    expect(parseCategoryColor("emerald")).toBe("emerald");
+    expect(parseCategoryColor("chartreuse")).toBe(CATEGORY_DEFAULT_COLOR);
+    expect(parseCategoryColor(undefined)).toBe(CATEGORY_DEFAULT_COLOR);
+    expect(parseCategoryIcon("rocket")).toBe("rocket");
+    expect(parseCategoryIcon("unicorn")).toBe(CATEGORY_DEFAULT_ICON);
+    expect(categoryStylePayload("violet", "coffee")).toEqual({
+      color: "violet",
+      icon: "coffee",
+    });
+    expect(categoryStylePayload("nope", "nope")).toEqual({
+      color: CATEGORY_DEFAULT_COLOR,
+      icon: CATEGORY_DEFAULT_ICON,
+    });
+    expect(CATEGORY_DEFAULT_COLOR).toBe("stone");
+    expect(CATEGORY_DEFAULT_ICON).toBe("lightbulb");
+  });
+
+  test("patched style follows the server, never an optimistic guess", () => {
+    const previous = {
+      id: "a",
+      name: "Идеи",
+      color: "stone",
+      icon: "lightbulb",
+      noteCount: 2,
+    };
+    const server = { name: "Замысел", color: "emerald", icon: "rocket" };
+    expect(taxonomyCategoryPatched(false, previous, server)).toEqual(previous);
+    expect(taxonomyCategoryPatched(true, previous, server)).toEqual({
+      ...previous,
+      name: "Замысел",
+      color: "emerald",
+      icon: "rocket",
+    });
+    expect(taxonomyToast(false, "category", "update").kind).not.toBe("success");
+    expect(CATEGORY_UPDATED).not.toMatch(/не удалось/i);
+    expect(CATEGORY_UPDATE_FAILED).toMatch(/не удалось/i);
   });
 });

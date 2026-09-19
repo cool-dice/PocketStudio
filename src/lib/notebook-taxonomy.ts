@@ -2,12 +2,26 @@
  * Honest notebook categories and tags. Create/rename/delete only after
  * the API; a failed load is not «пока нет»; empty is not an error.
  * Success toasts are built from the outcome, never before the request.
+ * Category color/icon follow the same allowlists as POST/PATCH.
  */
+
+import {
+  COLORS,
+  ICONS,
+  isCategoryColor,
+  isCategoryIcon,
+  type CategoryColor,
+  type CategoryIcon,
+} from "@/lib/note-utils";
 
 export const CATEGORY_NAME_MIN = 1;
 export const CATEGORY_NAME_MAX = 40;
 export const TAG_NAME_MIN = 1;
 export const TAG_NAME_MAX = 32;
+
+/** Same defaults as POST /api/categories when color/icon are omitted. */
+export const CATEGORY_DEFAULT_COLOR: CategoryColor = "stone";
+export const CATEGORY_DEFAULT_ICON: CategoryIcon = "lightbulb";
 
 export const CATEGORY_NAME_EMPTY = "Название категории не может быть пустым";
 export const CATEGORY_NAME_TOO_LONG =
@@ -44,14 +58,19 @@ export const TAXONOMY_DIALOG_HINT =
 export const TAXONOMY_OPEN = "Категории и теги";
 export const TAXONOMY_CREATE = "Создать";
 export const TAXONOMY_RENAME = "Переименовать";
+export const TAXONOMY_SAVE = "Сохранить";
 export const TAXONOMY_DELETE = "Удалить";
 export const TAXONOMY_CANCEL = "Отмена";
+export const TAXONOMY_COLOR = "Цвет";
+export const TAXONOMY_ICON = "Иконка";
 
 export const CATEGORY_CREATED = "Категория создана";
 export const CATEGORY_RENAMED = "Категория переименована";
+export const CATEGORY_UPDATED = "Категория обновлена";
 export const CATEGORY_DELETED = "Категория удалена";
 export const CATEGORY_CREATE_FAILED = "Не удалось создать категорию";
 export const CATEGORY_RENAME_FAILED = "Не удалось переименовать категорию";
+export const CATEGORY_UPDATE_FAILED = "Не удалось обновить категорию";
 export const CATEGORY_DELETE_FAILED = "Не удалось удалить категорию";
 export const CATEGORY_DELETE_CONFIRM = "Удалить категорию?";
 export const CATEGORY_DELETE_CONFIRM_HINT =
@@ -59,16 +78,18 @@ export const CATEGORY_DELETE_CONFIRM_HINT =
 
 export const TAG_CREATED = "Тег создан";
 export const TAG_RENAMED = "Тег переименован";
+export const TAG_UPDATED = "Тег обновлён";
 export const TAG_DELETED = "Тег удалён";
 export const TAG_CREATE_FAILED = "Не удалось создать тег";
 export const TAG_RENAME_FAILED = "Не удалось переименовать тег";
+export const TAG_UPDATE_FAILED = "Не удалось обновить тег";
 export const TAG_DELETE_FAILED = "Не удалось удалить тег";
 export const TAG_DELETE_CONFIRM = "Удалить тег?";
 export const TAG_DELETE_CONFIRM_HINT =
   "Связь с вашими заметками пропадёт, текст заметок останется.";
 
 export type TaxonomyKind = "category" | "tag";
-export type TaxonomyOp = "create" | "rename" | "delete";
+export type TaxonomyOp = "create" | "rename" | "update" | "delete";
 export type TaxonomyListView = "loading" | "error" | "empty" | "ready";
 
 export type NameParse =
@@ -98,6 +119,34 @@ export function validateTagName(raw: unknown): NameParse {
   }
   return { ok: true, name };
 }
+
+/** Junk or missing → API default, never an unlisted key in POST/PATCH. */
+export function parseCategoryColor(raw: unknown): CategoryColor {
+  return typeof raw === "string" && isCategoryColor(raw)
+    ? raw
+    : CATEGORY_DEFAULT_COLOR;
+}
+
+/** Junk or missing → API default, never an unlisted key in POST/PATCH. */
+export function parseCategoryIcon(raw: unknown): CategoryIcon {
+  return typeof raw === "string" && isCategoryIcon(raw)
+    ? raw
+    : CATEGORY_DEFAULT_ICON;
+}
+
+/** Body fragment for category POST/PATCH — only allowlisted keys. */
+export function categoryStylePayload(
+  color: unknown,
+  icon: unknown,
+): { color: CategoryColor; icon: CategoryIcon } {
+  return {
+    color: parseCategoryColor(color),
+    icon: parseCategoryIcon(icon),
+  };
+}
+
+export const CATEGORY_COLOR_KEYS: readonly CategoryColor[] = COLORS;
+export const CATEGORY_ICON_KEYS: readonly CategoryIcon[] = ICONS;
 
 export function taxonomyListView(
   loading: boolean,
@@ -132,11 +181,13 @@ const SUCCESS: Record<TaxonomyKind, Record<TaxonomyOp, string>> = {
   category: {
     create: CATEGORY_CREATED,
     rename: CATEGORY_RENAMED,
+    update: CATEGORY_UPDATED,
     delete: CATEGORY_DELETED,
   },
   tag: {
     create: TAG_CREATED,
     rename: TAG_RENAMED,
+    update: TAG_UPDATED,
     delete: TAG_DELETED,
   },
 };
@@ -145,11 +196,13 @@ const FAILED: Record<TaxonomyKind, Record<TaxonomyOp, string>> = {
   category: {
     create: CATEGORY_CREATE_FAILED,
     rename: CATEGORY_RENAME_FAILED,
+    update: CATEGORY_UPDATE_FAILED,
     delete: CATEGORY_DELETE_FAILED,
   },
   tag: {
     create: TAG_CREATE_FAILED,
     rename: TAG_RENAME_FAILED,
+    update: TAG_UPDATE_FAILED,
     delete: TAG_DELETE_FAILED,
   },
 };
@@ -197,4 +250,24 @@ export function taxonomyAfterCreate<T>(
 ): T[] {
   if (!ok || !created) return [...rows];
   return [...rows, created];
+}
+
+/**
+ * Name/color/icon follow the PATCH body, never an optimistic guess.
+ * Call only after the API returns.
+ */
+export function taxonomyCategoryPatched<
+  T extends { name: string; color: string; icon: string },
+>(
+  ok: boolean,
+  previous: T,
+  server: { name: string; color: string; icon: string },
+): T {
+  if (!ok) return previous;
+  return {
+    ...previous,
+    name: server.name,
+    color: server.color,
+    icon: server.icon,
+  };
 }

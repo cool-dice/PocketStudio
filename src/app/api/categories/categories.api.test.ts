@@ -3,6 +3,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
+  CATEGORY_COLOR_INVALID,
+  CATEGORY_ICON_INVALID,
   CATEGORY_NAME_EMPTY,
   CATEGORY_NAME_TAKEN,
   CATEGORY_NOT_FOUND,
@@ -126,9 +128,17 @@ describe.skipIf(SKIP_PG)("categories API: own CRUD, empty vs error, IDOR", () =>
     );
     expect(created.status).toBe(201);
     const createdJson = (await created.json()) as {
-      category: { id: string; name: string; noteCount: number };
+      category: {
+        id: string;
+        name: string;
+        color: string;
+        icon: string;
+        noteCount: number;
+      };
     };
     expect(createdJson.category.name).toBe("Идеи");
+    expect(createdJson.category.color).toBe("emerald");
+    expect(createdJson.category.icon).toBe("lightbulb");
     expect(createdJson.category.noteCount).toBe(0);
 
     const dup = await createCategory(
@@ -151,9 +161,11 @@ describe.skipIf(SKIP_PG)("categories API: own CRUD, empty vs error, IDOR", () =>
     );
     expect(renamed.status).toBe(200);
     const renamedJson = (await renamed.json()) as {
-      category: { name: string };
+      category: { name: string; color: string; icon: string };
     };
     expect(renamedJson.category.name).toBe("Замысел");
+    expect(renamedJson.category.color).toBe("emerald");
+    expect(renamedJson.category.icon).toBe("lightbulb");
 
     const deleted = await deleteCategory(
       jsonRequest(
@@ -338,5 +350,96 @@ describe.skipIf(SKIP_PG)("categories API: own CRUD, empty vs error, IDOR", () =>
       otherJson.notes.find((n) => n.id === secret.id)?.category?.id,
     ).toBe(otherCat.id);
     expect(JSON.stringify(otherJson)).not.toContain(mine.id);
+  });
+
+  test("POST and PATCH persist allowlisted color/icon; junk is 400", async () => {
+    const { token } = await seedUser("style");
+    const created = await createCategory(
+      jsonRequest(
+        "http://localhost/api/categories",
+        "POST",
+        { name: "Маяк", color: "violet", icon: "rocket" },
+        token,
+      ),
+    );
+    expect(created.status).toBe(201);
+    const createdJson = (await created.json()) as {
+      category: { id: string; color: string; icon: string };
+    };
+    expect(createdJson.category.color).toBe("violet");
+    expect(createdJson.category.icon).toBe("rocket");
+
+    const params = { params: Promise.resolve({ id: createdJson.category.id }) };
+    const patched = await patchCategory(
+      jsonRequest(
+        `http://localhost/api/categories/${createdJson.category.id}`,
+        "PATCH",
+        { color: "cyan", icon: "coffee" },
+        token,
+      ),
+      params,
+    );
+    expect(patched.status).toBe(200);
+    const patchedJson = (await patched.json()) as {
+      category: { color: string; icon: string; name: string };
+    };
+    expect(patchedJson.category.name).toBe("Маяк");
+    expect(patchedJson.category.color).toBe("cyan");
+    expect(patchedJson.category.icon).toBe("coffee");
+
+    const listed = await listCategories(
+      jsonRequest("http://localhost/api/categories", "GET", undefined, token),
+    );
+    const listedJson = (await listed.json()) as {
+      categories: { id: string; color: string; icon: string }[];
+    };
+    const row = listedJson.categories.find((c) => c.id === createdJson.category.id);
+    expect(row?.color).toBe("cyan");
+    expect(row?.icon).toBe("coffee");
+
+    const badColor = await createCategory(
+      jsonRequest(
+        "http://localhost/api/categories",
+        "POST",
+        { name: "Мусор", color: "chartreuse", icon: "rocket" },
+        token,
+      ),
+    );
+    expect(badColor.status).toBe(400);
+    const badColorJson = (await badColor.json()) as {
+      error: string;
+      fields?: { color?: string };
+      category?: unknown;
+    };
+    expect(badColorJson.category).toBeUndefined();
+    expect(badColorJson.fields?.color).toBe(CATEGORY_COLOR_INVALID);
+
+    const badIcon = await patchCategory(
+      jsonRequest(
+        `http://localhost/api/categories/${createdJson.category.id}`,
+        "PATCH",
+        { icon: "unicorn" },
+        token,
+      ),
+      params,
+    );
+    expect(badIcon.status).toBe(400);
+    const badIconJson = (await badIcon.json()) as {
+      error: string;
+      fields?: { icon?: string };
+      category?: unknown;
+    };
+    expect(badIconJson.category).toBeUndefined();
+    expect(badIconJson.fields?.icon).toBe(CATEGORY_ICON_INVALID);
+
+    const afterBad = await listCategories(
+      jsonRequest("http://localhost/api/categories", "GET", undefined, token),
+    );
+    const afterBadJson = (await afterBad.json()) as {
+      categories: { id: string; color: string; icon: string }[];
+    };
+    const still = afterBadJson.categories.find((c) => c.id === createdJson.category.id);
+    expect(still?.color).toBe("cyan");
+    expect(still?.icon).toBe("coffee");
   });
 });

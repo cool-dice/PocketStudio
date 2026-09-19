@@ -350,5 +350,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Register rate-limit | POST `/api/auth/register`: 8 / 15 мин in-memory per IP, 429 + Retry-After. Дубль email — 409 «уже существует», без enumeration-маски. |
 | 2026-09-19 | REST IDOR sweep | Path `[id]` уже с `ensureOwned`/`userId`. Добиты leftover query/body: `GET /api/offers?projectId=` чужой → 404 (не пустой список); `GET /api/notes?categoryId=`/`tagId=` чужой → 404; `POST /api/rag/search` `projectId` чужой → 404 (как `threadProjectId`). |
 | 2026-09-19 | Note categories/tags CRUD | POST/PATCH/DELETE только свои (чужой id → 404, без тела). Пустой список ≠ ошибка загрузки. Тост успеха только после API. Удаление категории/тега не трогает и не отдаёт чужие заметки с тем же именем. |
+| 2026-09-19 | Category color/icon picker | Диалог категорий: пикер цвета и иконки, POST/PATCH allowlist, тост только после API. Теги по-прежнему имя. |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.
