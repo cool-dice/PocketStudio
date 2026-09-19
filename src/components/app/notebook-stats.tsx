@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export function NotebookStats({
@@ -11,6 +12,7 @@ export function NotebookStats({
   dueReminders?: number;
   onDueClick?: () => void;
 }) {
+  const notesVersion = useAppUi((s) => s.notesVersion);
   const [days, setDays] = useState<{ date: string; total: number }[]>([]);
   const [due, setDue] = useState(0);
 
@@ -30,7 +32,7 @@ export function NotebookStats({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [notesVersion]);
 
   const max = Math.max(1, ...days.map((d) => d.total));
 
@@ -59,6 +61,7 @@ export function NotebookStats({
           type="button"
           onClick={onDueClick}
           className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-800 dark:text-amber-200"
+          aria-label={`Просроченных напоминаний: ${due}. Открыть список.`}
         >
           Напоминания: {due}
         </button>

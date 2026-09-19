@@ -130,9 +130,11 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
             : `Сервер «${target.name}» отключён`,
           {
             description: next
-              ? target.external
-                ? "Конфиг сохранён; инструменты заработают в полной версии"
-                : "Инструменты доступны оркестратору в чате"
+              ? target.runtimeStatus === "cli_missing"
+                ? "agent-browser нет в PATH. Fetch и файлы работают без CLI."
+                : target.external
+                  ? "Конфиг сохранён; процесс не стартовал (stdio/sse — полная версия)"
+                  : "Инструменты доступны оркестратору в чате"
               : "Инструменты сервера скрыты из диалогов",
           },
         );
