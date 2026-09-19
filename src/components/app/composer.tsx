@@ -11,8 +11,9 @@
  * checkpoint and zip export (last two need a bound project).
  *
  * Voice (Stage 2): compact mic next to the send button — records via
- * useVoiceRecorder, the backend transcribes (POST /api/notes/voice) and
- * the text is appended to the message input for review before sending.
+ * useVoiceRecorder, the backend transcribes (POST /api/notes/voice → { text })
+ * and the text is appended to the message input for review before sending.
+ * Chat voice does not create a notebook note.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -260,11 +261,11 @@ export function Composer({
     finalizingRef.current = true;
     try {
       const clip = clipArg ?? (await recorder.stop());
-      const note = await api.createVoiceNote({
+      const text = await api.transcribeVoice({
         audioBase64: clip.audioBase64,
         mime: clip.mime,
       });
-      const result = voiceResultCopy(note.rawText ?? note.transcription);
+      const result = voiceResultCopy(text);
       if (!result.ok) {
         toast.error(result.error);
       } else {

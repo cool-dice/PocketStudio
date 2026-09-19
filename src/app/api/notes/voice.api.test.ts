@@ -8,6 +8,7 @@ import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
 import { db } from "@/lib/db";
 import { ASR_EMPTY } from "@/lib/voice-copy";
 
+import { POST as createNote } from "./route";
 import { POST as voice } from "./voice/route";
 
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
@@ -199,8 +200,9 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
     expect(await db.note.count({ where: { userId: userId! } })).toBe(before);
   });
 
-  test("real transcript is saved, not a success stub", async () => {
+  test("real transcript is returned, not a success stub, and no note is created", async () => {
     await seedAsrOverride();
+    const before = await db.note.count({ where: { userId: userId! } });
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("https://asr.test.local/v1/audio/transcriptions");
       return new Response(JSON.stringify({ text: "маяк в тумане" }), {
@@ -211,10 +213,67 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
     const res = await voice(
       jsonRequest({ audioBase64: AUDIO, mime: "audio/wav" }, token!),
     );
-    expect(res.status).toBe(201);
-    const json = (await res.json()) as { note: { id: string; rawText: string } };
-    expect(json.note.rawText).toBe("маяк в тумане");
-    expect(json.note.rawText).not.toMatch(/успешно записано/i);
-    await db.note.delete({ where: { id: json.note.id } });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { text: string; note?: unknown };
+    expect(json.text).toBe("маяк в тумане");
+    expect(json.text).not.toMatch(/успешно записано/i);
+    expect(json.note).toBeUndefined();
+    expect(await db.note.count({ where: { userId: userId! } })).toBe(before);
+  });
+
+  test("one voice success then one save creates exactly one note row", async () => {
+    await seedAsrOverride();
+    const beforeNotes = await db.note.count({ where: { userId: userId! } });
+    const beforeLinks = await db.noteLink.count({
+      where: { note: { userId: userId! } },
+    });
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ text: "маяк в тумане" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const asr = await voice(
+      jsonRequest({ audioBase64: AUDIO, mime: "audio/wav" }, token!),
+    );
+    expect(asr.status).toBe(200);
+    const asrJson = (await asr.json()) as { text: string; note?: unknown };
+    expect(asrJson.text).toBe("маяк в тумане");
+    expect(asrJson.note).toBeUndefined();
+    expect(await db.note.count({ where: { userId: userId! } })).toBe(beforeNotes);
+
+    const headers = new Headers({
+      accept: "application/json",
+      "content-type": "application/json",
+      authorization: `Bearer ${token!}`,
+    });
+    const save = await createNote(
+      new Request("http://localhost/api/notes", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: asrJson.text }),
+      }),
+    );
+    expect(save.status).toBe(201);
+    const saved = (await save.json()) as { note: { id: string; rawText: string } };
+    expect(saved.note.rawText).toBe("маяк в тумане");
+
+    expect(await db.note.count({ where: { userId: userId! } })).toBe(
+      beforeNotes + 1,
+    );
+    expect(
+      await db.noteLink.count({ where: { note: { userId: userId! } } }),
+    ).toBe(beforeLinks);
+
+    const secondAsr = await voice(
+      jsonRequest({ audioBase64: AUDIO, mime: "audio/wav" }, token!),
+    );
+    expect(secondAsr.status).toBe(200);
+    expect(await db.note.count({ where: { userId: userId! } })).toBe(
+      beforeNotes + 1,
+    );
+
+    await db.note.delete({ where: { id: saved.note.id } });
   });
 });

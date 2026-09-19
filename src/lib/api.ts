@@ -395,17 +395,20 @@ export const api = {
     ).then((r) => r.note);
   },
 
-  /** Voice capture: audio (WAV base64) → ASR → new note (Stage 2). */
-  createVoiceNote(data: {
+  /**
+   * Voice capture: audio (WAV base64) → ASR transcript.
+   * Does not create a note — the caller confirms, then POSTs /api/notes once.
+   */
+  transcribeVoice(data: {
     audioBase64: string;
     mime: string;
-  }): Promise<Note> {
-    return request<{ note: Note }>("/api/notes/voice", {
+  }): Promise<string> {
+    return request<{ text: string }>("/api/notes/voice", {
       method: "POST",
       body: JSON.stringify(data),
       // Slightly above server ASR timeout so the gateway 504 wins when it can.
       timeoutMs: 95_000,
-    }).then((r) => r.note);
+    }).then((r) => r.text);
   },
 
   listCategories(): Promise<Category[]> {

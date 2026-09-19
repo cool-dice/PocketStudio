@@ -40,7 +40,7 @@ export type VoiceRecorderState =
   | "recording"
   | "processing";
 
-/** Converted recording ready for POST /api/notes/voice. */
+/** Converted recording ready for POST /api/notes/voice (transcribe only). */
 export interface VoiceClip {
   /** 16 kHz mono PCM16 WAV as standard base64 (no data: prefix). */
   audioBase64: string;

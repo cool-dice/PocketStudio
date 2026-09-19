@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { aiErrorResponse, aiTranscribe } from "@/lib/ai";
-import { noteWithCategory } from "@/lib/note-utils";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
 import { ASR_EMPTY, ASR_UNAVAILABLE, isUsableTranscript } from "@/lib/voice-copy";
 
 /**
- * POST /api/notes/voice — voice capture.
+ * POST /api/notes/voice — transcribe only.
  * Body: {audioBase64, mime} → ASR (OpenAI-compatible /v1/audio/transcriptions)
- * → create note {rawText, transcription, status: "pending"} → 201 {note}.
+ * → 200 { text }. Does not create a Note, NoteLink, or RAG chunk — the client
+ * puts the text in the composer and POSTs /api/notes once on save.
  */
 
 export const dynamic = "force-dynamic";
@@ -86,23 +85,5 @@ export async function POST(req: Request) {
     text = text.slice(0, MAX_NOTE_LENGTH);
   }
 
-  try {
-    const note = await db.note.create({
-      data: {
-        userId: session.sub,
-        rawText: text,
-        transcription: text,
-        status: "pending",
-      },
-      include: { category: true },
-    });
-
-    return NextResponse.json({ note: noteWithCategory(note) }, { status: 201 });
-  } catch (err) {
-    console.error("[voice] note create failed:", err);
-    return NextResponse.json(
-      { error: "Не удалось сохранить голосовую заметку" },
-      { status: 500 },
-    );
-  }
+  return NextResponse.json({ text }, { status: 200 });
 }

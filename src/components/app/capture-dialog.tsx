@@ -7,8 +7,9 @@
  * a jump straight to the notebook.
  *
  * Voice (Stage 2): the mic button records via useVoiceRecorder, the
- * backend transcribes (POST /api/notes/voice) and the text lands in the
- * textarea for review — the user still saves with the regular flow.
+ * backend transcribes (POST /api/notes/voice → { text }) and the text lands
+ * in the textarea. A notebook row is created only when the user saves
+ * (POST /api/notes) — one utterance = one note.
  *
  * The form lives in an inner component: Radix unmounts dialog content on
  * close, so the draft state resets naturally without reset effects.
@@ -35,7 +36,12 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
-import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
+import {
+  ASR_GENERIC,
+  MIC_START_FAILED,
+  isTranscriptAlreadySaved,
+  voiceReviewCopy,
+} from "@/lib/voice-copy";
 
 /** ~12 rows of text-sm/leading-relaxed before the inner scrollbar kicks in. */
 const MAX_TEXTAREA_HEIGHT = 288;
@@ -85,6 +91,7 @@ function CaptureForm() {
 
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [savedText, setSavedText] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
@@ -95,15 +102,15 @@ function CaptureForm() {
     finalizingRef.current = true;
     try {
       const clip = clipArg ?? (await recorder.stop());
-      const note = await api.createVoiceNote({
+      const text = await api.transcribeVoice({
         audioBase64: clip.audioBase64,
         mime: clip.mime,
       });
-      const result = voiceResultCopy(note.rawText ?? note.transcription);
+      const result = voiceReviewCopy(text);
       if (!result.ok) {
         toast.error(result.error);
       } else {
-        // Text goes INTO the textarea — the user reviews and saves manually.
+        // Text goes INTO the textarea — the user reviews and saves once.
         setValue((prev) => {
           const base = prev.trim();
           const merged = base ? `${base}\n${result.text}` : result.text;
@@ -147,14 +154,19 @@ function CaptureForm() {
   }, [value]);
 
   const trimmed = value.trim();
+  const alreadySaved = isTranscriptAlreadySaved(trimmed, savedText);
   const canSubmit =
-    !submitting && voiceState === "idle" && trimmed.length > 0;
+    !submitting &&
+    voiceState === "idle" &&
+    trimmed.length > 0 &&
+    !alreadySaved;
 
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
       const note = await api.createNote({ text: trimmed });
+      setSavedText(trimmed);
       bumpNotes();
       setCaptureOpen(false);
       let quest = false;
@@ -328,12 +340,17 @@ function CaptureForm() {
         type="submit"
         className="h-10 w-full gap-2 rounded-xl"
         disabled={!canSubmit}
-        aria-label="Сохранить мысль"
+        aria-label={alreadySaved ? "Мысль уже сохранена" : "Сохранить мысль"}
       >
         {submitting ? (
           <>
             <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             Сохраняем…
+          </>
+        ) : alreadySaved ? (
+          <>
+            <PenLine className="size-4" aria-hidden="true" />
+            Сохранено
           </>
         ) : (
           <>

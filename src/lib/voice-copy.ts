@@ -23,6 +23,8 @@ export const ASR_UNAVAILABLE =
   "Сервис распознавания недоступен, попробуйте позже";
 export const ASR_GENERIC = "Не удалось распознать голос";
 export const VOICE_RECOGNIZED = "Голос распознан — проверьте текст";
+export const VOICE_REVIEW_AND_SAVE =
+  "Голос распознан — проверьте и сохраните";
 
 export function isUsableTranscript(text: string | null | undefined): boolean {
   const trimmed = (text ?? "").trim();
@@ -40,4 +42,22 @@ export function voiceResultCopy(
     return { ok: false, error: ASR_EMPTY };
   }
   return { ok: true, text, toast: VOICE_RECOGNIZED };
+}
+
+export function voiceReviewCopy(
+  transcript: string | null | undefined,
+):
+  | { ok: true; text: string; toast: typeof VOICE_REVIEW_AND_SAVE }
+  | { ok: false; error: typeof ASR_EMPTY } {
+  const result = voiceResultCopy(transcript);
+  if (!result.ok) return result;
+  return { ok: true, text: result.text, toast: VOICE_REVIEW_AND_SAVE };
+}
+
+/** True when this exact draft was already POSTed as a note in this session. */
+export function isTranscriptAlreadySaved(
+  trimmed: string,
+  savedText: string | null | undefined,
+): boolean {
+  return Boolean(savedText) && trimmed === savedText;
 }

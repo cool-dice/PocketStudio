@@ -7,8 +7,11 @@ import {
   MIC_PERMISSION_DENIED,
   MIC_START_FAILED,
   VOICE_RECOGNIZED,
+  VOICE_REVIEW_AND_SAVE,
+  isTranscriptAlreadySaved,
   isUsableTranscript,
   voiceResultCopy,
+  voiceReviewCopy,
 } from "./voice-copy";
 
 const FAKE_SUCCESS = /успешно записано/i;
@@ -48,5 +51,23 @@ describe("voice capture honesty", () => {
       toast: VOICE_RECOGNIZED,
     });
     expect(VOICE_RECOGNIZED).not.toMatch(FAKE_SUCCESS);
+    expect(VOICE_REVIEW_AND_SAVE).toMatch(/проверьте и сохраните/);
+    expect(voiceReviewCopy("мысль про маяк")).toEqual({
+      ok: true,
+      text: "мысль про маяк",
+      toast: VOICE_REVIEW_AND_SAVE,
+    });
+    expect(voiceReviewCopy("успешно записано")).toEqual({
+      ok: false,
+      error: ASR_EMPTY,
+    });
+  });
+
+  test("the same confirmed transcript cannot be saved again", () => {
+    expect(isTranscriptAlreadySaved("маяк", null)).toBe(false);
+    expect(isTranscriptAlreadySaved("маяк", undefined)).toBe(false);
+    expect(isTranscriptAlreadySaved("маяк", "маяк")).toBe(true);
+    expect(isTranscriptAlreadySaved("маяк в тумане", "маяк")).toBe(false);
+    expect(isTranscriptAlreadySaved("", "маяк")).toBe(false);
   });
 });
