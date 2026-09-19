@@ -56,6 +56,26 @@ DATABASE_URL=postgresql://… bun scripts/migrate-sqlite-to-postgres.ts
 
 На этом этапе свежий `db push` на пустой Postgres — нормальный путь.
 
+## Postgres не поднимается
+
+- `docker compose up -d postgres` требует **Docker daemon**. Если демона нет, поставьте PostgreSQL 16 + [pgvector](https://github.com/pgvector/pgvector) сами и пропишите `DATABASE_URL` в `.env`.
+- Порт 5432 занят: остановите чужой Postgres или смените `ports` в `docker-compose.yml` и URL.
+- `bun run test` / `db:push` падают с `Can't reach database server`: демон не слушает `127.0.0.1:5432`. Проверьте `docker compose ps` и `pg_isready -h 127.0.0.1 -p 5432`.
+- После wipe тома: `docker compose down -v` удалит данные. Затем снова `bun run db:push`.
+- SQLite (`file:./db/custom.db`) **не** является рабочим хранилищем — тесты подменяют такой URL на дефолтный Postgres.
+
+## Платежи (честно)
+
+Кабинет офферов живой. Режимы:
+
+| Режим | Что происходит |
+|---|---|
+| `simulated` (по умолчанию) | «Симулировать оплату» помечает оффер `paid` и создаёт выплату `pending`. Карты нет. |
+| `live` + нет `PAYMENTS_API_KEY` | Сервер отказывает, клиент не рисует «оплачено». |
+| `live` + ключ задан | Ключ принят, **эквайринг всё равно не подключён** — отказ, не фейковый charge. |
+
+Админ может пометить оффер оплаченным вручную. Это не прохождение карты.
+
 ## Первый пользователь = админ
 
 1. На лендинге «Создать аккаунт».

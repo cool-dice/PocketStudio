@@ -19,7 +19,7 @@ import {
   indexSkillById,
 } from "./hooks";
 import { indexDocument } from "./indexer";
-import { isProbablyBinary, shouldSkipPath } from "./skip";
+import { isProbablyBinary, shouldSkipFileBytes, shouldSkipPath } from "./skip";
 import { UNCONFIGURED_EMBEDDINGS_MESSAGE } from "./types";
 import { projectRoot } from "../workspace";
 
@@ -196,7 +196,7 @@ async function indexProjectFiles(
       if (!d.isFile()) continue;
       try {
         const stat = await fsp.stat(abs);
-        if (stat.size > 200_000) continue;
+        if (shouldSkipFileBytes(stat.size)) continue;
         const buf = await fsp.readFile(abs);
         if (isProbablyBinary(buf)) continue;
         await indexFileContent(db, {

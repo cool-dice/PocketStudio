@@ -1,23 +1,63 @@
 /**
- * Fire-and-forget index-on-write. Failures are logged, never thrown to the UI.
+ * Fire-and-forget index-on-write. Failures never hang the request:
+ * jobs run in-process with bounded retries.
  */
 
 import type { PrismaClient } from "@prisma/client";
 
 import { indexDocument, removeSource } from "./indexer";
+import { MAX_INDEX_FILE_BYTES, shouldSkipFileBytes } from "./skip";
 import type { RagSourceType } from "./types";
 
-const queue: Promise<void>[] = [];
-const MAX_QUEUE = 32;
+type QueueJob = {
+  id: string;
+  attempts: number;
+  run: () => Promise<{ embedFailed?: boolean } | void>;
+};
 
-function enqueue(job: () => Promise<void>): void {
-  const run = job().catch((err) => {
-    console.warn("[rag] index-on-write failed:", err instanceof Error ? err.message : err);
-  });
-  queue.push(run);
-  if (queue.length > MAX_QUEUE) {
-    void queue.shift();
+const pending: QueueJob[] = [];
+let pumping = false;
+const MAX_QUEUE = 48;
+const MAX_ATTEMPTS = 4;
+
+function jobId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function enqueue(run: QueueJob["run"]): void {
+  if (pending.length >= MAX_QUEUE) {
+    const dropped = pending.shift();
+    console.warn("[rag] queue full, dropped oldest job", dropped?.id);
   }
+  pending.push({ id: jobId(), attempts: 0, run });
+  void pump();
+}
+
+async function pump(): Promise<void> {
+  if (pumping) return;
+  pumping = true;
+  while (pending.length) {
+    const job = pending.shift()!;
+    try {
+      const result = await job.run();
+      if (result && result.embedFailed) {
+        throw new Error("embeddings unavailable, retry");
+      }
+    } catch (err) {
+      job.attempts += 1;
+      if (job.attempts < MAX_ATTEMPTS) {
+        const delay = Math.min(8_000, 400 * 2 ** job.attempts);
+        await new Promise((r) => setTimeout(r, delay));
+        pending.push(job);
+      } else {
+        console.warn(
+          "[rag] index-on-write gave up after retries:",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+  pumping = false;
 }
 
 export function scheduleIndex(
@@ -33,7 +73,7 @@ export function scheduleIndex(
     code?: boolean;
   },
 ): void {
-  enqueue(() => indexDocument(db, doc).then(() => undefined));
+  enqueue(() => indexDocument(db, doc));
 }
 
 export function scheduleRemove(
@@ -42,10 +82,12 @@ export function scheduleRemove(
   sourceType: RagSourceType,
   sourceId: string,
 ): void {
-  enqueue(() => removeSource(db, userId, sourceType, sourceId));
+  enqueue(async () => {
+    await removeSource(db, userId, sourceType, sourceId);
+  });
 }
 
-export async function indexNoteById(db: PrismaClient, noteId: string): Promise<void> {
+export async function indexNoteById(db: PrismaClient, noteId: string) {
   const note = await db.note.findUnique({
     where: { id: noteId },
     select: {
@@ -73,7 +115,7 @@ export async function indexNoteById(db: PrismaClient, noteId: string): Promise<v
   ]
     .filter((p) => p && p.trim())
     .join("\n\n");
-  await indexDocument(db, {
+  return indexDocument(db, {
     userId: note.userId,
     projectId: note.links[0]?.projectId ?? null,
     sourceType: "note",
@@ -83,7 +125,7 @@ export async function indexNoteById(db: PrismaClient, noteId: string): Promise<v
   });
 }
 
-export async function indexSectionById(db: PrismaClient, sectionId: string): Promise<void> {
+export async function indexSectionById(db: PrismaClient, sectionId: string) {
   const section = await db.documentSection.findUnique({
     where: { id: sectionId },
     select: {
@@ -94,7 +136,7 @@ export async function indexSectionById(db: PrismaClient, sectionId: string): Pro
     },
   });
   if (!section) return;
-  await indexDocument(db, {
+  return indexDocument(db, {
     userId: section.document.project.userId,
     projectId: section.document.projectId,
     sourceType: "section",
@@ -104,7 +146,7 @@ export async function indexSectionById(db: PrismaClient, sectionId: string): Pro
   });
 }
 
-export async function indexEntityById(db: PrismaClient, entityId: string): Promise<void> {
+export async function indexEntityById(db: PrismaClient, entityId: string) {
   const entity = await db.entity.findUnique({
     where: { id: entityId },
     select: {
@@ -118,7 +160,7 @@ export async function indexEntityById(db: PrismaClient, entityId: string): Promi
     },
   });
   if (!entity) return;
-  await indexDocument(db, {
+  return indexDocument(db, {
     userId: entity.project.userId,
     projectId: entity.projectId,
     sourceType: "entity",
@@ -128,7 +170,7 @@ export async function indexEntityById(db: PrismaClient, entityId: string): Promi
   });
 }
 
-export async function indexArtifactById(db: PrismaClient, artifactId: string): Promise<void> {
+export async function indexArtifactById(db: PrismaClient, artifactId: string) {
   const artifact = await db.artifact.findUnique({
     where: { id: artifactId },
     select: {
@@ -142,7 +184,7 @@ export async function indexArtifactById(db: PrismaClient, artifactId: string): P
     },
   });
   if (!artifact) return;
-  await indexDocument(db, {
+  return indexDocument(db, {
     userId: artifact.project.userId,
     projectId: artifact.projectId,
     sourceType: "artifact",
@@ -152,13 +194,13 @@ export async function indexArtifactById(db: PrismaClient, artifactId: string): P
   });
 }
 
-export async function indexSkillById(db: PrismaClient, skillId: string): Promise<void> {
+export async function indexSkillById(db: PrismaClient, skillId: string) {
   const skill = await db.skill.findUnique({
     where: { id: skillId },
     select: { id: true, userId: true, name: true, description: true, skillMd: true, triggers: true },
   });
   if (!skill) return;
-  await indexDocument(db, {
+  return indexDocument(db, {
     userId: skill.userId,
     projectId: null,
     sourceType: "skill",
@@ -168,7 +210,7 @@ export async function indexSkillById(db: PrismaClient, skillId: string): Promise
   });
 }
 
-export async function indexFindingById(db: PrismaClient, findingId: string): Promise<void> {
+export async function indexFindingById(db: PrismaClient, findingId: string) {
   const finding = await db.finding.findUnique({
     where: { id: findingId },
     select: {
@@ -182,7 +224,7 @@ export async function indexFindingById(db: PrismaClient, findingId: string): Pro
     },
   });
   if (!finding) return;
-  await indexDocument(db, {
+  return indexDocument(db, {
     userId: finding.project.userId,
     projectId: finding.projectId,
     sourceType: "finding",
@@ -201,6 +243,13 @@ export async function indexFileContent(
     content: string;
   },
 ): Promise<void> {
+  const bytes = Buffer.byteLength(opts.content, "utf8");
+  if (shouldSkipFileBytes(bytes)) {
+    console.warn(
+      `[rag] skip huge file ${opts.relPath} (${bytes} > ${MAX_INDEX_FILE_BYTES} bytes)`,
+    );
+    return;
+  }
   await indexDocument(db, {
     userId: opts.userId,
     projectId: opts.projectId,
@@ -241,5 +290,7 @@ export function scheduleIndexFile(
   db: PrismaClient,
   opts: { userId: string; projectId: string; relPath: string; content: string },
 ): void {
-  enqueue(() => indexFileContent(db, opts));
+  enqueue(async () => {
+    await indexFileContent(db, opts);
+  });
 }

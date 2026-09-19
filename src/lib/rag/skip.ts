@@ -67,6 +67,13 @@ const SKIP_EXT = new Set([
   "sqlite3",
 ]);
 
+/** Skip embedding files larger than this (chars ≈ bytes for source). */
+export const MAX_INDEX_FILE_BYTES = 200_000;
+
+export function shouldSkipFileBytes(bytes: number): boolean {
+  return !Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_INDEX_FILE_BYTES;
+}
+
 export function shouldSkipPath(relPath: string): boolean {
   const posix = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
   if (!posix) return true;

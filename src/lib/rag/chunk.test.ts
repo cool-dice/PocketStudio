@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { chunkCode, chunkText, estimateTokens } from "./chunk";
-import { shouldSkipPath } from "./skip";
+import { shouldSkipFileBytes, shouldSkipPath, MAX_INDEX_FILE_BYTES } from "./skip";
 
 describe("chunkText", () => {
   test("splits a long markdown doc into overlapping pieces", () => {
@@ -43,5 +43,12 @@ describe("shouldSkipPath", () => {
     expect(shouldSkipPath("cover.png")).toBe(true);
     expect(shouldSkipPath("src/lib/agent.ts")).toBe(false);
     expect(shouldSkipPath("README.md")).toBe(false);
+  });
+
+  test("huge files are skipped by byte cap", () => {
+    expect(shouldSkipFileBytes(1)).toBe(false);
+    expect(shouldSkipFileBytes(MAX_INDEX_FILE_BYTES)).toBe(false);
+    expect(shouldSkipFileBytes(MAX_INDEX_FILE_BYTES + 1)).toBe(true);
+    expect(shouldSkipFileBytes(0)).toBe(true);
   });
 });

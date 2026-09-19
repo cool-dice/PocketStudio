@@ -24,17 +24,19 @@ export interface IndexDocument {
 export async function indexDocument(
   db: PrismaClient,
   doc: IndexDocument,
-): Promise<{ chunks: number; embedded: number; skipped: number }> {
+): Promise<{ chunks: number; embedded: number; skipped: number; embedFailed: boolean }> {
   const body = (doc.body ?? "").trim();
   if (!body) {
     await deleteSourceChunks(db, doc.userId, doc.sourceType, doc.sourceId);
-    return { chunks: 0, embedded: 0, skipped: 0 };
+    return { chunks: 0, embedded: 0, skipped: 0, embedFailed: false };
   }
   const prefix = doc.title?.trim() ? `# ${doc.title.trim()}\n\n` : "";
-  const full = `${prefix}${body}`;
-  const pieces: TextChunk[] = doc.code
+  let full = `${prefix}${body}`;
+  if (full.length > 200_000) full = full.slice(0, 200_000);
+  const pieces: TextChunk[] = (doc.code
     ? chunkCode(full, doc.path)
-    : chunkText(full);
+    : chunkText(full)
+  ).slice(0, 40);
 
   const existing = await loadSourceHashes(db, doc.userId, doc.sourceType, doc.sourceId);
   const keepOrdinals = new Set(pieces.map((p) => p.ordinal));
@@ -68,14 +70,20 @@ export async function indexDocument(
   }
 
   let embedded = 0;
+  let embedFailed = false;
   const BATCH = 16;
   for (let i = 0; i < toEmbed.length; i += BATCH) {
     const batch = toEmbed.slice(i, i + BATCH);
-    const { vectors } = await tryEmbedTexts(
+    const { vectors, error } = await tryEmbedTexts(
       db,
       doc.userId,
       batch.map((b) => b.chunk.content),
     );
+    if (error && !vectors) {
+      const permanent =
+        /не настроена|Anthropic не умеет|не умеет считать эмбеддинги/i.test(error);
+      if (!permanent) embedFailed = true;
+    }
     for (let j = 0; j < batch.length; j++) {
       const item = batch[j]!;
       const embedding = vectors?.[j] ?? null;
@@ -95,7 +103,7 @@ export async function indexDocument(
     }
   }
 
-  return { chunks: pieces.length, embedded, skipped };
+  return { chunks: pieces.length, embedded, skipped, embedFailed };
 }
 
 export async function removeSource(
