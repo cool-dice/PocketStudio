@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { parseEntityRefs, serializeEntityRefs } from "@/lib/entity-meta";
 import { workspaceCounts, workspaceDto } from "@/lib/workspace-shapes";
 import { ensureCodeWorkspace } from "@/lib/workspace";
 
@@ -56,8 +57,9 @@ export async function POST(req: Request, { params }: Params) {
     db.dawProject.findUnique({ where: { projectId: source.id } }),
   ]);
 
+  const sectionIdMap = new Map<string, string>();
   for (const doc of docs) {
-    await db.document.create({
+    const created = await db.document.create({
       data: {
         projectId: copy.id,
         title: doc.title,
@@ -72,10 +74,21 @@ export async function POST(req: Request, { params }: Params) {
           })),
         },
       },
+      include: { sections: { orderBy: { order: "asc" } } },
     });
+    const oldSorted = [...doc.sections].sort((a, b) => a.order - b.order);
+    for (let i = 0; i < oldSorted.length; i++) {
+      const next = created.sections[i];
+      if (next) sectionIdMap.set(oldSorted[i]!.id, next.id);
+    }
   }
 
   for (const entity of entities) {
+    const refs = parseEntityRefs(entity.refs);
+    const remapped = serializeEntityRefs({
+      ...refs,
+      items: refs.items.map((item) => sectionIdMap.get(item) ?? item),
+    });
     await db.entity.create({
       data: {
         projectId: copy.id,
@@ -88,7 +101,7 @@ export async function POST(req: Request, { params }: Params) {
         description: entity.description,
         attributes: entity.attributes,
         tags: entity.tags,
-        refs: entity.refs,
+        refs: remapped,
         portrait: entity.portrait,
         image: entity.image,
         imagePrompt: entity.imagePrompt,

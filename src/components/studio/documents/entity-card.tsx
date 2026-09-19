@@ -128,15 +128,25 @@ export function EntityCard({
               </span>
             ))}
           </div>
-          {entity.refs.items.length > 0 ? (
+          {(entity.mentions ?? entity.refs.items).length > 0 ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground/80">{refs.lead}</span>
-              {entity.refs.items.slice(0, 5).map((ref) => (
+              {(entity.mentions.length > 0
+                ? entity.mentions
+                : entity.refs.items.map((item) => ({
+                    id: item,
+                    title: refs.format(item),
+                    source: "label" as const,
+                  }))
+              )
+                .slice(0, 5)
+                .map((mention) => (
                 <span
-                  key={ref}
+                  key={mention.id}
                   className="rounded-full bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary"
+                  title={mention.source === "linked" ? "привязано" : "подпись"}
                 >
-                  {refs.format(ref)}
+                  {mention.title}
                 </span>
               ))}
             </div>

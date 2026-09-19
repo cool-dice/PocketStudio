@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { detachSectionMentions } from "@/lib/entity-mentions";
 import { ensureOwned } from "@/lib/workspace-api";
 import { snapshotSection } from "@/lib/section-revisions";
 import { sectionDto } from "@/lib/workspace-shapes";
-import { scheduleIndexSection, scheduleRemove } from "@/lib/rag";
+import { scheduleIndexEntity, scheduleIndexSection, scheduleRemove } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +86,8 @@ export async function DELETE(req: Request, { params }: Params) {
       data: { updatedAt: new Date() },
     }),
   ]);
+  const detached = await detachSectionMentions(db, documentRow.projectId, [id]);
+  for (const entityId of detached) scheduleIndexEntity(db, entityId);
   scheduleRemove(db, check.userId, "section", id);
   return NextResponse.json({ ok: true });
 }

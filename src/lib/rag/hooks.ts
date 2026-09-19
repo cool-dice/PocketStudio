@@ -8,6 +8,7 @@ import type { PrismaClient } from "@prisma/client";
 import { indexDocument, removeSource } from "./indexer";
 import { MAX_INDEX_FILE_BYTES, shouldSkipFileBytes } from "./skip";
 import type { RagSourceType } from "./types";
+import { parseEntityRefs } from "@/lib/entity-meta";
 
 type QueueJob = {
   id: string;
@@ -172,18 +173,39 @@ export async function indexEntityById(db: PrismaClient, entityId: string) {
       description: true,
       attributes: true,
       tags: true,
+      refs: true,
       projectId: true,
       project: { select: { userId: true } },
     },
   });
   if (!entity) return;
+  const refs = parseEntityRefs(entity.refs);
+  let mentionTitles = "";
+  if (refs.items.length > 0) {
+    const sections = await db.documentSection.findMany({
+      where: {
+        id: { in: refs.items },
+        document: { projectId: entity.projectId },
+      },
+      select: { title: true, document: { select: { title: true } } },
+    });
+    mentionTitles = sections
+      .map((row) => `${row.document.title} ${row.title}`)
+      .join("\n");
+  }
   return indexDocument(db, {
     userId: entity.project.userId,
     projectId: entity.projectId,
     sourceType: "entity",
     sourceId: entity.id,
     title: entity.name,
-    body: [entity.short, entity.description, entity.attributes, entity.tags]
+    body: [
+      entity.short,
+      entity.description,
+      entity.attributes,
+      entity.tags,
+      mentionTitles,
+    ]
       .filter(Boolean)
       .join("\n"),
   });

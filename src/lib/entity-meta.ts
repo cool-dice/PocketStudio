@@ -1,13 +1,15 @@
 /**
  * Compact/normalize helpers for entity attributes (JSON column),
- * tags (JSON column) and related ids (EntityLink rows).
+ * tags (JSON column), related ids (EntityLink rows) and chapter refs
+ * (Entity.refs JSON — section ids or leftover captions).
  */
 
-import type { EntityAttribute } from "@/lib/workspace-types";
+import type { EntityAttribute, EntityRefs } from "@/lib/workspace-types";
 
 export const MAX_ENTITY_ATTRIBUTES = 20;
 export const MAX_ENTITY_TAGS = 12;
 export const MAX_ENTITY_LINKS = 24;
+export const MAX_ENTITY_REFS = 48;
 
 export function compactAttributes(
   attrs: EntityAttribute[] | undefined,
@@ -81,4 +83,56 @@ export function sameStringList(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(b);
   return a.every((id) => set.has(id));
+}
+
+export function compactRefItems(items: string[] | undefined): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of items ?? []) {
+    const item = String(raw ?? "").trim().slice(0, 64);
+    if (!item || seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+    if (out.length >= MAX_ENTITY_REFS) break;
+  }
+  return out;
+}
+
+export function refsKindOfDomain(domain: string): EntityRefs["kind"] {
+  return domain === "product" ? "section" : "chapter";
+}
+
+export function parseEntityRefs(raw: string | null | undefined): EntityRefs {
+  const empty: EntityRefs = { kind: "chapter", items: [] };
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw) as { kind?: unknown; items?: unknown };
+    if (!parsed || typeof parsed !== "object") return empty;
+    return {
+      kind: parsed.kind === "section" ? "section" : "chapter",
+      items: compactRefItems(
+        Array.isArray(parsed.items) ? parsed.items.map(String) : [],
+      ),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export function serializeEntityRefs(refs: EntityRefs): string {
+  return JSON.stringify({
+    kind: refs.kind === "section" ? "section" : "chapter",
+    items: compactRefItems(refs.items),
+  });
+}
+
+export function withRefItem(refs: EntityRefs, item: string): EntityRefs {
+  return { kind: refs.kind, items: compactRefItems([...refs.items, item]) };
+}
+
+export function withoutRefItem(refs: EntityRefs, item: string): EntityRefs {
+  return {
+    kind: refs.kind,
+    items: refs.items.filter((candidate) => candidate !== item),
+  };
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { relatedFromLinks } from "@/lib/entity-meta";
+import { loadSectionHints } from "@/lib/entity-mentions";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { entityDto } from "@/lib/workspace-shapes";
 import { scheduleIndexEntity } from "@/lib/rag";
@@ -18,18 +19,21 @@ export async function GET(req: Request, { params }: Params) {
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
 
-  const entities = await db.entity.findMany({
-    where: { projectId: id },
-    orderBy: { updatedAt: "desc" },
-    include: {
-      linksFrom: { select: { toId: true } },
-      linksTo: { select: { fromId: true } },
-    },
-  });
+  const [entities, hints] = await Promise.all([
+    db.entity.findMany({
+      where: { projectId: id },
+      orderBy: { updatedAt: "desc" },
+      include: {
+        linksFrom: { select: { toId: true } },
+        linksTo: { select: { fromId: true } },
+      },
+    }),
+    loadSectionHints(db, id),
+  ]);
 
   return NextResponse.json({
     entities: entities.map((e) =>
-      entityDto(e, relatedFromLinks(e.linksFrom, e.linksTo)),
+      entityDto(e, relatedFromLinks(e.linksFrom, e.linksTo), hints),
     ),
   });
 }

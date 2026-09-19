@@ -86,7 +86,25 @@ export interface EntityAttribute {
 
 export interface EntityRefs {
   kind: "chapter" | "section";
+  /** Section ids (live links) or leftover captions like «1» / «SRS-2». */
   items: string[];
+}
+
+/** Resolved mention for UI: live chapter vs saved caption. */
+export interface EntityMentionDto {
+  id: string;
+  title: string;
+  documentTitle: string | null;
+  /** linked = DocumentSection in this workspace; label = saved caption. */
+  source: "linked" | "label";
+}
+
+export interface MentionSectionOption {
+  id: string;
+  title: string;
+  documentId: string;
+  documentTitle: string;
+  order: number;
 }
 
 export interface EntityPortrait {
@@ -107,6 +125,8 @@ export interface EntityDto {
   attributes: EntityAttribute[];
   tags: string[];
   refs: EntityRefs;
+  /** Derived from refs.items + live sections (never a fake graph). */
+  mentions: EntityMentionDto[];
   portrait: EntityPortrait | null;
   /** URL персистентного сгенерированного портрета/иллюстрации (PS-6). */
   image: string | null;

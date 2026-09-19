@@ -37,7 +37,7 @@ import {
   ENTITY_TAB_LOAD_ERROR,
   ENTITY_TAB_LOAD_ERROR_HINT,
 } from "@/lib/entity-copy";
-import type { EntityDto } from "@/lib/workspace-types";
+import type { EntityDto, MentionSectionOption } from "@/lib/workspace-types";
 import { CharacterSheet } from "./character-sheet";
 import { EntityCard } from "./entity-card";
 import { EntitySheet, type EntityDraftPatch } from "./entity-sheet";
@@ -63,6 +63,7 @@ export function EntitiesTab({
   onCountChange?: (count: number) => void;
 }) {
   const [entities, setEntities] = useState<EntityDto[]>([]);
+  const [sections, setSections] = useState<MentionSectionOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [setId, setSetId] = useState<string | null>(null);
@@ -78,14 +79,19 @@ export function EntitiesTab({
   const loadEntities = useCallback(async () => {
     if (!workspaceId) {
       setEntities([]);
+      setSections([]);
       setLoading(false);
       setLoadError(false);
       return;
     }
     setLoading(true);
     try {
-      const list = await api.listEntities(workspaceId);
+      const [list, chapterList] = await Promise.all([
+        api.listEntities(workspaceId),
+        api.listWorkspaceSections(workspaceId).catch(() => [] as MentionSectionOption[]),
+      ]);
       setEntities(list);
+      setSections(chapterList);
       setLoadError(false);
     } catch {
       setLoadError(true);
@@ -454,6 +460,7 @@ export function EntitiesTab({
           key={openEntity.id}
           entity={openEntity}
           entities={entities}
+          sections={sections}
           onClose={() => setOpenId(null)}
           onOpenEntity={(id) => setOpenId(id)}
           onSave={handleSave}
@@ -471,6 +478,7 @@ export function EntitiesTab({
           key={openEntity?.id ?? "none"}
           entity={openEntity}
           entities={entities}
+          sections={sections}
           onClose={() => setOpenId(null)}
           onOpenEntity={(id) => setOpenId(id)}
           onSave={handleSave}

@@ -5,7 +5,7 @@
  * правятся и уходят в PATCH. Портрет — живой image-tool; описание — LLM.
  */
 
-import { Check, ImagePlus, Loader2, MapPin, Save, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ImagePlus, Loader2, Save, Sparkles, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,24 +21,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   CHARACTER_SHEET_NO_PORTRAIT,
-  CHARACTER_SHEET_NO_REFS,
   CHARACTER_SHEET_NO_TRAITS,
 } from "@/lib/entity-copy";
-import type { EntityDto } from "@/lib/workspace-types";
+import type { EntityDto, MentionSectionOption } from "@/lib/workspace-types";
 import { GradientArt } from "./art-placeholder";
-import { MiniChip } from "./narrative-chip";
 import {
   buildEntitySavePatch,
   useEntityDraft,
   type EntityDraftPatch,
 } from "./entity-draft";
 import { AttributesEditor, LinksEditor, TagsEditor } from "./entity-meta-editors";
+import { MentionsEditor } from "./mentions-editor";
 import { ROLE_CATEGORY_META, roleCategoryOf } from "./entities-data";
 import { agoFromISO } from "./types";
 
 export function CharacterSheet({
   entity,
   entities,
+  sections,
   onClose,
   onOpenEntity,
   onSave,
@@ -53,6 +53,7 @@ export function CharacterSheet({
 }: {
   entity: EntityDto | null;
   entities: EntityDto[];
+  sections: MentionSectionOption[];
   onClose: () => void;
   onOpenEntity: (id: string) => void;
   onSave: (id: string, patch: EntityDraftPatch) => void;
@@ -204,27 +205,15 @@ export function CharacterSheet({
 
               <Separator />
 
-              {/* Упоминания */}
-              <section aria-label="Упоминания в главах">
-                <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <MapPin className="size-3.5" aria-hidden="true" />
-                  Упомянута в главах
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.refs.items.length > 0 ? (
-                    entity.refs.items.map((ref) => (
-                      <MiniChip key={ref} className="font-mono">
-                        гл. {ref}
-                      </MiniChip>
-                    ))
-                  ) : (
-                    <p className="text-xs text-muted-foreground">{CHARACTER_SHEET_NO_REFS}</p>
-                  )}
-                </div>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">
-                  обновлена {agoFromISO(entity.updatedAt)}
-                </p>
-              </section>
+              <MentionsEditor
+                items={draft.refsItems}
+                domain={entity.domain}
+                sections={sections}
+                onChange={(refsItems) => update({ refsItems })}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                обновлена {agoFromISO(entity.updatedAt)}
+              </p>
             </div>
 
             {/* Действия */}

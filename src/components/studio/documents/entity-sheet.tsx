@@ -6,7 +6,7 @@
  * персистентное изображение. Хук драфта — entity-draft.
  */
 
-import { BookOpenText, Check, FileText, ImagePlus, Loader2, MapPin, Save, Sparkles, Trash2, X } from "lucide-react";
+import { BookOpenText, Check, ImagePlus, Loader2, Save, Sparkles, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,20 +21,18 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  ENTITY_SHEET_NO_REFS_NARRATIVE,
-  ENTITY_SHEET_NO_REFS_PRODUCT,
   ENTITY_SHEET_OPEN_ERROR,
   ENTITY_SHEET_OPEN_ERROR_HINT,
 } from "@/lib/entity-copy";
-import type { EntityDto } from "@/lib/workspace-types";
-import { MiniChip } from "./narrative-chip";
-import { ENTITY_KIND_META, refsLabel } from "./entities-data";
+import type { EntityDto, MentionSectionOption } from "@/lib/workspace-types";
+import { ENTITY_KIND_META } from "./entities-data";
 import {
   buildEntitySavePatch,
   useEntityDraft,
   type EntityDraftPatch,
 } from "./entity-draft";
 import { AttributesEditor, LinksEditor, TagsEditor } from "./entity-meta-editors";
+import { MentionsEditor } from "./mentions-editor";
 import { agoFromISO } from "./types";
 
 export type { EntityDraftPatch };
@@ -43,6 +41,7 @@ export { useEntityDraft };
 export function EntitySheet({
   entity,
   entities,
+  sections,
   onClose,
   onOpenEntity,
   onSave,
@@ -56,6 +55,7 @@ export function EntitySheet({
 }: {
   entity: EntityDto | null;
   entities: EntityDto[];
+  sections: MentionSectionOption[];
   onClose: () => void;
   onOpenEntity: (id: string) => void;
   onSave: (id: string, patch: EntityDraftPatch) => void;
@@ -71,7 +71,6 @@ export function EntitySheet({
   const meta = entity ? ENTITY_KIND_META[entity.kind] : null;
   const KindIcon = meta?.icon;
   const isNarrative = entity?.domain === "narrative";
-  const refs = entity ? refsLabel(entity.domain) : null;
 
   function persist() {
     if (!entity) return;
@@ -86,7 +85,7 @@ export function EntitySheet({
   return (
     <Sheet open={Boolean(entity)} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-md">
-        {entity && meta && KindIcon && refs ? (
+        {entity && meta && KindIcon ? (
           <>
             <SheetHeader className="shrink-0 space-y-2 border-b px-5 pb-4">
               <div className="flex items-center gap-2">
@@ -206,33 +205,16 @@ export function EntitySheet({
               />
               <Separator />
 
-              <section aria-label={isNarrative ? "Упоминания в главах" : "Разделы документации"}>
-                <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  {isNarrative ? (
-                    <MapPin className="size-3.5" aria-hidden="true" />
-                  ) : (
-                    <FileText className="size-3.5" aria-hidden="true" />
-                  )}
-                  {isNarrative ? "Упомянута в главах" : "Разделы документации"}
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.refs.items.length > 0 ? (
-                    entity.refs.items.map((ref) => (
-                      <MiniChip key={ref} className="font-mono">
-                        {refs.format(ref)}
-                      </MiniChip>
-                    ))
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      {isNarrative ? ENTITY_SHEET_NO_REFS_NARRATIVE : ENTITY_SHEET_NO_REFS_PRODUCT}
-                    </p>
-                  )}
-                </div>
-                <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <BookOpenText className="size-3.5 shrink-0" aria-hidden="true" />
-                  {entity.setName} · обновлена {agoFromISO(entity.updatedAt)}
-                </p>
-              </section>
+              <MentionsEditor
+                items={draft.refsItems}
+                domain={entity.domain}
+                sections={sections}
+                onChange={(refsItems) => update({ refsItems })}
+              />
+              <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <BookOpenText className="size-3.5 shrink-0" aria-hidden="true" />
+                {entity.setName} · обновлена {agoFromISO(entity.updatedAt)}
+              </p>
 
               <TagsEditor
                 tags={draft.tags}

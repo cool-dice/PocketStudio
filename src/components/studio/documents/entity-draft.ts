@@ -4,12 +4,13 @@ import { useState } from "react";
 
 import {
   compactAttributes,
+  compactRefItems,
   compactTags,
   sameAttributes,
   sameStringList,
   uniqueRelated,
 } from "@/lib/entity-meta";
-import type { EntityAttribute, EntityDto } from "@/lib/workspace-types";
+import type { EntityAttribute, EntityDto, EntityRefs } from "@/lib/workspace-types";
 
 export type EntityDraftPatch = {
   name?: string;
@@ -18,6 +19,7 @@ export type EntityDraftPatch = {
   attributes?: EntityAttribute[];
   tags?: string[];
   related?: string[];
+  refs?: EntityRefs;
 };
 
 type DraftFields = {
@@ -28,6 +30,7 @@ type DraftFields = {
   tags: string[];
   tagDraft: string;
   related: string[];
+  refsItems: string[];
 };
 
 const EMPTY_DRAFT: DraftFields = {
@@ -38,6 +41,7 @@ const EMPTY_DRAFT: DraftFields = {
   tags: [],
   tagDraft: "",
   related: [],
+  refsItems: [],
 };
 
 const CLEAN: Record<keyof DraftFields, boolean> = {
@@ -48,6 +52,7 @@ const CLEAN: Record<keyof DraftFields, boolean> = {
   tags: false,
   tagDraft: false,
   related: false,
+  refsItems: false,
 };
 
 export function buildEntitySavePatch(
@@ -61,6 +66,10 @@ export function buildEntitySavePatch(
     attributes: compactAttributes(draft.attributes),
     tags: compactTags([...draft.tags, draft.tagDraft]),
     related: uniqueRelated(draft.related, entity.id),
+    refs: {
+      kind: entity.refs.kind,
+      items: compactRefItems(draft.refsItems),
+    },
   };
 }
 
@@ -77,6 +86,7 @@ export function useEntityDraft(entity: EntityDto | null) {
     tags: dirty.tags ? raw.tags : (entity?.tags ?? []),
     tagDraft: dirty.tagDraft ? raw.tagDraft : "",
     related: dirty.related ? raw.related : (entity?.related ?? []),
+    refsItems: dirty.refsItems ? raw.refsItems : (entity?.refs.items ?? []),
   };
 
   function update(patch: Partial<DraftFields>) {
@@ -107,6 +117,11 @@ export function useEntityDraft(entity: EntityDto | null) {
         !sameStringList(
           uniqueRelated(draft.related, entity!.id),
           uniqueRelated(entity!.related ?? [], entity!.id),
+        )) ||
+      (dirty.refsItems &&
+        !sameStringList(
+          compactRefItems(draft.refsItems),
+          compactRefItems(entity!.refs.items),
         )));
 
   return { draft, update, isDirty };

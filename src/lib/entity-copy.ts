@@ -31,6 +31,14 @@ export const ENTITY_SHEET_NO_REFS_NARRATIVE =
   "В главах эта карточка пока не упомянута.";
 export const ENTITY_SHEET_NO_REFS_PRODUCT =
   "В документации эта карточка пока не упомянута.";
+export const ENTITY_SHEET_ADD_MENTION_CHAPTER = "Привязать главу…";
+export const ENTITY_SHEET_ADD_MENTION_SECTION = "Привязать раздел…";
+export const ENTITY_SHEET_MENTION_LINKED = "привязано";
+export const ENTITY_SHEET_MENTION_LABEL = "подпись";
+export const ENTITY_SHEET_NO_SECTIONS =
+  "В этом воркспейсе пока нет глав, чтобы привязать.";
+export const SECTION_MENTION_FOUND = "найдено в тексте";
+export const SECTION_MENTION_BIND = "Привязать";
 
 export const CHARACTER_SHEET_NO_TRAITS = "Черт у этого персонажа пока нет.";
 export const CHARACTER_SHEET_NO_LINKS = "Связей у этой карточки пока нет.";

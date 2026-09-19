@@ -4,10 +4,15 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import {
   compactAttributes,
+  compactRefItems,
   compactTags,
+  parseEntityRefs,
   relatedFromLinks,
+  refsKindOfDomain,
+  serializeEntityRefs,
   uniqueRelated,
 } from "@/lib/entity-meta";
+import { loadSectionHints, refsStayInProject } from "@/lib/entity-mentions";
 import { ensureOwned } from "@/lib/workspace-api";
 import { entityDto } from "@/lib/workspace-shapes";
 import { removeSource, scheduleIndexEntity } from "@/lib/rag";
@@ -21,11 +26,18 @@ const linkInclude = {
   linksTo: { select: { fromId: true } },
 } as const;
 
-function dtoWithLinks(entity: Parameters<typeof entityDto>[0] & {
-  linksFrom: { toId: string }[];
-  linksTo: { fromId: string }[];
-}) {
-  return entityDto(entity, relatedFromLinks(entity.linksFrom, entity.linksTo));
+async function dtoWithLinks(
+  entity: Parameters<typeof entityDto>[0] & {
+    linksFrom: { toId: string }[];
+    linksTo: { fromId: string }[];
+  },
+) {
+  const hints = await loadSectionHints(db, entity.projectId);
+  return entityDto(
+    entity,
+    relatedFromLinks(entity.linksFrom, entity.linksTo),
+    hints,
+  );
 }
 
 /* ── GET /api/entities/[id] ── */
@@ -38,7 +50,7 @@ export async function GET(req: Request, { params }: Params) {
   });
   const check = await ensureOwned(req, entityRow);
   if (!check.ok) return check.response;
-  return NextResponse.json({ entity: dtoWithLinks(check.row) });
+  return NextResponse.json({ entity: await dtoWithLinks(check.row) });
 }
 
 /* ── PATCH /api/entities/[id] — правка сущности ── */
@@ -53,6 +65,12 @@ const patchSchema = z.object({
     .optional(),
   tags: z.array(z.string().max(40)).max(12).optional(),
   related: z.array(z.string().min(1).max(64)).max(24).optional(),
+  refs: z
+    .object({
+      kind: z.enum(["chapter", "section"]).optional(),
+      items: z.array(z.string().min(1).max(64)).max(48),
+    })
+    .optional(),
   portrait: z
     .object({ gradient: z.string().max(200), initials: z.string().max(4) })
     .nullable()
@@ -100,6 +118,23 @@ export async function PATCH(req: Request, { params }: Params) {
     }
   }
 
+  let refsJson: string | undefined;
+  if (data.refs !== undefined) {
+    const items = compactRefItems(data.refs.items);
+    const inProject = await refsStayInProject(db, entity.projectId, items);
+    if (!inProject) {
+      return NextResponse.json(
+        { error: "Упоминание указывает на главу вне этого воркспейса" },
+        { status: 400 },
+      );
+    }
+    const current = parseEntityRefs(entity.refs);
+    refsJson = serializeEntityRefs({
+      kind: data.refs.kind ?? current.kind ?? refsKindOfDomain(entity.domain),
+      items,
+    });
+  }
+
   const updated = await db.$transaction(async (tx) => {
     if (related !== undefined) {
       await tx.entityLink.deleteMany({
@@ -131,6 +166,7 @@ export async function PATCH(req: Request, { params }: Params) {
           ? { portrait: data.portrait ? JSON.stringify(data.portrait) : null }
           : {}),
         ...(data.favorite !== undefined ? { favorite: data.favorite } : {}),
+        ...(refsJson !== undefined ? { refs: refsJson } : {}),
       },
       include: linkInclude,
     });
@@ -138,7 +174,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
   scheduleIndexEntity(db, updated.id);
 
-  return NextResponse.json({ entity: dtoWithLinks(updated) });
+  return NextResponse.json({ entity: await dtoWithLinks(updated) });
 }
 
 /* ── DELETE /api/entities/[id] ── */

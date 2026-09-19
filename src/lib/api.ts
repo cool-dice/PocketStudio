@@ -48,6 +48,7 @@ import type {
   FindingDto,
   FindingStatus,
   McpServerDto,
+  MentionSectionOption,
   SectionRevisionDto,
   WorkspaceDto,
   WorkspaceKind,
@@ -1035,6 +1036,12 @@ export const api = {
     ).then((r) => r.documents);
   },
 
+  listWorkspaceSections(projectId: string): Promise<MentionSectionOption[]> {
+    return request<{ sections: MentionSectionOption[] }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/sections`,
+    ).then((r) => r.sections);
+  },
+
   createDocument(
     projectId: string,
     body: { title: string; description?: string; kind?: DocumentKind },
@@ -1135,7 +1142,15 @@ export const api = {
     body: Partial<
       Pick<
         EntityDto,
-        "name" | "short" | "description" | "attributes" | "tags" | "related" | "portrait" | "favorite"
+        | "name"
+        | "short"
+        | "description"
+        | "attributes"
+        | "tags"
+        | "related"
+        | "portrait"
+        | "favorite"
+        | "refs"
       >
     >,
   ): Promise<EntityDto> {
@@ -1149,6 +1164,29 @@ export const api = {
     await request<{ ok: boolean }>(`/api/entities/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
+  },
+
+  listSectionMentions(sectionId: string): Promise<{
+    linked: { id: string; name: string; kind: string }[];
+    foundInText: { id: string; name: string; kind: string }[];
+  }> {
+    return request(
+      `/api/sections/${encodeURIComponent(sectionId)}/mentions`,
+    );
+  },
+
+  addSectionMention(sectionId: string, entityId: string): Promise<EntityDto> {
+    return request<{ entity: EntityDto }>(
+      `/api/sections/${encodeURIComponent(sectionId)}/mentions`,
+      { method: "POST", body: JSON.stringify({ entityId }) },
+    ).then((r) => r.entity);
+  },
+
+  async removeSectionMention(sectionId: string, entityId: string): Promise<EntityDto> {
+    return request<{ entity: EntityDto }>(
+      `/api/sections/${encodeURIComponent(sectionId)}/mentions/${encodeURIComponent(entityId)}`,
+      { method: "DELETE" },
+    ).then((r) => r.entity);
   },
 
   listArtifacts(projectId: string, type?: string): Promise<ArtifactDto[]> {

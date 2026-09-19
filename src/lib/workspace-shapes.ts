@@ -4,6 +4,8 @@
  */
 
 import { db } from "@/lib/db";
+import { parseEntityRefs } from "@/lib/entity-meta";
+import { mentionsOfRefs, type SectionHintMap } from "@/lib/entity-mentions";
 import type {
   ArtifactDto,
   ArtifactType,
@@ -13,7 +15,6 @@ import type {
   EntityDomain,
   EntityKind,
   EntityDto,
-  EntityRefs,
   FindingDto,
   FindingSeverity,
   FindingStatus,
@@ -194,25 +195,20 @@ type EntityRow = {
   updatedAt: Date;
 };
 
-export function entityDto(e: EntityRow, related: string[] = []): EntityDto {
+export function entityDto(
+  e: EntityRow,
+  related: string[] = [],
+  hints: SectionHintMap = new Map(),
+): EntityDto {
   let attributes: EntityAttribute[] = [];
   let tags: string[] = [];
-  let refs: EntityRefs = { kind: "chapter", items: [] };
+  const refs = parseEntityRefs(e.refs);
   let portrait: EntityDto["portrait"] = null;
   try {
     attributes = JSON.parse(e.attributes) ?? [];
   } catch { /* дефолт */ }
   try {
     tags = JSON.parse(e.tags) ?? [];
-  } catch { /* дефолт */ }
-  try {
-    const parsed = JSON.parse(e.refs);
-    if (parsed && typeof parsed === "object") {
-      refs = {
-        kind: parsed.kind === "section" ? "section" : "chapter",
-        items: Array.isArray(parsed.items) ? parsed.items.map(String) : [],
-      };
-    }
   } catch { /* дефолт */ }
   try {
     if (e.portrait) portrait = JSON.parse(e.portrait);
@@ -232,6 +228,7 @@ export function entityDto(e: EntityRow, related: string[] = []): EntityDto {
     attributes,
     tags,
     refs,
+    mentions: mentionsOfRefs(refs, hints),
     portrait,
     image: e.image ?? null,
     favorite: e.favorite,

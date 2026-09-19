@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { detachSectionMentions } from "@/lib/entity-mentions";
 import { ensureOwned } from "@/lib/workspace-api";
 import { isWorkspaceDocId } from "@/lib/app-url";
 import { documentDto } from "@/lib/workspace-shapes";
-import { removeSource } from "@/lib/rag";
+import { removeSource, scheduleIndexEntity } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +82,12 @@ export async function DELETE(req: Request, { params }: Params) {
     select: { id: true },
   });
   await db.document.delete({ where: { id } });
+  const detached = await detachSectionMentions(
+    db,
+    document.projectId,
+    sections.map((section) => section.id),
+  );
+  for (const entityId of detached) scheduleIndexEntity(db, entityId);
   for (const section of sections) {
     await removeSource(db, check.userId, "section", section.id);
   }

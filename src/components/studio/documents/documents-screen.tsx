@@ -300,6 +300,7 @@ export function DocumentsScreen({
               if (isEmbedded) embedded.patchLocal(docId, patch);
               else globalShelves.patchDocument(docId, patch);
             }}
+            workspaceId={dataWorkspaceId}
           />
         </TabsContent>
 

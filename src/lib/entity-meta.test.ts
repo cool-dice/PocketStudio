@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
   compactAttributes,
+  compactRefItems,
   compactTags,
+  parseEntityRefs,
   relatedFromLinks,
+  serializeEntityRefs,
   sameAttributes,
   sameStringList,
   uniqueRelated,
@@ -46,5 +49,17 @@ describe("entity-meta compact/normalize", () => {
     ).toBe(false);
     expect(sameStringList(["b", "a"], ["a", "b"])).toBe(true);
     expect(sameStringList(["a"], ["a", "b"])).toBe(false);
+  });
+
+  test("refs compact, parse labels, round-trip JSON", () => {
+    expect(compactRefItems(["  a ", "a", "", "b"])).toEqual(["a", "b"]);
+    expect(parseEntityRefs('{"kind":"section","items":["SRS-2"]}')).toEqual({
+      kind: "section",
+      items: ["SRS-2"],
+    });
+    expect(JSON.parse(serializeEntityRefs({ kind: "chapter", items: ["x", "x"] }))).toEqual({
+      kind: "chapter",
+      items: ["x"],
+    });
   });
 });
