@@ -108,7 +108,7 @@ DATABASE_URL=postgresql://… bun scripts/migrate-sqlite-to-postgres.ts
 ## Тесты
 
 ```bash
-bun test
+bun run test
 ```
 
 Шлюз `src/lib/ai` + RAG (`src/lib/rag`, изоляция скоупов) + дымовой `src/app/api/mvp.smoke.test.ts` (нужен живой Postgres) + тесты промптов агента и `parseToolCall`.

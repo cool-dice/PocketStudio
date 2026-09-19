@@ -257,7 +257,7 @@ Bookmark/share обязательны (бывшая «опциональная W
 
 - Расширить `src/app/api/mvp.smoke.test.ts` (skills, favorite, duplicate, offers, login route contract).
 - README: как запустить **полное** приложение, не «урезанный MVP».
-- `bun test` зелёный.
+- `bun run test` зелёный.
 - [x] F15
 
 ---
@@ -271,7 +271,7 @@ bun install
 bunx prisma generate && bun run db:push
 bun run dev          # Next :3000
 bun run dev:agent    # агент :3003 (или POST /api/health/agent-service)
-bun test
+bun run test
 ```
 
 Первый пользователь = admin. Ключи ИИ — в Админ → Модели ИИ, не в `.env`.
