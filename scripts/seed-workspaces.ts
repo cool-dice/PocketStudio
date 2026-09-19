@@ -9,10 +9,12 @@
 
 import { db } from "../src/lib/db";
 import { MOCK_WORKSPACES } from "../src/lib/workspace-data";
-import { ENTITY_SETS } from "../src/components/studio/documents/entities-data";
 import { MOCK_ARTIFACTS } from "../src/components/workspaces/shared/artifacts-data";
-import { ALBUM_ITEMS } from "../src/components/studio/documents/album-data";
-import { ANALYST_FINDINGS } from "../src/components/studio/documents/analyst-data";
+import {
+  ALBUM_ITEMS,
+  ANALYST_FINDINGS,
+  ENTITY_SETS,
+} from "./seed-workspace-content";
 
 const EMAIL = process.argv[2] ?? "ps2c-audio@vf.io";
 
@@ -275,12 +277,14 @@ async function main() {
   // 5. Находки Аналитика.
   const typeMap: Record<string, string> = {
     contradiction: "contradiction",
+    gap: "omission",
     omission: "omission",
     mismatch: "inconsistency",
   };
   const sevMap: Record<string, string> = {
     error: "critical",
     warning: "warning",
+    note: "info",
     info: "info",
   };
   for (const f of ANALYST_FINDINGS) {
