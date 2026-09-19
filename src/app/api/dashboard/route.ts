@@ -48,9 +48,12 @@ export async function GET(req: Request) {
   });
   const workspaceIds = workspaces.map((w) => w.id);
 
+  const emptyIds = workspaceIds.length === 0;
   const [artifactsCount, notesWeek, activeStages, recentArtifacts] =
     await Promise.all([
-      db.artifact.count({ where: { projectId: { in: workspaceIds } } }),
+      emptyIds
+        ? Promise.resolve(0)
+        : db.artifact.count({ where: { projectId: { in: workspaceIds } } }),
       db.note.count({
         where: {
           userId: session.sub,
@@ -64,18 +67,20 @@ export async function GET(req: Request) {
           progress: { gt: 0, lt: 100 },
         },
       }),
-      db.artifact.findMany({
-        where: { projectId: { in: workspaceIds } },
-        orderBy: { createdAt: "desc" },
-        take: 12,
-        select: {
-          id: true,
-          projectId: true,
-          type: true,
-          title: true,
-          createdAt: true,
-        },
-      }),
+      emptyIds
+        ? Promise.resolve([])
+        : db.artifact.findMany({
+            where: { projectId: { in: workspaceIds } },
+            orderBy: { createdAt: "desc" },
+            take: 12,
+            select: {
+              id: true,
+              projectId: true,
+              type: true,
+              title: true,
+              createdAt: true,
+            },
+          }),
     ]);
 
   const activity: DashboardActivityItem[] = recentArtifacts.map((a) => ({

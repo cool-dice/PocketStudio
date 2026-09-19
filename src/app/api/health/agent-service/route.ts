@@ -17,17 +17,12 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import { getUserFromRequest } from "@/lib/auth";
+import { resolveAgentSupervisorPath } from "@/lib/agent-supervisor";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const SERVICE_PORT = 3003;
-const SUPERVISOR_PATH = path.join(
-  process.cwd(),
-  "mini-services",
-  "agent-service",
-  "start.sh",
-);
 
 /** TCP probe of the agent-service port (resolves in ~50ms). */
 function probeService(timeoutMs = 500): Promise<boolean> {
@@ -46,12 +41,15 @@ function probeService(timeoutMs = 500): Promise<boolean> {
 }
 
 /** Detached supervisor spawn (child of THIS dev-server process). */
-function spawnSupervisor(): void {
-  const child = spawn("sh", [SUPERVISOR_PATH], {
-    cwd: path.dirname(SUPERVISOR_PATH),
+function spawnSupervisor(supervisorPath: string): void {
+  const child = spawn("sh", [supervisorPath], {
+    cwd: path.dirname(supervisorPath),
     detached: true,
     stdio: "ignore",
     env: process.env,
+  });
+  child.on("error", (err) => {
+    console.error("[health] agent-service supervisor spawn failed:", err);
   });
   child.unref();
   console.log(`[health] agent-service supervisor spawned (pid ${child.pid})`);
@@ -73,11 +71,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ up: true, started: false });
   }
 
-  spawnSupervisor();
+  const supervisorPath = resolveAgentSupervisorPath();
+  if (!supervisorPath) {
+    console.error(
+      "[health] agent-service start.sh not found from cwd",
+      process.cwd(),
+    );
+    return NextResponse.json(
+      { up: false, started: false, error: "Не найден супервизор агента" },
+      { status: 503 },
+    );
+  }
 
-  // The service boots in ~1–2s; give it a few chances before reporting.
-  for (let i = 0; i < 10; i++) {
-    await sleep(400);
+  spawnSupervisor(supervisorPath);
+
+  // bun --hot cold start can exceed 2s; wait long enough to report honestly.
+  for (let i = 0; i < 16; i++) {
+    await sleep(500);
     if (await probeService()) {
       return NextResponse.json({ up: true, started: true });
     }

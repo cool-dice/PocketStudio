@@ -311,6 +311,55 @@ describe.skipIf(SKIP_PG)("full app smoke: skills, favorite, duplicate, offers", 
     expect(inv.status).toBe(201);
     const invJson = (await inv.json()) as { invite: { token: string } };
     expect(invJson.invite.token.length).toBeGreaterThan(8);
+
+    const { GET: adminStats } = await import("./admin/stats/route");
+    const statsRes = await adminStats(
+      jsonRequest("http://localhost/api/admin/stats", "GET", undefined, token!),
+    );
+    expect(statsRes.status).toBe(200);
+    const statsJson = (await statsRes.json()) as {
+      stats: { users: number; activity: unknown[] };
+    };
+    expect(statsJson.stats.users).toBeGreaterThan(0);
+    expect(statsJson.stats.activity).toHaveLength(14);
+  });
+
+  test("dashboard is 200 with zeros when the user has no workspaces", async () => {
+    const emptyEmail = `mvp-empty-${stamp}@example.test`;
+    const emptyUser = await db.user.create({
+      data: {
+        name: "Пустой",
+        email: emptyEmail,
+        passwordHash: await hashPassword("password-ok"),
+      },
+    });
+    const emptyToken = await signSession({
+      sub: emptyUser.id,
+      email: emptyUser.email,
+      name: emptyUser.name,
+      role: "client",
+    });
+    try {
+      const { GET: getDashboard } = await import("./dashboard/route");
+      const res = await getDashboard(
+        jsonRequest("http://localhost/api/dashboard", "GET", undefined, emptyToken),
+      );
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        stats: {
+          workspaces: number;
+          artifacts: number;
+          notesWeek: number;
+          activeStages: number;
+        };
+        activity: unknown[];
+      };
+      expect(json.stats.workspaces).toBe(0);
+      expect(json.stats.artifacts).toBe(0);
+      expect(json.activity).toEqual([]);
+    } finally {
+      await db.user.delete({ where: { id: emptyUser.id } }).catch(() => {});
+    }
   });
 
   test("note tags, reminders, stats, payments adapter, health brand", async () => {

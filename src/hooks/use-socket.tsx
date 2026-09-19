@@ -178,7 +178,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       if (now - healRef.last < 30000) return;
       healRef.last = now;
       try {
-        await fetch("/api/health/agent-service", { method: "POST" });
+        await fetch("/api/health/agent-service", {
+          method: "POST",
+          credentials: "same-origin",
+        });
       } catch {
         // Next app unreachable — nothing we can do from here
       }
