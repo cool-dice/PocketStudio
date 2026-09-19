@@ -168,9 +168,15 @@ export async function DELETE(
         where: { userId: row.id },
         select: { id: true },
       });
+      const actorStill = await tx.user.findUnique({
+        where: { id: guard.userId },
+        select: { id: true },
+      });
       await tx.auditLog.create({
         data: {
-          userId: guard.userId,
+          // Peer delete may have already removed the actor; the row
+          // still records who was deleted (entityId + meta).
+          userId: actorStill ? guard.userId : null,
           action: "admin.user_delete",
           entity: "user",
           entityId: row.id,
