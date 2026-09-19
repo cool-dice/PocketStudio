@@ -14,6 +14,10 @@ import { promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { isDeletableRelPath } from "./rel-path";
+
+export { isDeletableRelPath } from "./rel-path";
+
 // ─────────────────────────── roots ───────────────────────────
 
 export const WORKSPACE_ROOT =
@@ -262,6 +266,9 @@ export async function deleteWorkspacePath(
   root: string,
   relPath: string,
 ): Promise<{ deleted: true; path: string }> {
+  if (!isDeletableRelPath(relPath)) {
+    throw new WorkspaceError("Нельзя удалить корень проекта");
+  }
   const abs = safeJoin(root, relPath);
   await assertInsideRoot(root, abs);
   if (abs === root) throw new WorkspaceError("Нельзя удалить корень проекта");

@@ -72,6 +72,7 @@ import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
 import { pluralFiles, relativeTime } from "@/lib/format";
 import { languageFromPath, OriginBadge, fileDotStyle } from "@/lib/project-style";
+import { isDeletableRelPath } from "@/lib/rel-path";
 import { useAppUi } from "@/lib/store";
 import type { CommitInfo, FileEntry, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -435,6 +436,11 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
 
   const doDeleteFile = async () => {
     if (!fileDeletePath || deletingFile) return;
+    if (!isDeletableRelPath(fileDeletePath)) {
+      toast.error("Нельзя удалить корень проекта");
+      setFileDeletePath(null);
+      return;
+    }
     setDeletingFile(true);
     try {
       const deleted = await api.deleteProjectFile(projectId, fileDeletePath);
@@ -448,6 +454,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
       setFileDeletePath(null);
       toast.success("Файл удалён", { description: deleted.path });
       void loadTree(true);
+      useAppUi.getState().bumpProjectFiles();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Не удалось удалить файл");
     } finally {
@@ -626,7 +633,13 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             activePath={activePath}
             dirtyPaths={dirtyPaths}
             onOpenFile={(path) => void openFile(path)}
-            onDeleteFile={(path) => setFileDeletePath(path)}
+            onDeleteFile={(path) => {
+              if (!isDeletableRelPath(path)) {
+                toast.error("Нельзя удалить корень проекта");
+                return;
+              }
+              setFileDeletePath(path);
+            }}
           />
         </nav>
 
@@ -669,7 +682,13 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
                 activePath={activePath}
                 dirtyPaths={dirtyPaths}
                 onOpenFile={(path) => void openFile(path)}
-                onDeleteFile={(path) => setFileDeletePath(path)}
+                onDeleteFile={(path) => {
+              if (!isDeletableRelPath(path)) {
+                toast.error("Нельзя удалить корень проекта");
+                return;
+              }
+              setFileDeletePath(path);
+            }}
               />
             </div>
           </SheetContent>
@@ -716,7 +735,13 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
                   variant="outline"
                   size="sm"
                   className="h-8 gap-1.5 rounded-lg px-2.5 text-xs text-destructive hover:text-destructive"
-                  onClick={() => setFileDeletePath(activeFile.path)}
+                  onClick={() => {
+                    if (!isDeletableRelPath(activeFile.path)) {
+                      toast.error("Нельзя удалить корень проекта");
+                      return;
+                    }
+                    setFileDeletePath(activeFile.path);
+                  }}
                   disabled={deletingFile}
                   aria-label={`Удалить файл ${activeFile.path}`}
                 >

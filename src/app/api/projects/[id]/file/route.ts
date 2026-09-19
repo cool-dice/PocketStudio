@@ -9,6 +9,7 @@ import {
   writeWorkspaceFile,
   deleteWorkspacePath,
 } from "@/lib/workspace";
+import { isDeletableRelPath } from "@/lib/rel-path";
 import { removeFileChunks, scheduleIndexFile } from "@/lib/rag";
 import { shouldSkipPath } from "@/lib/rag/skip";
 
@@ -143,6 +144,9 @@ export async function DELETE(
   const filePath = new URL(req.url).searchParams.get("path");
   if (!filePath) {
     return NextResponse.json({ error: "Параметр path обязателен" }, { status: 400 });
+  }
+  if (!isDeletableRelPath(filePath)) {
+    return NextResponse.json({ error: "Нельзя удалить корень проекта" }, { status: 400 });
   }
 
   try {

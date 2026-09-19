@@ -139,6 +139,17 @@ describe.skipIf(SKIP_PG)("DELETE /api/projects/[id]/file purges RAG", () => {
       },
     });
     expect(leftover).toBe(0);
+
+    const rootDel = await deleteFile(
+      jsonRequest(
+        `http://localhost/api/projects/${project.id}/file?path=${encodeURIComponent(".")}`,
+        "DELETE",
+        undefined,
+        ownerToken,
+      ),
+      { params: Promise.resolve({ id: project.id }) },
+    );
+    expect(rootDel.status).toBe(400);
   });
 
   afterAll(async () => {

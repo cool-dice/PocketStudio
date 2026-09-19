@@ -78,4 +78,14 @@ describe("assertInsideRoot / file ops vs symlink", () => {
     const read = await readWorkspaceFile(root, "README.md");
     expect(read.content).toBe("# hi\n");
   });
+
+  test("cannot delete the project root", async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), "ps-root-"));
+    await writeWorkspaceFile(root, "README.md", "# x\n");
+    await expect(deleteWorkspacePath(root, ".")).rejects.toThrow(WorkspaceError);
+    await expect(deleteWorkspacePath(root, "")).rejects.toThrow(WorkspaceError);
+    await expect(deleteWorkspacePath(root, "./")).rejects.toThrow(WorkspaceError);
+    const still = await readWorkspaceFile(root, "README.md");
+    expect(still.content).toBe("# x\n");
+  });
 });
