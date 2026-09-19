@@ -13,6 +13,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
+import {
+  LAST_ADMIN_DELETE,
+  SELF_USER_DELETE,
+  USER_NOT_FOUND,
+  roleChangeBlock,
+  roleChangeError,
+} from "@/lib/admin-users-copy";
+import { publicUserDto } from "@/lib/user-dto";
 import { removeProjectDir } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -41,53 +49,76 @@ export async function PATCH(
     );
   }
 
-  const target = await db.user.findUnique({
-    where: { id },
-    select: { id: true, email: true, name: true, role: true },
-  });
-  if (!target) {
-    return NextResponse.json({ error: "Пользователь не найден" }, { status: 404 });
-  }
-  if (target.id === guard.userId) {
-    return NextResponse.json(
-      { error: "Нельзя изменить собственную роль" },
-      { status: 409 },
-    );
-  }
-  if (target.role === "admin" && parsed.data.role === "client") {
-    const admins = await db.user.count({ where: { role: "admin" } });
-    if (admins <= 1) {
+  let fromRole: string;
+  let updated;
+  try {
+    const result = await db.$transaction(async (tx) => {
+      const target = await tx.user.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          createdAt: true,
+          onboardingDone: true,
+        },
+      });
+      if (!target) {
+        throw Object.assign(new Error("not-found"), { code: "NOT_FOUND" });
+      }
+      const adminCount = await tx.user.count({ where: { role: "admin" } });
+      const block = roleChangeBlock({
+        actorId: guard.userId,
+        targetId: target.id,
+        targetRole: target.role,
+        nextRole: parsed.data.role,
+        adminCount,
+      });
+      if (block) {
+        throw Object.assign(new Error(block), { code: block });
+      }
+      const row = await tx.user.update({
+        where: { id: target.id },
+        data: { role: parsed.data.role },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          createdAt: true,
+          onboardingDone: true,
+        },
+      });
+      return { from: target.role, user: row };
+    });
+    fromRole = result.from;
+    updated = result.user;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "NOT_FOUND") {
+      return NextResponse.json({ error: USER_NOT_FOUND }, { status: 404 });
+    }
+    if (code === "last-admin" || code === "self") {
       return NextResponse.json(
-        { error: "Нельзя снять последнего администратора" },
+        { error: roleChangeError(code) },
         { status: 409 },
       );
     }
+    throw err;
   }
-
-  const updated = await db.user.update({
-    where: { id: target.id },
-    data: { role: parsed.data.role },
-  });
 
   await db.auditLog.create({
     data: {
       userId: guard.userId,
       action: "admin.role_change",
       entity: "user",
-      entityId: target.id,
-      meta: JSON.stringify({ from: target.role, to: parsed.data.role }),
+      entityId: updated.id,
+      meta: JSON.stringify({ from: fromRole, to: parsed.data.role }),
     },
   });
 
-  return NextResponse.json({
-    user: {
-      id: updated.id,
-      email: updated.email,
-      name: updated.name,
-      role: updated.role,
-      createdAt: updated.createdAt.toISOString(),
-    },
-  });
+  return NextResponse.json({ user: publicUserDto(updated) });
 }
 
 export async function DELETE(
@@ -104,13 +135,16 @@ export async function DELETE(
     select: { id: true, email: true, name: true, role: true },
   });
   if (!target) {
-    return NextResponse.json({ error: "Пользователь не найден" }, { status: 404 });
+    return NextResponse.json({ error: USER_NOT_FOUND }, { status: 404 });
   }
   if (target.id === guard.userId) {
-    return NextResponse.json(
-      { error: "Нельзя удалить свой аккаунт из админ-панели" },
-      { status: 409 },
-    );
+    return NextResponse.json({ error: SELF_USER_DELETE }, { status: 409 });
+  }
+  if (target.role === "admin") {
+    const adminCount = await db.user.count({ where: { role: "admin" } });
+    if (adminCount <= 1) {
+      return NextResponse.json({ error: LAST_ADMIN_DELETE }, { status: 409 });
+    }
   }
 
   // Remove workspace dirs first (row cascade will erase the DB side).

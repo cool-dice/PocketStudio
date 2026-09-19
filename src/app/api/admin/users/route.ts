@@ -10,6 +10,11 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
 import { lastActivityOf } from "@/lib/admin-activity";
+import {
+  ROLE_PARAM_INVALID,
+  USERS_LOAD_ERROR,
+  toPublicAdminUserListItem,
+} from "@/lib/admin-users-copy";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +28,7 @@ export async function GET(req: Request) {
   const q = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
   const role = url.searchParams.get("role")?.trim() ?? "";
   if (role && role !== "admin" && role !== "client") {
-    return NextResponse.json(
-      { error: "Параметр role должен быть admin или client" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: ROLE_PARAM_INVALID }, { status: 400 });
   }
 
   let users;
@@ -65,10 +67,7 @@ export async function GET(req: Request) {
   ]);
   } catch {
     console.error("[admin/users] list failed");
-    return NextResponse.json(
-      { error: "Не удалось загрузить пользователей" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: USERS_LOAD_ERROR }, { status: 500 });
   }
 
   const noteBy = new Map(noteAgg.map((a) => [a.userId, a]));
@@ -86,19 +85,19 @@ export async function GET(req: Request) {
         threadBy.get(u.id)?._max.updatedAt,
         projectBy.get(u.id)?._max.updatedAt,
       ]);
-      return {
+      return toPublicAdminUserListItem({
         id: u.id,
         email: u.email,
         name: u.name,
         role: u.role,
-        createdAt: u.createdAt.toISOString(),
-        lastActivity: lastActivity ? lastActivity.toISOString() : null,
+        createdAt: u.createdAt,
+        lastActivity,
         counts: {
           notes: noteBy.get(u.id)?._count._all ?? 0,
           threads: threadBy.get(u.id)?._count._all ?? 0,
           projects: projectBy.get(u.id)?._count._all ?? 0,
         },
-      };
+      });
     });
 
   return NextResponse.json({ users: list });

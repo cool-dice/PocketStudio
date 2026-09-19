@@ -2,9 +2,17 @@ import { afterAll, describe, expect, test } from "bun:test";
 
 import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
+import {
+  LAST_ADMIN_DEMOTE,
+  SELF_ROLE_CHANGE,
+} from "@/lib/admin-users-copy";
 
 import { GET as adminStats } from "./stats/route";
 import { GET as adminUsers } from "./users/route";
+import {
+  DELETE as adminDeleteUser,
+  PATCH as adminPatchUser,
+} from "./users/[id]/route";
 import { GET as adminAudit } from "./audit/route";
 import { GET as adminProviders } from "./ai/providers/route";
 import { GET as adminDefaults } from "./ai/defaults/route";
@@ -13,10 +21,19 @@ const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 const stamp = Date.now().toString(36);
 const ids: string[] = [];
 
-function jsonRequest(url: string, bearer?: string): Request {
+function jsonRequest(
+  url: string,
+  bearer?: string,
+  init?: { method?: string; body?: unknown },
+): Request {
   const headers = new Headers({ accept: "application/json" });
+  if (init?.body !== undefined) headers.set("content-type", "application/json");
   if (bearer) headers.set("authorization", `Bearer ${bearer}`);
-  return new Request(url, { method: "GET", headers });
+  return new Request(url, {
+    method: init?.method ?? "GET",
+    headers,
+    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+  });
 }
 
 async function tokenFor(user: {
@@ -73,6 +90,13 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
     const statsJson = (await stats.json()) as { stats?: unknown; error: string };
     expect(statsJson.stats).toBeUndefined();
     expect(statsJson.error).toMatch(/администратор/i);
+    const usersJson = (await users.json()) as {
+      users?: unknown;
+      error: string;
+    };
+    expect(usersJson.users).toBeUndefined();
+    expect(usersJson.error).toMatch(/администратор/i);
+    expect(JSON.stringify(usersJson)).not.toMatch(/passwordHash|\$2[aby]\$/i);
     const auditJson = (await audit.json()) as {
       entries?: unknown;
       hasMore?: unknown;
@@ -129,6 +153,10 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
     const usersJson = (await usersRes.json()) as {
       users: { id: string; lastActivity: string | null; counts: { notes: number } }[];
     };
+    expect(JSON.stringify(usersJson)).not.toMatch(/passwordHash|\$2[aby]\$/i);
+    for (const row of usersJson.users) {
+      expect(row).not.toHaveProperty("passwordHash");
+    }
     const idleRow = usersJson.users.find((u) => u.id === idle.id);
     expect(idleRow).toBeTruthy();
     expect(idleRow?.lastActivity).toBeNull();
@@ -247,5 +275,127 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
     } finally {
       await db.auditLog.deleteMany({ where: { id: { in: created } } }).catch(() => {});
     }
+  });
+
+  test("role change: 403 for client, last admin stays, peer demote has no hash", async () => {
+    const passwordHash = await hashPassword("password-ok");
+    const adminA = await db.user.create({
+      data: {
+        name: "Админ А",
+        email: `admin-role-a-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminA.id);
+    const adminB = await db.user.create({
+      data: {
+        name: "Админ Б",
+        email: `admin-role-b-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminB.id);
+    const client = await db.user.create({
+      data: {
+        name: "Клиент роль",
+        email: `admin-role-c-${stamp}@example.test`,
+        passwordHash,
+        role: "client",
+      },
+    });
+    ids.push(client.id);
+
+    const clientToken = await tokenFor(client);
+    const clientPatch = await adminPatchUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, clientToken, {
+        method: "PATCH",
+        body: { role: "client" },
+      }),
+      { params: Promise.resolve({ id: adminA.id }) },
+    );
+    expect(clientPatch.status).toBe(403);
+    const clientJson = (await clientPatch.json()) as {
+      user?: unknown;
+      error: string;
+    };
+    expect(clientJson.user).toBeUndefined();
+    expect(clientJson.error).toMatch(/администратор/i);
+    expect(JSON.stringify(clientJson)).not.toMatch(/passwordHash|\$2[aby]\$/i);
+
+    const clientDelete = await adminDeleteUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, clientToken, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: adminA.id }) },
+    );
+    expect(clientDelete.status).toBe(403);
+
+    const tokenA = await tokenFor(adminA);
+    const demoteB = await adminPatchUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminB.id}`, tokenA, {
+        method: "PATCH",
+        body: { role: "client" },
+      }),
+      { params: Promise.resolve({ id: adminB.id }) },
+    );
+    expect(demoteB.status).toBe(200);
+    const demoteJson = (await demoteB.json()) as {
+      user: { id: string; role: string };
+    };
+    expect(demoteJson.user.id).toBe(adminB.id);
+    expect(demoteJson.user.role).toBe("client");
+    expect(demoteJson.user).not.toHaveProperty("passwordHash");
+    expect(JSON.stringify(demoteJson)).not.toMatch(/passwordHash|\$2[aby]\$/i);
+    expect(JSON.stringify(demoteJson)).not.toContain(passwordHash);
+
+    const stillB = await db.user.findUnique({
+      where: { id: adminB.id },
+      select: { role: true, passwordHash: true },
+    });
+    expect(stillB?.role).toBe("client");
+    expect(stillB?.passwordHash).toBe(passwordHash);
+
+    const lastSelf = await adminPatchUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, tokenA, {
+        method: "PATCH",
+        body: { role: "client" },
+      }),
+      { params: Promise.resolve({ id: adminA.id }) },
+    );
+    expect(lastSelf.status).toBe(409);
+    const lastJson = (await lastSelf.json()) as { user?: unknown; error: string };
+    expect(lastJson.user).toBeUndefined();
+    expect(lastJson.error).toBe(LAST_ADMIN_DEMOTE);
+    const stillA = await db.user.findUnique({
+      where: { id: adminA.id },
+      select: { role: true },
+    });
+    expect(stillA?.role).toBe("admin");
+
+    const promoteB = await adminPatchUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminB.id}`, tokenA, {
+        method: "PATCH",
+        body: { role: "admin" },
+      }),
+      { params: Promise.resolve({ id: adminB.id }) },
+    );
+    expect(promoteB.status).toBe(200);
+
+    const selfWithPeer = await adminPatchUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, tokenA, {
+        method: "PATCH",
+        body: { role: "client" },
+      }),
+      { params: Promise.resolve({ id: adminA.id }) },
+    );
+    expect(selfWithPeer.status).toBe(409);
+    const selfJson = (await selfWithPeer.json()) as { error: string };
+    expect(selfJson.error).toBe(SELF_ROLE_CHANGE);
+    expect(
+      (await db.user.findUnique({ where: { id: adminA.id }, select: { role: true } }))
+        ?.role,
+    ).toBe("admin");
   });
 });

@@ -767,13 +767,22 @@ export const api = {
 
   /** Role change — returns the plain user; the caller patches its local list. */
   adminUpdateUserRole(id: string, role: Role): Promise<{ id: string; role: Role }> {
-    return request<{ id: string; role: Role }>(
+    return request<{ user: { id: string; role: Role } }>(
       `/api/admin/users/${encodeURIComponent(id)}`,
       {
         method: "PATCH",
         body: JSON.stringify({ role }),
       },
-    );
+    ).then((r) => {
+      const user = r.user;
+      if (
+        !user?.id ||
+        (user.role !== "admin" && user.role !== "client")
+      ) {
+        throw new ApiError("Не удалось изменить роль", 500);
+      }
+      return { id: user.id, role: user.role };
+    });
   },
 
   async adminDeleteUser(id: string): Promise<void> {
