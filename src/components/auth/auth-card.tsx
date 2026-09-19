@@ -5,7 +5,12 @@
  * Used inside a Dialog (from the landing hero) and as a standalone view.
  */
 
-import { cloneElement, isValidElement, type ReactElement } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  useState,
+  type ReactElement,
+} from "react";
 import { Loader2, LogIn, UserPlus } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
@@ -149,7 +154,12 @@ export function AuthCard({
 
             {error && <ErrorBanner message={error} />}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading}
+              aria-busy={loading}
+            >
               {loading ? (
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
               ) : (
@@ -218,7 +228,12 @@ export function AuthCard({
 
             {error && <ErrorBanner message={error} />}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading}
+              aria-busy={loading}
+            >
               {loading ? (
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
               ) : (

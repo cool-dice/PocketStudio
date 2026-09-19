@@ -399,7 +399,14 @@ export const api = {
     return request("/api/notes/stats");
   },
 
-  fireDueReminders(): Promise<{ fired: number; notes: { id: string; preview: string }[] }> {
+  fireDueReminders(): Promise<{
+    fired: number;
+    notes: {
+      id: string;
+      preview: string;
+      notification?: Notification;
+    }[];
+  }> {
     return request("/api/notes/reminders/fire", { method: "POST" });
   },
 

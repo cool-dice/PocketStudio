@@ -14,6 +14,7 @@
 
 import { useState } from "react";
 import {
+  AlarmClock,
   Bell,
   BellOff,
   CheckCheck,
@@ -54,6 +55,11 @@ const TYPE_META: Record<
     iconClass: "text-teal-600 dark:text-teal-400",
     ariaLabel: "Чекпоинт",
   },
+  reminder: {
+    icon: AlarmClock,
+    iconClass: "text-amber-600 dark:text-amber-400",
+    ariaLabel: "Напоминание",
+  },
   system: {
     icon: Bell,
     iconClass: "text-stone-500 dark:text-stone-400",
@@ -81,10 +87,13 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
   const handleItemClick = (n: Notification) => {
     markRead(n.id);
     const ui = useAppUi.getState();
-    if (n.type === "analysis_ready" && n.entityId) {
+    if ((n.type === "analysis_ready" || n.type === "reminder") && n.entityId) {
       void api
         .getNote(n.entityId)
-        .then((note) => ui.openNote(note))
+        .then((note) => {
+          ui.openNote(note);
+          if (n.type === "reminder") ui.setMainArea("notebook");
+        })
         .catch(() => toast.error("Заметка не найдена — возможно, удалена"));
     } else if ((n.type === "project_created" || n.type === "checkpoint") && n.entityId) {
       ui.openProject(n.entityId);
@@ -195,7 +204,8 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
               </span>
               <p className="text-sm font-medium">Пока тихо</p>
               <p className="max-w-56 text-xs leading-relaxed text-muted-foreground">
-                Здесь появятся готовые анализы, новые проекты агента и чекпоинты
+                Здесь появятся готовые анализы, напоминания из блокнота,
+                новые проекты агента и чекпоинты
               </p>
             </div>
           ) : (

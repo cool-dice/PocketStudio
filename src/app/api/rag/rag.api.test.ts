@@ -129,6 +129,28 @@ describe.skipIf(SKIP_PG)("POST /api/rag", () => {
     expect(wsJson.hits.some((h) => h.excerpt.includes("Тишина"))).toBe(false);
     expect(wsJson.hits.some((h) => h.excerpt.includes("чужого"))).toBe(false);
 
+    const ignored = await search(
+      jsonRequest(
+        "http://localhost/api/rag/search",
+        {
+          query: "карие глаза",
+          threadProjectId: app.id,
+          projectId: book.id,
+        },
+        token,
+      ),
+    );
+    expect(ignored.status).toBe(200);
+    const ignoredJson = (await ignored.json()) as {
+      scope: string;
+      hits: Array<{ workspaceId: string | null; excerpt: string }>;
+    };
+    expect(ignoredJson.scope).toBe("workspace");
+    expect(ignoredJson.hits.every((h) => h.workspaceId === app.id)).toBe(true);
+    expect(ignoredJson.hits.some((h) => h.excerpt.includes("Тишина"))).toBe(
+      false,
+    );
+
     const global = await search(
       jsonRequest(
         "http://localhost/api/rag/search",

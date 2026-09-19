@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
 
 const INTERVAL_MS = 45_000;
@@ -16,6 +17,7 @@ const INTERVAL_MS = 45_000;
 export function DueRemindersWatcher() {
   const bumpNotes = useAppUi((s) => s.bumpNotes);
   const setMainArea = useAppUi((s) => s.setMainArea);
+  const openNote = useAppUi((s) => s.openNote);
   const inFlight = useRef(false);
 
   useEffect(() => {
@@ -28,12 +30,27 @@ export function DueRemindersWatcher() {
         const res = await api.fireDueReminders();
         if (cancelled || !res.fired) return;
         bumpNotes();
+        const store = useNotifications.getState();
+        for (const note of res.notes) {
+          if (note.notification) store.prepend(note.notification);
+        }
+        if (!res.notes.some((n) => n.notification)) {
+          void store.refresh();
+        }
         for (const note of res.notes.slice(0, 3)) {
           toast("Напоминание", {
             description: note.preview,
             action: {
-              label: "Блокнот",
-              onClick: () => setMainArea("notebook"),
+              label: "Открыть",
+              onClick: () => {
+                void api
+                  .getNote(note.id)
+                  .then((full) => {
+                    openNote(full);
+                    setMainArea("notebook");
+                  })
+                  .catch(() => setMainArea("notebook"));
+              },
             },
           });
         }
@@ -55,7 +72,7 @@ export function DueRemindersWatcher() {
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [bumpNotes, setMainArea]);
+  }, [bumpNotes, setMainArea, openNote]);
 
   return null;
 }

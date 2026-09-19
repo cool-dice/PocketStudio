@@ -201,6 +201,7 @@ export function CreateWorkspaceDialog({
             variant="ghost"
             onClick={goBack}
             disabled={step === 1}
+            aria-label="Назад к предыдущему шагу"
           >
             <ArrowLeft aria-hidden="true" />
             Назад
@@ -211,7 +212,12 @@ export function CreateWorkspaceDialog({
               <ArrowRight aria-hidden="true" />
             </Button>
           ) : (
-            <Button type="button" onClick={handleCreate} disabled={creating}>
+            <Button
+              type="button"
+              onClick={handleCreate}
+              disabled={creating}
+              aria-busy={creating}
+            >
               {creating ? (
                 <Loader2 className="animate-spin" aria-hidden="true" />
               ) : (

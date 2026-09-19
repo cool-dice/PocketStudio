@@ -19,6 +19,11 @@ export function RagScopeBadge({
           ? "Контекст: только этот воркспейс. Чужой код и канон недоступны."
           : "Контекст: вся студия — канон всех ваших воркспейсов."
       }
+      aria-label={
+        workspace
+          ? "Контекст поиска: этот воркспейс"
+          : "Контекст поиска: вся студия"
+      }
       className={cn(
         "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
         workspace

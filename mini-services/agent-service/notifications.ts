@@ -25,6 +25,7 @@ export type NotificationType =
   | "analysis_ready"
   | "project_created"
   | "checkpoint"
+  | "reminder"
   | "system";
 
 /** Wire shape — mirrors src/lib/types.ts Notification (ISO date). */

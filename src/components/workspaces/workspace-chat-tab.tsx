@@ -191,7 +191,9 @@ export function WorkspaceChatTab({
               <h2 className="truncate text-sm font-semibold">
                 Оркестратор воркспейса «{workspace.title}»
               </h2>
-              <RagScopeBadge scope="workspace" />
+              <RagScopeBadge
+                scope={activeThread?.projectId ? "workspace" : "global"}
+              />
               <StageBadge stage="beta" />
             </div>
             <p className="mt-0.5 truncate text-xs text-muted-foreground">

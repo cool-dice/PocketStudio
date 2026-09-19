@@ -283,6 +283,7 @@ export type NotificationType =
   | "analysis_ready"
   | "project_created"
   | "checkpoint"
+  | "reminder"
   | "system";
 
 export interface Notification {

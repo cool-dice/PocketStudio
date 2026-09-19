@@ -5,6 +5,7 @@ import { MousePointerClick, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useThreads } from "@/hooks/use-threads";
 import { useAppUi } from "@/lib/store";
 
 export interface InspectHit {
@@ -18,9 +19,12 @@ export interface InspectHit {
 export function PreviewInspector({
   iframeSrc,
   projectName,
+  projectId,
 }: {
   iframeSrc: string;
   projectName: string;
+  /** Thread.projectId to wait for before auto-sending «Попросить агента». */
+  projectId?: string | null;
 }) {
   const [hit, setHit] = useState<InspectHit | null>(null);
   const [instruction, setInstruction] = useState("");
@@ -28,6 +32,7 @@ export function PreviewInspector({
   const setMainArea = useAppUi((s) => s.setMainArea);
   const activeWorkspaceId = useAppUi((s) => s.activeWorkspaceId);
   const openWorkspace = useAppUi((s) => s.openWorkspace);
+  const { threads, selectThread, startProjectThread } = useThreads();
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -57,7 +62,16 @@ export function PreviewInspector({
     ]
       .filter(Boolean)
       .join(" ");
-    setComposerDraft(body);
+    const targetProjectId = activeWorkspaceId ?? projectId ?? null;
+    setComposerDraft(body, { autoSendProjectId: targetProjectId });
+    if (targetProjectId) {
+      const existing = threads.find((t) => t.projectId === targetProjectId);
+      if (existing) {
+        void selectThread(existing.id);
+      } else {
+        void startProjectThread(targetProjectId, `Превью · ${projectName}`);
+      }
+    }
     if (activeWorkspaceId) {
       openWorkspace(activeWorkspaceId, "chat");
     } else {

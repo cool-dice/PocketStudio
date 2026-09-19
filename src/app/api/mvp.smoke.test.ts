@@ -436,8 +436,28 @@ describe.skipIf(SKIP_PG)("full app smoke: skills, favorite, duplicate, offers", 
       jsonRequest("http://localhost/api/notes/reminders/fire", "POST", {}, token!),
     );
     expect(first.status).toBe(200);
-    const firstJson = (await first.json()) as { fired: number };
+    const firstJson = (await first.json()) as {
+      fired: number;
+      notes: { id: string; notification?: { type: string } }[];
+    };
     expect(firstJson.fired).toBeGreaterThanOrEqual(1);
+    expect(
+      firstJson.notes.some((n) => n.notification?.type === "reminder"),
+    ).toBe(true);
+
+    const { GET: listNotifications } = await import("./notifications/route");
+    const bell = await listNotifications(
+      jsonRequest("http://localhost/api/notifications", "GET", undefined, token!),
+    );
+    expect(bell.status).toBe(200);
+    const bellJson = (await bell.json()) as {
+      notifications: { type: string; entityId: string | null }[];
+    };
+    expect(
+      bellJson.notifications.some(
+        (n) => n.type === "reminder" && n.entityId === note.id,
+      ),
+    ).toBe(true);
 
     const second = await fire(
       jsonRequest("http://localhost/api/notes/reminders/fire", "POST", {}, token!),

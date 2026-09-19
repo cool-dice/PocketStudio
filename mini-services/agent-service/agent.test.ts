@@ -41,6 +41,30 @@ describe("parseToolCall", () => {
     expect(call?.args.query).toBe("глаза");
   });
 
+  test("accepts trailing commas in tool JSON", () => {
+    const call = parseToolCall(
+      '{"tool":"retrieve_code","args":{"query":"agent",},}',
+    );
+    expect(call?.tool).toBe("retrieve_code");
+    expect(call?.args.query).toBe("agent");
+  });
+
+  test("accepts OpenAI-style name/arguments", () => {
+    const call = parseToolCall(
+      '{"name":"retrieve_canon","arguments":{"query":"Марина"}}',
+    );
+    expect(call?.tool).toBe("retrieve_canon");
+    expect(call?.args.query).toBe("Марина");
+  });
+
+  test("accepts stringified arguments", () => {
+    const call = parseToolCall(
+      '{"tool":"retrieve_canon","arguments":"{\\"query\\":\\"глаза\\"}"}',
+    );
+    expect(call?.tool).toBe("retrieve_canon");
+    expect(call?.args.query).toBe("глаза");
+  });
+
   test("returns null for a plain answer", () => {
     expect(parseToolCall("Готово: глава лежит в документах.")).toBeNull();
   });
@@ -69,6 +93,9 @@ describe("agent tool registry", () => {
       "tag_note",
       "set_reminder",
       "rewrite_section",
+      "fetch_url",
+      "web_search",
+      "browser_read",
     ]) {
       expect(names).toContain(name);
     }

@@ -814,6 +814,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
               <PreviewInspector
                 iframeSrc={previewSrc}
                 projectName={project?.name ?? "проект"}
+                projectId={projectId}
               />
             </div>
           ) : (

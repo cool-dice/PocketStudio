@@ -70,8 +70,14 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-dvh items-center justify-center">
+        <div
+          className="flex min-h-dvh items-center justify-center"
+          role="status"
+          aria-live="polite"
+          aria-label="Загрузка входа"
+        >
           <LogoMark className="size-12 animate-pulse rounded-xl" />
+          <span className="sr-only">Загрузка PocketStudio…</span>
         </div>
       }
     >

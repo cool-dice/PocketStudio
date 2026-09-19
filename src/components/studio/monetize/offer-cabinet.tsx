@@ -147,7 +147,9 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
                 </Button>
               ) : (
                 <span className="text-xs text-emerald-600">
-                  {o.paymentMode === "live" ? "оплачено (live-заглушка)" : "оплачено (симуляция)"}
+                  {o.paymentMode === "live"
+                    ? "оплачено (не картой: симуляция или пометка админа)"
+                    : "оплачено (симуляция)"}
                 </span>
               )}
             </li>

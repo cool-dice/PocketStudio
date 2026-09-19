@@ -143,7 +143,15 @@ interface AppUiState {
 
   /** Composer prefill from preview inspect / quest. */
   composerDraft: string | null;
-  setComposerDraft: (text: string | null) => void;
+  /**
+   * When set (including `null` = global thread), Composer sends the draft
+   * once the active Thread.projectId matches. `undefined` = only prefill.
+   */
+  composerAutoSendProjectId: string | null | undefined;
+  setComposerDraft: (
+    text: string | null,
+    opts?: { autoSendProjectId?: string | null },
+  ) => void;
 }
 
 export const useAppUi = create<AppUiState>((set, get) => ({
@@ -272,5 +280,11 @@ export const useAppUi = create<AppUiState>((set, get) => ({
   },
 
   composerDraft: null,
-  setComposerDraft: (composerDraft) => set({ composerDraft }),
+  composerAutoSendProjectId: undefined,
+  setComposerDraft: (composerDraft, opts) =>
+    set({
+      composerDraft,
+      composerAutoSendProjectId:
+        composerDraft == null ? undefined : opts?.autoSendProjectId,
+    }),
 }));

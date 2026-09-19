@@ -39,10 +39,22 @@ export async function POST(req: Request) {
   const have = new Set(existing.map((n) => n.entityId).filter(Boolean));
   const fresh = due.filter((n) => !have.has(n.id));
 
-  const created: { id: string; preview: string }[] = [];
+  const created: {
+    id: string;
+    preview: string;
+    notification: {
+      id: string;
+      type: string;
+      title: string;
+      body: string | null;
+      entityId: string | null;
+      read: boolean;
+      createdAt: string;
+    };
+  }[] = [];
   for (const note of fresh) {
     const preview = (note.rawText ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-    await db.notification.create({
+    const row = await db.notification.create({
       data: {
         userId: session.sub,
         type: "reminder",
@@ -51,7 +63,19 @@ export async function POST(req: Request) {
         entityId: note.id,
       },
     });
-    created.push({ id: note.id, preview: preview || "Мысль" });
+    created.push({
+      id: note.id,
+      preview: preview || "Мысль",
+      notification: {
+        id: row.id,
+        type: row.type,
+        title: row.title,
+        body: row.body,
+        entityId: row.entityId,
+        read: row.read,
+        createdAt: row.createdAt.toISOString(),
+      },
+    });
   }
 
   return NextResponse.json({ fired: created.length, notes: created });

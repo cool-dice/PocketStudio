@@ -130,28 +130,65 @@ function splitTopLevelObjects(text: string): string[] {
   return objects;
 }
 
-/** Parse one JSON string as a tool-call object, null when not shaped right. */
-function tryParseToolObject(raw: string): ToolCall | null {
-  let parsed: unknown;
+function parseJsonLenient(raw: string): unknown | undefined {
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch {
+    /* trailing commas are a frequent model slip */
+  }
+  try {
+    return JSON.parse(raw.replace(/,\s*([}\]])/g, "$1"));
+  } catch {
+    return undefined;
+  }
+}
+
+function coerceArgs(value: unknown): Record<string, unknown> | null {
+  if (typeof value === "string") {
+    const nested = parseJsonLenient(value);
+    if (typeof nested === "object" && nested !== null && !Array.isArray(nested)) {
+      return nested as Record<string, unknown>;
+    }
     return null;
   }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+/** Parse one JSON string as a tool-call object, null when not shaped right. */
+function tryParseToolObject(raw: string): ToolCall | null {
+  const parsed = parseJsonLenient(raw);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return null;
   }
   const obj = parsed as Record<string, unknown>;
-  if (typeof obj.tool === "string" && obj.tool.trim()) {
-    if (typeof obj.args === "object" && obj.args !== null && !Array.isArray(obj.args)) {
-      return { tool: obj.tool.trim(), args: obj.args as Record<string, unknown> };
-    }
-    // Flat form observed in the wild: {"tool":"write_file","path":…,…} —
-    // the model forgot the args wrapper; treat the other keys as args.
-    if (obj.args === undefined) {
-      const { tool, ...rest } = obj;
-      return { tool: tool.trim(), args: rest as Record<string, unknown> };
-    }
+  const nestedFn =
+    typeof obj.function === "object" && obj.function !== null && !Array.isArray(obj.function)
+      ? (obj.function as Record<string, unknown>)
+      : null;
+  const toolRaw =
+    (typeof obj.tool === "string" && obj.tool) ||
+    (typeof obj.name === "string" && obj.name) ||
+    (typeof nestedFn?.name === "string" && nestedFn.name) ||
+    "";
+  const tool = toolRaw.trim();
+  if (!tool) return null;
+
+  const argsCandidate =
+    obj.args ?? obj.arguments ?? nestedFn?.arguments ?? nestedFn?.args;
+  const wrapped = coerceArgs(argsCandidate);
+  if (wrapped) return { tool, args: wrapped };
+
+  // Flat form observed in the wild: {"tool":"write_file","path":…,…} —
+  // the model forgot the args wrapper; treat the other keys as args.
+  if (argsCandidate === undefined) {
+    const rest = { ...obj };
+    delete rest.tool;
+    delete rest.name;
+    delete rest.function;
+    return { tool, args: rest };
   }
   return null;
 }

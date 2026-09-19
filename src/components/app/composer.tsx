@@ -55,16 +55,36 @@ export function Composer() {
   const openCreateProject = useAppUi((s) => s.openCreateProject);
   const bumpProjectFiles = useAppUi((s) => s.bumpProjectFiles);
   const composerDraft = useAppUi((s) => s.composerDraft);
+  const composerAutoSendProjectId = useAppUi((s) => s.composerAutoSendProjectId);
   const setComposerDraft = useAppUi((s) => s.setComposerDraft);
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const pendingAutoSend = useRef<{
+    text: string;
+    projectId: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!composerDraft) return;
-    setValue(composerDraft);
+    const text = composerDraft;
+    const autoProjectId = composerAutoSendProjectId;
+    setValue(text);
     setComposerDraft(null);
+    if (autoProjectId !== undefined) {
+      pendingAutoSend.current = { text, projectId: autoProjectId };
+    }
     requestAnimationFrame(() => taRef.current?.focus());
-  }, [composerDraft, setComposerDraft]);
+  }, [composerDraft, composerAutoSendProjectId, setComposerDraft]);
+
+  useEffect(() => {
+    const pending = pendingAutoSend.current;
+    if (!pending || busy || !activeThread) return;
+    const have = activeThread.projectId ?? null;
+    if (pending.projectId !== have) return;
+    pendingAutoSend.current = null;
+    setValue("");
+    void sendMessage(pending.text);
+  }, [activeThread, busy, sendMessage]);
 
   const boundProject = getById(activeThread?.projectId ?? null);
 
