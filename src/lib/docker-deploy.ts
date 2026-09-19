@@ -1,6 +1,26 @@
 import { spawn } from "node:child_process";
 
+import {
+  DOCKERFILE_MISSING_ERROR,
+  DOCKER_DAEMON_MISSING_LOG,
+  EMPTY_APP_BUILD_ERROR,
+  dockerCliMissingLog,
+  hasBuildableAppFiles,
+  hasDockerfile,
+} from "./docker-copy";
+import { listWorkspaceTree } from "./workspace";
+
 export type DockerPresence = "ok" | "no-cli" | "no-daemon";
+
+export type DockerBuildStatus = "empty" | "unavailable" | "failed" | "built";
+
+export interface DockerBuildResult {
+  status: DockerBuildStatus;
+  log: string;
+  imageTag: string | null;
+  published: false;
+  error?: string;
+}
 
 function looksLikeMissingDaemon(text: string): boolean {
   return /cannot connect|daemon|Is the docker daemon running|pipe/i.test(text);
@@ -58,4 +78,71 @@ export function runDockerBuild(
       resolve({ ok: code === 0, log: buf.slice(-8_000) }),
     );
   });
+}
+
+/**
+ * Same docker-build path as POST /api/workspaces/[id]/docker-build.
+ * Empty trees are never «built». Missing CLI/daemon is «unavailable».
+ * published is always false — local build is not a registry push.
+ */
+export async function dockerBuildWorkspace(
+  projectId: string,
+  root: string,
+): Promise<DockerBuildResult> {
+  let files: { path: string; type: string }[] = [];
+  try {
+    files = (await listWorkspaceTree(root)).entries;
+  } catch {
+    files = [];
+  }
+
+  if (!hasBuildableAppFiles(files)) {
+    return {
+      status: "empty",
+      log: EMPTY_APP_BUILD_ERROR,
+      imageTag: null,
+      published: false,
+      error: EMPTY_APP_BUILD_ERROR,
+    };
+  }
+  if (!hasDockerfile(files)) {
+    return {
+      status: "empty",
+      log: DOCKERFILE_MISSING_ERROR,
+      imageTag: null,
+      published: false,
+      error: DOCKERFILE_MISSING_ERROR,
+    };
+  }
+
+  const docker = await whichDocker();
+  if (docker === "no-cli") {
+    return {
+      status: "unavailable",
+      log: dockerCliMissingLog(projectId, root),
+      imageTag: null,
+      published: false,
+    };
+  }
+  if (docker === "no-daemon") {
+    return {
+      status: "unavailable",
+      log: DOCKER_DAEMON_MISSING_LOG,
+      imageTag: null,
+      published: false,
+    };
+  }
+
+  const tag = `pocketstudio/${projectId.slice(0, 12).toLowerCase()}:local`;
+  const result = await runDockerBuild(root, tag);
+  return {
+    status: result.ok ? "built" : "failed",
+    log:
+      result.log ||
+      (result.ok
+        ? "docker build завершился без лога"
+        : "docker build не удался"),
+    imageTag: result.ok ? tag : null,
+    published: false,
+  };
 }

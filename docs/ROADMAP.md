@@ -287,7 +287,8 @@ welcome-чипы открывают воркспейсы; промпт аген�
    профиль Next.js/Vite/Node/Python/статика по реальным файлам → Dockerfile + .dockerignore на диск,
    карточка в «Деплое», глобальный экран Деплой доступен из сайдбара, чипы включают код-проекты).
    Сборка образа/push/SSH-деплой — вне песочницы (docker CLI отсутствует), карточки честно
-   помечают это. Инструмент `deploy_project` отложен до появления Docker-движка.
+   помечают это. Инструмент `deploy_project` вызывает те же ZIP / Dockerfile / docker-build
+   пути: только `type=app`, пустой не «собрано», без Docker — `unavailable` в чат, `published: false`.
 2. **MCP**: реестр серверов в БД (Prisma `McpServer`, ленивый посев каталога 10 серверов на
    пользователя). **Builtin-адаптеры работают реально**: `fetch` → инструменты оркестратора
    `fetch_url` (page_reader SDK) + `web_search`; `browser` (Playwright) → `browser_read` через

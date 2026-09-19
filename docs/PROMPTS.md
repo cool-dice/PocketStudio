@@ -27,7 +27,7 @@ Inventory of every LLM surface. Winners are implemented in
 
 ## Agent tools added to the prompt
 
-`retrieve_canon` / `retrieve_code` (pgvector RAG + keyword fallback in the same scope), `apply_patch`, `tag_note`, `set_reminder`, `fetch_url` / `web_search` / `browser_read` (MCP builtin; browser_read honest if CLI missing).
+`retrieve_canon` / `retrieve_code` (pgvector RAG + keyword fallback in the same scope), `apply_patch`, `tag_note`, `set_reminder`, `fetch_url` / `web_search` / `browser_read` (MCP builtin; browser_read honest if CLI missing), `deploy_project` (app-only ZIP/Dockerfile/docker-build; empty not built; no fake publish).
 
 ## Mode merge (proto2 → PocketStudio)
 

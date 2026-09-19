@@ -14,6 +14,7 @@ describe("agent system prompt builder", () => {
     expect(prompt).toContain("fetch_url");
     expect(prompt).toContain("web_search");
     expect(prompt).toContain("browser_read");
+    expect(prompt).toContain("deploy_project");
   });
 
   test("act mode prefers patch and scopes to project tree", () => {

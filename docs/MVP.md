@@ -327,5 +327,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Entity sheet meta | Атрибуты, теги и связи на карточке правятся и пишутся в PATCH (JSON-колонки + EntityLink); битый JSON 400 без затирания; save → RAG; IDOR 404 |
 | 2026-09-19 | Document analyst | Проверка через `document_check`; без модели — русская ошибка, находки не создаются; Finding в БД переживает reload; цитаты только из текста; Исправлено/Отклонить → API; IDOR 404 |
 | 2026-09-19 | Deploy honesty | ZIP только владельца; Dockerfile `published: false`; `docker build` — лог или `unavailable`; пустой app не «собрано»; IDOR 404 |
+| 2026-09-19 | deploy_project | Агент: только app; пустой не built; без Docker — текст unavailable в чат; никогда не published |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

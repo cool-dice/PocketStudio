@@ -37,6 +37,21 @@ import {
   scheduleIndexFinding,
   scheduleIndexSection,
 } from "../../src/lib/rag/hooks";
+import {
+  DEPLOY_ZIP_HINT,
+  DOCKER_BUILD_LOCAL_ONLY,
+  EMPTY_APP_BUILD_ERROR,
+  deployWrongTypeMessage,
+  hasBuildableAppFiles,
+  hasDockerfile,
+} from "../../src/lib/docker-copy";
+import { generateWorkspaceDockerfile } from "../../src/lib/docker-file";
+import { dockerBuildWorkspace } from "../../src/lib/docker-deploy";
+import {
+  exportProjectZip,
+  listWorkspaceTree,
+  projectRoot,
+} from "../../src/lib/workspace";
 import type { ToolContext, ToolDef } from "./tools";
 
 // ─────────────────────────── shared helpers ───────────────────────────
@@ -803,6 +818,145 @@ const rewriteSection: ToolDef = {
   },
 };
 
+const FAKE_PUBLISH = /опубликовано на|published to registry|push succeeded|деплой завершён/i;
+
+function neverPublished<T extends Record<string, unknown>>(result: T): T & { published: false } {
+  const blob = JSON.stringify(result);
+  if (FAKE_PUBLISH.test(blob) || /"published":true/.test(blob)) {
+    return {
+      ...result,
+      published: false,
+      message:
+        typeof result.message === "string"
+          ? result.message
+          : "Локальная сборка. Образ не опубликован.",
+    };
+  }
+  return { ...result, published: false };
+}
+
+const deployProject: ToolDef = {
+  name: "deploy_project",
+  description:
+    "Подготовить приложение к локальной сборке: ZIP, Dockerfile и docker build. Только воркспейс типа app. Пустой проект не «собрано». Без Docker — честный unavailable. Никогда не публикация в реестр.",
+  argsSchema: {
+    workspaceId: "id воркспейса-приложения (или workspaceName)",
+    workspaceName: "название воркспейса, если id нет",
+    overwriteDockerfile: "перезаписать Dockerfile, если уже есть (по умолчанию нет)",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+
+    const ws = await resolveWorkspace(userId, args, ctx);
+    if ("error" in ws) return { error: ws.error };
+    if (ws.type !== "app") {
+      return neverPublished({
+        error: deployWrongTypeMessage(ws.type),
+        status: "refused",
+        published: false,
+        imageTag: null,
+        message: deployWrongTypeMessage(ws.type),
+      });
+    }
+
+    const project = await db.project.findFirst({
+      where: { id: ws.id, userId },
+      select: { id: true, name: true, type: true, rootPath: true },
+    });
+    if (!project) return { error: "Воркспейс не найден" };
+
+    const root = project.rootPath || projectRoot(project.id);
+    let files: { path: string; type: string }[] = [];
+    try {
+      files = (await listWorkspaceTree(root)).entries;
+    } catch {
+      files = [];
+    }
+
+    const overwrite =
+      args.overwriteDockerfile === true || args.overwrite === true;
+
+    const packZip = async (): Promise<{ zipReady: boolean; zipBytes: number | null }> => {
+      try {
+        const zipPath = await exportProjectZip(root);
+        try {
+          const st = await fs.promises.stat(zipPath);
+          return { zipReady: true, zipBytes: st.size };
+        } finally {
+          await fs.promises.rm(zipPath, { force: true }).catch(() => {});
+        }
+      } catch {
+        return { zipReady: false, zipBytes: null };
+      }
+    };
+
+    const emptyTree = !hasBuildableAppFiles(files);
+
+    if (emptyTree) {
+      const zip = await packZip();
+      return neverPublished({
+        status: "empty",
+        published: false,
+        imageTag: null,
+        message: EMPTY_APP_BUILD_ERROR,
+        log: EMPTY_APP_BUILD_ERROR,
+        zipHint: DEPLOY_ZIP_HINT,
+        zipReady: zip.zipReady,
+        zipBytes: zip.zipBytes,
+        workspace: { id: project.id, name: project.name, type: project.type },
+      });
+    }
+
+    let dockerfileKind: string | null = null;
+    if (!hasDockerfile(files) || overwrite) {
+      const generated = await generateWorkspaceDockerfile(root, overwrite || !hasDockerfile(files));
+      if (generated.ok) {
+        dockerfileKind = generated.kind;
+      } else if (!generated.conflict) {
+        return neverPublished({
+          error: generated.error,
+          status: "failed",
+          published: false,
+          imageTag: null,
+          message: generated.error,
+        });
+      }
+    }
+
+    const build = await dockerBuildWorkspace(project.id, root);
+    const zip = await packZip();
+
+    let message: string;
+    if (build.status === "empty") {
+      message = build.error ?? EMPTY_APP_BUILD_ERROR;
+    } else if (build.status === "unavailable") {
+      message = build.log;
+    } else if (build.status === "built") {
+      message = DOCKER_BUILD_LOCAL_ONLY;
+    } else {
+      message = build.log || "docker build не удался. Образ не опубликован.";
+    }
+    if (!message.includes(DEPLOY_ZIP_HINT)) {
+      message = `${message}\n${DEPLOY_ZIP_HINT}`;
+    }
+
+    return neverPublished({
+      status: build.status,
+      published: false,
+      imageTag: build.imageTag,
+      log: build.log,
+      message,
+      dockerfileKind,
+      zipHint: DEPLOY_ZIP_HINT,
+      zipReady: zip.zipReady,
+      zipBytes: zip.zipBytes,
+      workspace: { id: project.id, name: project.name, type: project.type },
+    });
+  },
+};
+
 // ─────────────────────────── registry export ───────────────────────────
 
 /** Инструменты контента воркспейсов (Фаза A) — добавляются в TOOLS tools.ts. */
@@ -814,4 +968,5 @@ export const WORKSPACE_TOOLS: ToolDef[] = [
   createDocument,
   appendSection,
   rewriteSection,
+  deployProject,
 ];

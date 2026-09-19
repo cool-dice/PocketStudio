@@ -118,6 +118,7 @@ describe("agent tool registry", () => {
       "fetch_url",
       "web_search",
       "browser_read",
+      "deploy_project",
     ]) {
       expect(names).toContain(name);
     }

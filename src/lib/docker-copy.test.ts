@@ -5,8 +5,11 @@ import {
   DOCKERFILE_NOT_PUBLISHED,
   DOCKER_BUILD_LOCAL_ONLY,
   DOCKER_DAEMON_MISSING_LOG,
+  DEPLOY_APP_ONLY_ERROR,
+  DEPLOY_ZIP_HINT,
   EMPTY_APP_BUILD_ERROR,
   dockerCliMissingLog,
+  deployWrongTypeMessage,
   hasBuildableAppFiles,
   hasDockerfile,
   isScaffoldFile,
@@ -30,6 +33,18 @@ describe("deploy honesty copy", () => {
     expect(dockerCliMissingLog("abc12345", "/tmp/app")).toMatch(/docker build/i);
     expect(DOCKER_BUILD_LOCAL_ONLY).toMatch(/не публикация/i);
     expect(DOCKER_BUILD_LOCAL_ONLY).not.toMatch(FAKE_SUCCESS);
+  });
+
+  test("wrong-type copy names the studio and never claims publish", () => {
+    const book = deployWrongTypeMessage("book");
+    expect(book).toMatch(/книга/i);
+    expect(book).toMatch(/приложение/i);
+    expect(book).not.toMatch(FAKE_SUCCESS);
+    expect(DEPLOY_APP_ONLY_ERROR).toMatch(/приложение/i);
+    expect(DEPLOY_ZIP_HINT).toMatch(/не публикация/i);
+    expect(`${DEPLOY_APP_ONLY_ERROR}\n${DEPLOY_ZIP_HINT}`).not.toMatch(
+      FAKE_SUCCESS,
+    );
   });
 });
 

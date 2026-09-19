@@ -29,6 +29,28 @@ export const DOCKER_DAEMON_MISSING_LOG =
 export const DOCKER_BUILD_LOCAL_ONLY =
   "Образ собран локально. В реестр ничего не уходило — это не публикация.";
 
+export const DEPLOY_APP_ONLY_ERROR =
+  "Сборка Docker доступна только для воркспейсов типа «приложение». Книги, фильмы, музыка и универсальные студии так не деплоятся — скачайте ZIP на экране «Деплой». Это не публикация образа.";
+
+export const DEPLOY_ZIP_HINT =
+  "ZIP исходников можно скачать на экране «Деплой». Это архив, не публикация.";
+
+const TYPE_LABELS: Record<string, string> = {
+  film: "фильм",
+  book: "книга",
+  music: "музыка",
+  app: "приложение",
+  universal: "универсальный",
+};
+
+export function deployWrongTypeMessage(type: string): string {
+  const label = TYPE_LABELS[type] ?? type;
+  return (
+    `Сборка Docker доступна только для воркспейсов типа «приложение». ` +
+    `Этот воркспейс — «${label}». Скачайте ZIP на экране «Деплой» — это не публикация образа.`
+  );
+}
+
 export function dockerCliMissingLog(projectId: string, root: string): string {
   const tag = `pocketstudio/${projectId.slice(0, 8)}`;
   return (

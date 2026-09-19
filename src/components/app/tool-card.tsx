@@ -111,6 +111,11 @@ const TOOL_META: Record<string, ToolMeta> = {
     running: "Ищу в коде…",
     done: "Код",
   },
+  deploy_project: {
+    icon: FolderGit2,
+    running: "Готовлю сборку…",
+    done: "Сборка",
+  },
 };
 
 const FALLBACK_META: ToolMeta = {
@@ -264,6 +269,21 @@ function summarizeResult(tool: string, result: unknown): string | null {
       .filter(Boolean);
     const rest = hits.length > 3 ? " …" : "";
     return `${scope} · ${hits.length} фрагм.${titles.length ? `: ${titles.join(", ")}${rest}` : ""}`;
+  }
+
+  if (tool === "deploy_project") {
+    if (typeof r.message === "string" && r.message.trim()) {
+      return textPreview(r.message, 280);
+    }
+    if (typeof r.log === "string" && r.log.trim()) {
+      return textPreview(r.log, 280);
+    }
+    const status = typeof r.status === "string" ? r.status : null;
+    return status ? `Статус: ${status}` : null;
+  }
+
+  if (typeof r.message === "string" && r.message.trim()) {
+    return textPreview(r.message, 240);
   }
 
   return null;
