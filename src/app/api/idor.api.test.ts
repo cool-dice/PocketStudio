@@ -5,7 +5,9 @@ import { db } from "@/lib/db";
 
 import { GET as getWorkspace } from "./workspaces/[id]/route";
 import { GET as getNote } from "./notes/[id]/route";
+import { GET as listNotebook } from "./notes/route";
 import { POST as searchRag } from "./rag/search/route";
+import { GET as listOffers } from "./offers/route";
 import { GET as getThread, PATCH as patchThread, DELETE as deleteThread } from "./threads/[id]/route";
 import {
   GET as getDocument,
@@ -426,6 +428,93 @@ describe.skipIf(SKIP_PG)("IDOR: other user's ids are 404", () => {
     const still = await db.notification.findUnique({ where: { id: secret.id } });
     expect(still?.title).toBe("Секрет колокола");
     expect(still?.read).toBe(false);
+  });
+
+  test("offers projectId, note category/tag, rag projectId are 404 for another user", async () => {
+    await seedAttacker();
+    const ws = await db.project.create({
+      data: { userId: ownerId!, name: "Кабинет", type: "book" },
+    });
+    const offer = await db.offer.create({
+      data: {
+        userId: ownerId!,
+        projectId: ws.id,
+        title: "Секретный оффер",
+        priceCents: 1500,
+        currency: "RUB",
+        status: "listed",
+        paymentMode: "simulated",
+      },
+    });
+    const category = await db.category.create({
+      data: { userId: ownerId!, name: "Секрет", color: "stone", icon: "folder" },
+    });
+    const tag = await db.tag.create({
+      data: { userId: ownerId!, name: `маяк-${stamp}`, color: "stone" },
+    });
+
+    const stolenOffers = await listOffers(
+      jsonRequest(
+        `http://localhost/api/offers?projectId=${ws.id}`,
+        "GET",
+        undefined,
+        attackerToken!,
+      ),
+    );
+    expect(stolenOffers.status).toBe(404);
+    const stolenOffersJson = (await stolenOffers.json()) as {
+      error: string;
+      offers?: unknown;
+    };
+    expect(stolenOffersJson.offers).toBeUndefined();
+    expect(stolenOffersJson.error).toMatch(/не найден/i);
+    expect(JSON.stringify(stolenOffersJson)).not.toContain("Секретный оффер");
+    expect(JSON.stringify(stolenOffersJson)).not.toContain(offer.id);
+
+    const stolenCat = await listNotebook(
+      jsonRequest(
+        `http://localhost/api/notes?categoryId=${category.id}`,
+        "GET",
+        undefined,
+        attackerToken!,
+      ),
+    );
+    expect(stolenCat.status).toBe(404);
+    const stolenCatJson = (await stolenCat.json()) as {
+      error: string;
+      notes?: unknown;
+    };
+    expect(stolenCatJson.notes).toBeUndefined();
+    expect(stolenCatJson.error).toMatch(/не найден/i);
+
+    const stolenTag = await listNotebook(
+      jsonRequest(
+        `http://localhost/api/notes?tagId=${tag.id}`,
+        "GET",
+        undefined,
+        attackerToken!,
+      ),
+    );
+    expect(stolenTag.status).toBe(404);
+    const stolenTagJson = (await stolenTag.json()) as {
+      error: string;
+      notes?: unknown;
+    };
+    expect(stolenTagJson.notes).toBeUndefined();
+    expect(stolenTagJson.error).toMatch(/не найден/i);
+
+    const rag = await searchRag(
+      jsonRequest(
+        "http://localhost/api/rag/search",
+        "POST",
+        { query: "секретная", projectId: ws.id },
+        attackerToken!,
+      ),
+    );
+    expect(rag.status).toBe(404);
+    const ragJson = (await rag.json()) as { error: string; hits?: unknown };
+    expect(ragJson.hits).toBeUndefined();
+    expect(ragJson.error).toMatch(/не найден/i);
   });
 
   afterAll(async () => {

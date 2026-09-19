@@ -69,11 +69,29 @@ export async function GET(req: Request) {
   }
 
   const where: Prisma.NoteWhereInput = { userId: session.sub };
-  if (categoryId) where.categoryId = categoryId;
+  if (categoryId) {
+    const category = await db.category.findFirst({
+      where: { id: categoryId, userId: session.sub },
+      select: { id: true },
+    });
+    if (!category) {
+      return NextResponse.json({ error: "Категория не найдена" }, { status: 404 });
+    }
+    where.categoryId = categoryId;
+  }
   if (favorite) where.favorite = true;
   if (due) where.remindAt = { not: null, lte: new Date() };
   else if (reminders) where.remindAt = { not: null };
-  if (tagId) where.tags = { some: { tagId } };
+  if (tagId) {
+    const tag = await db.tag.findFirst({
+      where: { id: tagId, userId: session.sub },
+      select: { id: true },
+    });
+    if (!tag) {
+      return NextResponse.json({ error: "Тег не найден" }, { status: 404 });
+    }
+    where.tags = { some: { tagId } };
+  }
 
   if (projectId) {
     const owned = await db.project.findFirst({

@@ -56,7 +56,11 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
   const url = new URL(req.url);
-  const projectId = url.searchParams.get("projectId") ?? undefined;
+  const projectId = url.searchParams.get("projectId")?.trim() || undefined;
+  if (projectId) {
+    const check = await ensureWorkspace(req, projectId);
+    if (!check.ok) return check.response;
+  }
   const rows = await db.offer.findMany({
     where: {
       userId: session.sub,

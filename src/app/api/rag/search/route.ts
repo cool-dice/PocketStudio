@@ -49,7 +49,9 @@ export async function POST(req: Request) {
       where: { id: requested, userId: session.sub },
       select: { id: true },
     });
-    if (!owned) requested = null;
+    if (!owned) {
+      return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
+    }
   }
 
   const scope = resolveRetrieveScope({
