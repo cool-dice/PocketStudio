@@ -11,7 +11,7 @@ export const PROFILE_SAVED = "Имя обновлено";
 export const PROFILE_NOTHING_TO_SAVE = "Нечего сохранять";
 export const PROFILE_DIALOG_TITLE = "Профиль";
 export const PROFILE_DIALOG_HINT =
-  "Имя видите вы и оркестратор. Тема — на этом устройстве.";
+  "Имя видите вы и оркестратор. Тема — на этом устройстве. Пароль — только с текущим.";
 export const PROFILE_NAME_LABEL = "Отображаемое имя";
 export const PROFILE_THEME_LABEL = "Тема";
 export const PROFILE_OPEN = "Профиль";

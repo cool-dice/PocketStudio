@@ -40,3 +40,4 @@ behavior is reconstructed from `worklog.md` and already-migrated notebook code.
 - Live card network (adapter fields + UX exist; `PAYMENTS_API_KEY` still not a real Stripe charge)
 - 2-hour Netflix pipeline (badge only)
 - ffmpeg in this sandbox: used when present; otherwise canvas WebM
+- Email password reset: SMTP is not in the product. Profile can change a password with the current one; we do not fake a letter.
