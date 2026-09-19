@@ -20,6 +20,7 @@ import { GatewayError, isGatewayError } from "./errors";
 import { resolveToolRoute } from "./resolve";
 import type { AiToolId } from "./tools";
 import { recordChatUsage } from "./usage-log";
+import { parseAnalystFindings, type AnalystFindingDraft } from "../finding-quotes";
 import { composeImagePrompt, DOCUMENT_ANALYST_SYSTEM } from "./prompts";
 
 export { GatewayError, isGatewayError } from "./errors";
@@ -226,17 +227,7 @@ export async function aiTranscribe(
   return transcribeAudio(route, { buffer, mime });
 }
 
-type FindingType = "contradiction" | "omission" | "inconsistency";
-type FindingSeverity = "info" | "warning" | "critical";
-
-export interface AnalystFindingDraft {
-  type: FindingType;
-  severity: FindingSeverity;
-  title: string;
-  quote: string | null;
-  advice: string | null;
-  sourceRef: string | null;
-}
+export type { AnalystFindingDraft };
 
 export async function aiAnalyzeDocument(
   userId: string,
@@ -249,20 +240,7 @@ export async function aiAnalyzeDocument(
     DOCUMENT_ANALYST_SYSTEM,
     doc,
   );
-  if (!Array.isArray(raw)) return [];
-  const allowedTypes = ["contradiction", "omission", "inconsistency"];
-  const allowedSev = ["info", "warning", "critical"];
-  return raw
-    .filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null)
-    .map((f) => ({
-      type: (allowedTypes.includes(String(f.type)) ? f.type : "inconsistency") as FindingType,
-      severity: (allowedSev.includes(String(f.severity)) ? f.severity : "warning") as FindingSeverity,
-      title: String(f.title ?? "").slice(0, 300),
-      quote: f.quote ? String(f.quote).slice(0, 600) : null,
-      advice: f.advice ? String(f.advice).slice(0, 600) : null,
-      sourceRef: f.sourceRef ? String(f.sourceRef).slice(0, 200) : null,
-    }))
-    .filter((f) => f.title.length > 0);
+  return parseAnalystFindings(raw, doc);
 }
 
 export async function assertProjectOwner(

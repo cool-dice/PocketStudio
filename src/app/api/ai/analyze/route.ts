@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { aiAnalyzeDocument, aiErrorResponse } from "@/lib/ai";
+import { scheduleIndexFinding } from "@/lib/rag/hooks";
 import { ensureOwned } from "@/lib/workspace-api";
 import { findingDto } from "@/lib/workspace-shapes";
 
@@ -66,6 +67,7 @@ export async function POST(req: Request) {
         }),
       ),
     );
+    for (const row of created) scheduleIndexFinding(db, row.id);
 
     return NextResponse.json(
       { findings: created.map(findingDto), replaced: drafts.length },

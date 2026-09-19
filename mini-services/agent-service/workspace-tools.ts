@@ -30,6 +30,7 @@ import {
   DOCUMENT_ANALYST_SYSTEM,
   sectionSystemFor,
 } from "../../src/lib/ai/prompts";
+import { parseAnalystFindings } from "../../src/lib/finding-quotes";
 import {
   scheduleIndexArtifact,
   scheduleIndexEntity,
@@ -272,32 +273,8 @@ function extractJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-interface FindingDraft {
-  type: string;
-  severity: string;
-  title: string;
-  quote: string | null;
-  advice: string | null;
-  sourceRef: string | null;
-}
-
-function parseFindings(raw: string): FindingDraft[] {
-  const parsed = extractJson(raw);
-  if (!Array.isArray(parsed)) return [];
-  const types = ["contradiction", "omission", "inconsistency"];
-  const severities = ["info", "warning", "critical"];
-  return parsed
-    .filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null)
-    .map((f) => ({
-      type: types.includes(String(f.type)) ? String(f.type) : "inconsistency",
-      severity: severities.includes(String(f.severity)) ? String(f.severity) : "warning",
-      title: String(f.title ?? "").slice(0, 300),
-      quote: f.quote ? String(f.quote).slice(0, 600) : null,
-      advice: f.advice ? String(f.advice).slice(0, 600) : null,
-      sourceRef: f.sourceRef ? String(f.sourceRef).slice(0, 200) : null,
-    }))
-    .filter((f) => f.title.length > 0)
-    .slice(0, 8);
+function parseFindings(raw: string, documentText: string) {
+  return parseAnalystFindings(extractJson(raw), documentText);
 }
 
 const checkDocument: ToolDef = {
@@ -390,12 +367,12 @@ const checkDocument: ToolDef = {
       .slice(0, 60_000);
 
     // 3. LLM-анализ через шлюз (промпт как у Аналитика Next-стороны).
-    let drafts: FindingDraft[];
+    let drafts: ReturnType<typeof parseFindings>;
     try {
       const raw = await generateLLMResponse(DOCUMENT_ANALYST_SYSTEM, [
         { role: "user", content: docText },
       ], { userId, toolId: "document_check", jsonMode: true, signal: ctx.signal });
-      drafts = parseFindings(raw);
+      drafts = parseFindings(raw, docText);
     } catch (err) {
       if (isAbortFlag(err)) return abortedToolResult();
       return {
