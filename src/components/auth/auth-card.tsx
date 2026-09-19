@@ -2,7 +2,7 @@
 
 /**
  * AuthCard — tabs «Вход» / «Регистрация».
- * Used inside a Dialog (from the landing hero) and as a standalone view.
+ * Used on `/login` (landing CTAs go there instead of an inline dialog).
  */
 
 import {
@@ -26,6 +26,7 @@ import {
   inviteRoleLabel,
   type InviteLifecycle,
 } from "@/lib/invite-status";
+import { firstUserAdminHint } from "@/lib/landing-copy";
 
 type AuthTab = "login" | "register";
 
@@ -154,7 +155,9 @@ export function AuthCard({
                 : inviteRole
                   ? `Вас пригласили как ${inviteRoleLabel(inviteRole)}. Email должен совпадать с приглашением.`
                   : inviteRegisterCopy("ok")
-              : "Пара шагов — и мысли потекут"}
+              : ["Пара шагов — и мысли потекут.", firstUserAdminHint()]
+                  .filter(Boolean)
+                  .join(" ")}
         </p>
       </div>
 

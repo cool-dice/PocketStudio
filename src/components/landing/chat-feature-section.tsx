@@ -24,6 +24,11 @@ import {
 } from "lucide-react";
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
+import {
+  LANDING_CHAT_MOCK_LABEL,
+  LANDING_CHAT_MOCK_PILL,
+  LANDING_CHAT_SECTION,
+} from "@/lib/landing-copy";
 import { cn } from "@/lib/utils";
 
 const BULLETS: {
@@ -59,7 +64,7 @@ export function ChatFeatureSection() {
           <SectionHeader
             overline="Пульт управления"
             title="Диалог — главный пульт"
-            description="Не переключайтесь между редакторами и генераторами: оркестратор слушает, модули исполняют. Хостинг — Dockerfile и локальный preview, не чужой прод."
+            description={LANDING_CHAT_SECTION}
           />
           <ul className="space-y-6">
             {BULLETS.map((bullet, i) => (
@@ -90,14 +95,18 @@ export function ChatFeatureSection() {
 
 function ChatMock() {
   return (
-    <motion.div
+    <motion.figure
       initial={{ opacity: 0, y: 24 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-60px" }}
       transition={{ duration: 0.6, delay: 0.1, ease: "easeOut" }}
       className="relative mx-auto w-full max-w-md"
-      aria-hidden="true"
+      aria-label={LANDING_CHAT_MOCK_LABEL}
     >
+      <figcaption className="mb-3 text-center text-xs font-medium text-muted-foreground">
+        {LANDING_CHAT_MOCK_LABEL}
+      </figcaption>
+      <div className="relative mt-4" aria-hidden="true">
       {/* soft emerald glow behind the card */}
       <div className="absolute -inset-3 -z-10 rounded-[2rem] bg-primary/5 blur-2xl sm:-inset-6" />
 
@@ -109,6 +118,9 @@ function ChatMock() {
             <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
           </span>
           <span className="text-sm font-medium">Диалог со студией</span>
+          <span className="rounded-full border border-dashed px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            макет
+          </span>
           <span className="ml-auto rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-medium text-primary">
             режим «Действовать»
           </span>
@@ -199,7 +211,7 @@ function ChatMock() {
           </div>
 
           {/* composer */}
-          <div className="flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-xs text-muted-foreground">
+          <div className="pointer-events-none flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-xs text-muted-foreground">
             <span className="flex-1 truncate">
               Опишите задачу… или / для команд
             </span>
@@ -230,9 +242,10 @@ function ChatMock() {
         }}
       >
         <Coins className="size-3.5 text-primary" />
-        Первая продажа
+        {LANDING_CHAT_MOCK_PILL}
       </motion.div>
-    </motion.div>
+      </div>
+    </motion.figure>
   );
 }
 

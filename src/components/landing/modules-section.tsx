@@ -21,6 +21,11 @@ import {
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
 import {
+  LANDING_DEPLOY_BLURB,
+  LANDING_MCP_BLURB,
+  LANDING_MONETIZE_BLURB,
+} from "@/lib/landing-copy";
+import {
   AUDIO_LANDING_BLURB,
   DESIGN_LANDING_BLURB,
   VIDEO_LANDING_BLURB,
@@ -59,14 +64,12 @@ const MODULES: {
   {
     icon: Rocket,
     title: "Деплой",
-    description:
-      "Dockerfile и zip готовы. Сборка образа — если docker есть на машине, иначе честный статус «нет демона».",
+    description: LANDING_DEPLOY_BLURB,
   },
   {
     icon: Blocks,
     title: "Интеграции",
-    description:
-      "Fetch, файлы и браузер работают в чате. GitHub и другие stdio — сохранённый конфиг, не живой процесс.",
+    description: LANDING_MCP_BLURB,
   },
   {
     icon: Wand2,
@@ -76,8 +79,7 @@ const MODULES: {
   {
     icon: Coins,
     title: "Монетизация",
-    description:
-      "Офферы и кабинет выплат. Живая карта — когда ключ эквайера подключён (сейчас симуляция).",
+    description: LANDING_MONETIZE_BLURB,
   },
 ];
 

@@ -1,15 +1,22 @@
 "use client";
 
 /**
- * How it works — three steps from empty screen to published work,
- * plus the final CTA band that closes the page.
+ * How it works — three steps from empty screen to an offer in the studio,
+ * plus the final CTA band that closes the page (CTA → `/login?tab=register`).
  */
 
 import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
+import {
+  LANDING_HOW_DESCRIPTION,
+  LANDING_HOW_STEP3,
+  landingCtaBandNote,
+  landingCtaHref,
+} from "@/lib/landing-copy";
 
 const STEPS = [
   {
@@ -27,12 +34,11 @@ const STEPS = [
   {
     step: "3",
     title: "Соберите оффер и следите за кабинетом",
-    description:
-      "Цена и статус живут в студии. Живой эквайринг ещё не подключён — симуляция и пометка админа, не фейковый «ушло на хост».",
+    description: LANDING_HOW_STEP3,
   },
 ] as const;
 
-export function HowItWorksSection({ onRegister }: { onRegister: () => void }) {
+export function HowItWorksSection() {
   return (
     <>
       <section id="how-it-works" className="border-t">
@@ -40,7 +46,7 @@ export function HowItWorksSection({ onRegister }: { onRegister: () => void }) {
           <SectionHeader
             overline="Быстрый старт"
             title="Как это работает"
-            description="Три шага от пустого экрана до опубликованной работы — всё внутри одного диалога."
+            description={LANDING_HOW_DESCRIPTION}
           />
           <ol className="grid gap-6 sm:grid-cols-3">
             {STEPS.map((step, i) => (
@@ -69,13 +75,15 @@ export function HowItWorksSection({ onRegister }: { onRegister: () => void }) {
           </Reveal>
           <Reveal delay={0.16}>
             <p className="max-w-md text-pretty text-muted-foreground">
-              Регистрация занимает минуту — студия уже ждёт первую идею.
+              {landingCtaBandNote()}
             </p>
           </Reveal>
           <Reveal delay={0.24}>
-            <Button size="lg" onClick={onRegister}>
-              Создать аккаунт
-              <ArrowRight className="size-4" aria-hidden="true" />
+            <Button size="lg" asChild>
+              <Link href={landingCtaHref("register")}>
+                Создать аккаунт
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </Link>
             </Button>
           </Reveal>
         </div>

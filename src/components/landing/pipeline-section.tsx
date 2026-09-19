@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
+import { LANDING_PIPELINE_MONETIZE } from "@/lib/landing-copy";
 
 const STEPS: {
   step: string;
@@ -42,8 +43,7 @@ const STEPS: {
     step: "3",
     icon: Coins,
     title: "Монетизация",
-    description:
-      "Соберите оффер и кабинет выплат. Карточная сеть не подключена: статус «оплачено» ставит админ или симуляция.",
+    description: LANDING_PIPELINE_MONETIZE,
   },
 ];
 
