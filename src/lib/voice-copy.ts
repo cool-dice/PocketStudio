@@ -1,0 +1,43 @@
+/**
+ * Honest voice-capture copy. Failed ASR / denied mic is never «успешно записано».
+ */
+
+/** Stub the old z-ai SDK used to persist instead of a real transcript. */
+const FAKE_SUCCESS_RE = /^успешно записано\.?$/i;
+
+export const MIC_PERMISSION_DENIED = "Доступ к микрофону запрещён";
+export const MIC_NOT_FOUND = "Микрофон не найден";
+export const MIC_UNSUPPORTED_BROWSER =
+  "Запись голоса не поддерживается в этом браузере";
+export const MIC_UNSUPPORTED_AUDIO = "Браузер не поддерживает запись аудио";
+export const MIC_START_FAILED = "Не удалось начать запись";
+export const RECORDING_INACTIVE = "Запись не активна";
+export const RECORDING_TOO_SHORT =
+  "Запись слишком короткая — попробуйте ещё раз";
+export const RECORDING_PROCESS_FAILED =
+  "Не удалось обработать запись — попробуйте ещё раз";
+
+export const ASR_EMPTY =
+  "Не удалось распознать речь — попробуйте записать ещё раз";
+export const ASR_UNAVAILABLE =
+  "Сервис распознавания недоступен, попробуйте позже";
+export const ASR_GENERIC = "Не удалось распознать голос";
+export const VOICE_RECOGNIZED = "Голос распознан — проверьте текст";
+
+export function isUsableTranscript(text: string | null | undefined): boolean {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return false;
+  return !FAKE_SUCCESS_RE.test(trimmed);
+}
+
+export function voiceResultCopy(
+  transcript: string | null | undefined,
+):
+  | { ok: true; text: string; toast: typeof VOICE_RECOGNIZED }
+  | { ok: false; error: typeof ASR_EMPTY } {
+  const text = (transcript ?? "").trim();
+  if (!isUsableTranscript(text)) {
+    return { ok: false, error: ASR_EMPTY };
+  }
+  return { ok: true, text, toast: VOICE_RECOGNIZED };
+}

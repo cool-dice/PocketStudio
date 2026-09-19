@@ -33,6 +33,28 @@ describe.skipIf(SKIP_PG)("resolveToolRoute unconfigured", () => {
       await db.user.delete({ where: { id: user.id } }).catch(() => {});
     }
   });
+
+  test("ASR throws the same Russian admin message when no default exists", async () => {
+    const email = `resolve-asr-${Date.now().toString(36)}@example.test`;
+    const user = await db.user.create({
+      data: {
+        email,
+        name: "ResolveAsr",
+        passwordHash: "x",
+        role: "client",
+      },
+    });
+    try {
+      const route = await resolveToolRoute(db, user.id, "asr");
+      expect(route.model.capAsr).toBe(true);
+    } catch (err) {
+      expect(err).toBeInstanceOf(GatewayError);
+      expect((err as GatewayError).message).toBe(UNCONFIGURED_TOOL_MESSAGE);
+      expect((err as GatewayError).status).toBe(400);
+    } finally {
+      await db.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
 });
 
 describe("provider URL validation", () => {

@@ -35,6 +35,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
+import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
 
 /** ~12 rows of text-sm/leading-relaxed before the inner scrollbar kicks in. */
 const MAX_TEXTAREA_HEIGHT = 288;
@@ -98,24 +99,24 @@ function CaptureForm() {
         audioBase64: clip.audioBase64,
         mime: clip.mime,
       });
-      const text = (note.rawText ?? note.transcription ?? "").trim();
-      if (!text) {
-        toast.error("Не удалось распознать речь — попробуйте записать ещё раз");
+      const result = voiceResultCopy(note.rawText ?? note.transcription);
+      if (!result.ok) {
+        toast.error(result.error);
       } else {
         // Text goes INTO the textarea — the user reviews and saves manually.
         setValue((prev) => {
           const base = prev.trim();
-          const merged = base ? `${base}\n${text}` : text;
+          const merged = base ? `${base}\n${result.text}` : result.text;
           return merged.slice(0, MAX_NOTE_LENGTH);
         });
         taRef.current?.focus();
-        toast.success("Голос распознан — проверьте текст");
+        toast.success(result.toast);
       }
     } catch (err) {
       toast.error(
         err instanceof ApiError || err instanceof Error
           ? err.message
-          : "Не удалось распознать голос",
+          : ASR_GENERIC,
       );
     } finally {
       finalizingRef.current = false;
@@ -126,14 +127,14 @@ function CaptureForm() {
   const recorder = useVoiceRecorder({
     onAutoStop: (clip) => void finalizeRecording(clip),
   });
-  const { state: voiceState, elapsedMs, level, supported } = recorder;
+  const { state: voiceState, elapsedMs, level, supported, error: voiceError } = recorder;
   const isRecording = voiceState === "recording";
 
   const startRecording = async () => {
     try {
       await recorder.start();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось начать запись");
+      toast.error(err instanceof Error ? err.message : MIC_START_FAILED);
     }
   };
 
@@ -300,8 +301,15 @@ function CaptureForm() {
             </Button>
           )}
           {!isRecording && (
-            <p className="truncate text-[11px] leading-snug text-muted-foreground">
-              Enter — сохранить · Shift+Enter — перенос · Esc — отмена
+            <p
+              className={`truncate text-[11px] leading-snug ${
+                voiceError ? "text-destructive" : "text-muted-foreground"
+              }`}
+              role={voiceError ? "alert" : undefined}
+            >
+              {voiceError
+                ? voiceError
+                : "Enter — сохранить · Shift+Enter — перенос · Esc — отмена"}
             </p>
           )}
         </div>

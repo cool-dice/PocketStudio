@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { EMPTY_NOTE_ANALYSIS_MESSAGE, isUsableNoteText } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 
 export const dynamic = "force-dynamic";
@@ -24,10 +25,16 @@ export async function POST(req: Request, ctx: RouteContext) {
 
   const existing = await db.note.findFirst({
     where: { id, userId: session.sub },
-    select: { id: true },
+    select: { id: true, rawText: true },
   });
   if (!existing) {
     return NextResponse.json({ error: "Заметка не найдена" }, { status: 404 });
+  }
+  if (!isUsableNoteText(existing.rawText)) {
+    return NextResponse.json(
+      { error: EMPTY_NOTE_ANALYSIS_MESSAGE },
+      { status: 422 },
+    );
   }
 
   const note = await db.note.update({

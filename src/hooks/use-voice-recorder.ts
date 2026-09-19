@@ -23,6 +23,16 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  MIC_NOT_FOUND,
+  MIC_PERMISSION_DENIED,
+  MIC_START_FAILED,
+  MIC_UNSUPPORTED_AUDIO,
+  MIC_UNSUPPORTED_BROWSER,
+  RECORDING_INACTIVE,
+  RECORDING_PROCESS_FAILED,
+  RECORDING_TOO_SHORT,
+} from "@/lib/voice-copy";
 
 export type VoiceRecorderState =
   | "idle"
@@ -176,15 +186,13 @@ async function blobToWav16kMonoBase64(blob: Blob): Promise<string> {
   try {
     audioBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
   } catch {
-    throw new VoiceCaptureError(
-      "Не удалось обработать запись — попробуйте ещё раз",
-    );
+    throw new VoiceCaptureError(RECORDING_PROCESS_FAILED);
   } finally {
     void decodeCtx.close().catch(() => undefined);
   }
 
   if (audioBuffer.duration < 0.25 || audioBuffer.length === 0) {
-    throw new VoiceCaptureError("Запись слишком короткая — попробуйте ещё раз");
+    throw new VoiceCaptureError(RECORDING_TOO_SHORT);
   }
 
   const mono = mixDownToMono(audioBuffer);
@@ -324,7 +332,7 @@ export function useVoiceRecorder(options?: {
   const doStop = useCallback(async (): Promise<VoiceClip> => {
     const recorder = recorderRef.current;
     if (stateRef.current !== "recording" || !recorder) {
-      throw new VoiceCaptureError("Запись не активна");
+      throw new VoiceCaptureError(RECORDING_INACTIVE);
     }
 
     const startedAt = startedAtRef.current;
@@ -355,7 +363,7 @@ export function useVoiceRecorder(options?: {
       teardown(); // release tracks + analyser context
 
       if (blob.size === 0) {
-        throw new VoiceCaptureError("Запись слишком короткая — попробуйте ещё раз");
+        throw new VoiceCaptureError(RECORDING_TOO_SHORT);
       }
       const audioBase64 = await blobToWav16kMonoBase64(blob);
       return { audioBase64, mime: "audio/wav", durationMs };
@@ -366,7 +374,7 @@ export function useVoiceRecorder(options?: {
       const message =
         err instanceof VoiceCaptureError
           ? err.message
-          : "Не удалось обработать запись — попробуйте ещё раз";
+          : RECORDING_PROCESS_FAILED;
       setError(message);
       throw new VoiceCaptureError(message);
     }
@@ -395,13 +403,13 @@ export function useVoiceRecorder(options?: {
     setLevel(0);
 
     if (!isRecorderSupported()) {
-      const message = "Запись голоса не поддерживается в этом браузере";
+      const message = MIC_UNSUPPORTED_BROWSER;
       setError(message);
       throw new VoiceCaptureError(message);
     }
     const mime = pickMimeType();
     if (!mime) {
-      const message = "Браузер не поддерживает запись аудио";
+      const message = MIC_UNSUPPORTED_AUDIO;
       setError(message);
       throw new VoiceCaptureError(message);
     }
@@ -424,10 +432,10 @@ export function useVoiceRecorder(options?: {
         name === "NotAllowedError" ||
         name === "SecurityError" ||
         name === "PermissionDeniedError"
-          ? "Доступ к микрофону запрещён"
+          ? MIC_PERMISSION_DENIED
           : name === "NotFoundError" || name === "DevicesNotFoundError"
-            ? "Микрофон не найден"
-            : "Не удалось начать запись";
+            ? MIC_NOT_FOUND
+            : MIC_START_FAILED;
       setError(message);
       throw new VoiceCaptureError(message);
     }
@@ -448,7 +456,7 @@ export function useVoiceRecorder(options?: {
     } catch {
       stream.getTracks().forEach((track) => track.stop());
       applyState("idle");
-      const message = "Не удалось начать запись";
+      const message = MIC_START_FAILED;
       setError(message);
       throw new VoiceCaptureError(message);
     }

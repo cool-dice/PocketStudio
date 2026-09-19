@@ -5,6 +5,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { aiErrorResponse, aiTranscribe } from "@/lib/ai";
 import { noteWithCategory } from "@/lib/note-utils";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
+import { ASR_EMPTY, ASR_UNAVAILABLE, isUsableTranscript } from "@/lib/voice-copy";
 
 /**
  * POST /api/notes/voice — voice capture.
@@ -70,21 +71,15 @@ export async function POST(req: Request) {
     const audioBuffer = Buffer.from(audioBase64, "base64");
     text = (await aiTranscribe(session.sub, audioBuffer, mime)).trim();
   } catch (err) {
-    const mapped = aiErrorResponse(
-      err,
-      "Сервис распознавания недоступен, попробуйте позже",
-    );
+    const mapped = aiErrorResponse(err, ASR_UNAVAILABLE);
     if (mapped.status >= 500) {
       console.error("[voice] ASR failed:", err instanceof Error ? err.message : err);
     }
     return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 
-  if (!text) {
-    return NextResponse.json(
-      { error: "Не удалось распознать речь — попробуйте записать ещё раз" },
-      { status: 422 },
-    );
+  if (!isUsableTranscript(text)) {
+    return NextResponse.json({ error: ASR_EMPTY }, { status: 422 });
   }
 
   if (text.length > MAX_NOTE_LENGTH) {

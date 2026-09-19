@@ -27,6 +27,10 @@ import {
   CATEGORY_COLORS,
   CATEGORY_ICONS,
 } from "./tools";
+import {
+  EMPTY_NOTE_ANALYSIS_MESSAGE,
+  isUsableNoteText,
+} from "../../src/lib/note-analysis";
 
 const ANALYSIS_POLL_MS = 5000;
 const BATCH_PER_TICK = 2;
@@ -204,6 +208,28 @@ async function analyzeNote(noteId: string): Promise<void> {
   });
   if (!note || note.status !== "pending") return;
 
+  const text = (note.rawText ?? "").trim().slice(0, MAX_NOTE_TEXT_CHARS);
+  if (!isUsableNoteText(text)) {
+    await db.note.update({
+      where: { id: noteId },
+      data: {
+        status: "error",
+        errorMessage: EMPTY_NOTE_ANALYSIS_MESSAGE,
+        updatedAt: new Date(),
+      },
+    });
+    await createNotification(
+      io,
+      note.userId,
+      "analysis_ready",
+      "Анализ заметки не удался",
+      EMPTY_NOTE_ANALYSIS_MESSAGE,
+      noteId,
+    );
+    await emitNote(noteId);
+    return;
+  }
+
   // → processing
   console.log(`[analyzer] note ${noteId.slice(-6)} → processing`);
   await db.note.update({
@@ -211,8 +237,6 @@ async function analyzeNote(noteId: string): Promise<void> {
     data: { status: "processing", errorMessage: null, updatedAt: new Date() },
   });
   io.to(`user:${note.userId}`).emit("note:analyzing", { noteId });
-
-  const text = (note.rawText ?? "").trim().slice(0, MAX_NOTE_TEXT_CHARS);
 
   // Build the user message: existing categories context (for reuse).
   const categories = await db.category.findMany({

@@ -403,6 +403,8 @@ export const api = {
     return request<{ note: Note }>("/api/notes/voice", {
       method: "POST",
       body: JSON.stringify(data),
+      // Slightly above server ASR timeout so the gateway 504 wins when it can.
+      timeoutMs: 95_000,
     }).then((r) => r.note);
   },
 

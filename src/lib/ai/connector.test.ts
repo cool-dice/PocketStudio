@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { chatCompletion, createEmbeddings, generateImage, synthesizeSpeech } from "./connector";
+import {
+  chatCompletion,
+  createEmbeddings,
+  generateImage,
+  synthesizeSpeech,
+  transcribeAudio,
+} from "./connector";
 import type { ResolvedRoute } from "./connector";
 import { GatewayError } from "./errors";
 import { pickCandidate, type LoadedCandidate } from "./resolve";
@@ -162,6 +168,52 @@ describe("Anthropic messages", () => {
       expect((err as GatewayError).message).toMatch(/эмбеддинг/i);
     }
   });
+
+  test("ASR fails with a clear Russian error", async () => {
+    try {
+      await transcribeAudio(anthropicRoute, { buffer: Buffer.from("wav") });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(GatewayError);
+      expect((err as GatewayError).message).toMatch(/распознавать речь|Anthropic/);
+    }
+  });
+});
+
+describe("OpenAI ASR", () => {
+  test("returns trimmed transcript text", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("https://api.openai.com/v1/audio/transcriptions");
+      return jsonResponse({ text: "  маяк в тумане  " });
+    }) as typeof fetch;
+    const text = await transcribeAudio(openaiRoute, {
+      buffer: Buffer.from("wav"),
+      mime: "audio/wav",
+    });
+    expect(text).toBe("маяк в тумане");
+  });
+
+  test("empty provider payload is an empty string, not success prose", async () => {
+    globalThis.fetch = (async () => jsonResponse({})) as typeof fetch;
+    const text = await transcribeAudio(openaiRoute, { buffer: Buffer.from("wav") });
+    expect(text).toBe("");
+  });
+
+  test("timeout becomes a Russian 504", async () => {
+    globalThis.fetch = (async () => {
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      throw err;
+    }) as typeof fetch;
+    try {
+      await transcribeAudio(openaiRoute, { buffer: Buffer.from("wav") });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(GatewayError);
+      expect((err as GatewayError).status).toBe(504);
+      expect((err as GatewayError).message).toMatch(/вовремя/);
+    }
+  });
 });
 
 describe("OpenAI embeddings", () => {
@@ -255,6 +307,18 @@ describe("pickCandidate", () => {
         userId: "u1",
         override: null,
         platformDefault: null,
+      }),
+    ).toThrow(UNCONFIGURED_TOOL_MESSAGE);
+  });
+
+  test("ASR without a capable model uses the same unconfigured message", () => {
+    expect(() =>
+      pickCandidate({
+        toolId: "asr",
+        capability: "asr",
+        userId: "u1",
+        override: null,
+        platformDefault: candidate({ providerUserId: null, capAsr: false }),
       }),
     ).toThrow(UNCONFIGURED_TOOL_MESSAGE);
   });

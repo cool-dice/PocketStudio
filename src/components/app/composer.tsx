@@ -43,6 +43,7 @@ import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
+import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
 
 const MAX_HEIGHT = 200;
 
@@ -263,24 +264,24 @@ export function Composer({
         audioBase64: clip.audioBase64,
         mime: clip.mime,
       });
-      const text = (note.rawText ?? note.transcription ?? "").trim();
-      if (!text) {
-        toast.error("Не удалось распознать речь — попробуйте записать ещё раз");
+      const result = voiceResultCopy(note.rawText ?? note.transcription);
+      if (!result.ok) {
+        toast.error(result.error);
       } else {
         // Append to whatever is already typed — the user reviews and sends.
         setValue((prev) => {
           const base = prev.trim();
-          const merged = base ? `${base} ${text}` : text;
+          const merged = base ? `${base} ${result.text}` : result.text;
           return merged.slice(0, MAX_MESSAGE_LENGTH);
         });
         taRef.current?.focus();
-        toast.success("Голос распознан — проверьте текст");
+        toast.success(result.toast);
       }
     } catch (err) {
       toast.error(
         err instanceof ApiError || err instanceof Error
           ? err.message
-          : "Не удалось распознать голос",
+          : ASR_GENERIC,
       );
     } finally {
       finalizingRef.current = false;
@@ -298,7 +299,7 @@ export function Composer({
     try {
       await recorder.start();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось начать запись");
+      toast.error(err instanceof Error ? err.message : MIC_START_FAILED);
     }
   };
 

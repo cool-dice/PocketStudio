@@ -54,6 +54,10 @@ import {
   categoryColorStyle,
 } from "@/lib/category-style";
 import { api } from "@/lib/api";
+import {
+  ANALYSIS_FAILED_FALLBACK,
+  EMPTY_ANALYSIS_BLOCKS_MESSAGE,
+} from "@/lib/note-analysis";
 import type { Note, NoteProjectLink, NoteStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -550,7 +554,7 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
               <p className="mt-2.5 text-sm leading-relaxed text-foreground/80">
                 {note.errorMessage
                   ? textPreview(note.errorMessage, 220)
-                  : "Анализ завершился с ошибкой. Попробуйте запустить его ещё раз."}
+                  : ANALYSIS_FAILED_FALLBACK}
               </p>
               <Button
                 variant="outline"
@@ -710,8 +714,7 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
                     variants={blockVariants}
                     className="rounded-xl border border-dashed bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground"
                   >
-                    Анализ завершился, но блоки пусты. Попробуйте
-                    переанализировать заметку.
+                    {EMPTY_ANALYSIS_BLOCKS_MESSAGE}
                   </motion.p>
                 )}
               </motion.div>
