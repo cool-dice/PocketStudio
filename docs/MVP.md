@@ -266,14 +266,16 @@ Bookmark/share обязательны (бывшая «опциональная W
 
 ```bash
 cp .env.example .env
+docker compose up -d postgres
 bun install
-bunx prisma generate && bunx prisma db push
+bunx prisma generate && bun run db:push
 bun run dev          # Next :3000
 bun run dev:agent    # агент :3003 (или POST /api/health/agent-service)
 bun test
 ```
 
 Первый пользователь = admin. Ключи ИИ — в Админ → Модели ИИ, не в `.env`.
+Хранилище — **PostgreSQL + pgvector**, не SQLite.
 
 Не коммитить: `.env`, `db/custom.db*`, секреты.
 
@@ -306,7 +308,7 @@ ROADMAP помечает визуальные волны ✅. По коду на
 
 - **Живое:** auth JWT, чат, блокнот, воркспейсы API, документы+ИИ главы, картинки, TTS, DAW, раскадровка+WebM, Dockerfile+zip, MCP builtin, шлюз OpenAI/Anthropic, админ ИИ.
 - **Было спрятано/урезано — вернуть:** скиллы, URL-роутинг, избранное/дубли/архив воркспейса, растр/макет, NLE-lite, кабинет монетизации, iframe preview, onboarding/quest, инвайты.
-- **Честный leftover их доков (не наша философия):** курсор-стиль клик-по-DOM в превью — **сделан** как инспектор iframe + «Попросить агента». Полный hot-reload пользовательского Next **упирается в отсутствие dev-сервера** в песочнице (кнопка «Обновить» перезагружает static HTML). RAG/pgvector → `retrieve_canon`. BullMQ/Gitea не тащим. Проверка занятости имени «PocketStudio» — вне кода. Live-эквайринг — поля UX есть, сеть карт нет.
+- **Честный leftover их доков (не наша философия):** курсор-стиль клик-по-DOM в превью — **сделан** как инспектор iframe + «Попросить агента». Полный hot-reload пользовательского Next **упирается в отсутствие dev-сервера** в песочнице (кнопка «Обновить» перезагружает static HTML). **SQLite не прод-хранилище.** RAG/pgvector **в продукте**: главный чат знает канон всех воркспейсов пользователя; чат воркспейса (в т.ч. личный кодер в «Приложение») не выходит за `Project.id`. BullMQ/Gitea не тащим. Проверка занятости имени «PocketStudio» — вне кода. Live-эквайринг — поля UX есть, сеть карт нет.
 
 ---
 
@@ -317,5 +319,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | F0 | План переписан: срезы отменены, полный скоуп по ROADMAP/UI/worklog |
 | 2026-09-19 | F1–F15 | Скиллы в БД+промпт, `/w/[id]` `/login`, избранное/дубли/архив, растр+макет, NLE-lite, офферы/выплаты simulated, docker build, iframe preview, onboarding, инвайты |
 | 2026-09-19 | Prompts + proto port | Аудит промптов (`docs/PROMPTS.md`), retrieve_canon/apply_patch, инспектор DOM, теги/напоминания/график блокнота, ffmpeg-сборка если есть, брендинг PocketStudio |
+| 2026-09-19 | Postgres + RAG | SQLite снят с продукта. Prisma PostgreSQL + pgvector `RagChunk`. Главный чат vs воркспейс. Личный кодер изолирован. |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

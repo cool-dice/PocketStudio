@@ -8,7 +8,7 @@ Inventory of every LLM surface. Winners are implemented in
 
 | ID | Where | What won | Why |
 |---|---|---|---|
-| `identity` | `IDENTITY_BLOCK` | PocketStudio «штурман студии», chat-first | Proto2 Analyst interview (7 stages) is too slow for a cockpit. PocketStudio identity was already the right voice; compressed sidebar tour. |
+| `identity` | `IDENTITY_BLOCK` + `RAG_GLOBAL_BLOCK` / `RAG_WORKSPACE_BLOCK` | PocketStudio «штурман студии», chat-first, RAG isolation | Proto2 Analyst interview (7 stages) is too slow for a cockpit. PocketStudio identity was already the right voice; compressed sidebar tour. |
 | `json_tool_contract` | `JSON_TOOL_CONTRACT` | One `{"tool","args"}` per turn + one few-shot | Proto2 used native tool-calling in the worker. Product already parses JSON; few-shot reduces fence/chained-object errors without bloating. |
 | `output_prose` | `OUTPUT_PROSE_CONTRACT` | Short Russian (user language) prose | Matches UI. Internal JSON keys stay English. |
 
@@ -27,7 +27,7 @@ Inventory of every LLM surface. Winners are implemented in
 
 ## Agent tools added to the prompt
 
-`retrieve_canon`, `apply_patch`, `tag_note`, `set_reminder` — user-visible proto gaps without pgvector/Gitea.
+`retrieve_canon` / `retrieve_code` (pgvector RAG + keyword fallback in the same scope), `apply_patch`, `tag_note`, `set_reminder`.
 
 ## Mode merge (proto2 → PocketStudio)
 

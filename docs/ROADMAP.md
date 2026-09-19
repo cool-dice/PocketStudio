@@ -222,12 +222,12 @@ welcome-чипы открывают воркспейсы; промпт аген�
 
 ### Из proto2 (Aiflow / AI Studio)
 - [x] Мультиагентный пайплайн Analyst → Planner → Coder → Reviewer — режимы + субагенты оркестратора (промпты слиты)
-- [x] RAG по файлам проекта — `retrieve_canon` (SQLite substring)
+- [x] RAG по файлам и канону — pgvector `RagChunk`, скоуп главный чат vs воркспейс (личный кодер в app не видит чужие репо)
 - [x] Cursor-стиль выбора элементов в превью — инспектор iframe + «Попросить агента»
 - [x] In-browser preview приложения (iframe static HTML; hot-reload dev-сервера нет в песочнице)
 - [x] Модели-роутер (выбор модели под задачу) → в единый AI-интерфейс
 - [x] Registry-proxy → в модуль Деплоя (Dockerfile + docker build)
-- [x] BullMQ-воркеры → in-process очередь (SQLite analyzer)
+- [x] BullMQ-воркеры → in-process очередь (analyzer + RAG index-on-write)
 - [x] Gitea-интеграция → уже заменена локальным git
 
 ### Из vb.md (экосистема Vibe — собираем в PocketStudio, а не в микрофронтенды)

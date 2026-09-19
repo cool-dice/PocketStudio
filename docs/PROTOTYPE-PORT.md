@@ -2,8 +2,7 @@
 
 `prototypes/proto1` is an **empty directory** in this repo. Proto1 (VibeMind)
 behavior is reconstructed from `worklog.md` and already-migrated notebook code.
-`prototypes/proto2/Aiflow-main` is present; infrastructure (Gitea, BullMQ,
-pgvector, Docker sandboxes) stays replaced per `worklog.md`.
+`prototypes/proto2/Aiflow-main` is present; Gitea, BullMQ, and Docker sandboxes stay replaced per `worklog.md`. **PostgreSQL + pgvector RAG is required** (not a leftover toy): main chat sees the current user's workspaces; workspace chat never leaves that `Project.id`. A personal coder in an app workspace must not see another repo.
 
 ## proto1 VibeMind
 
@@ -28,7 +27,7 @@ pgvector, Docker sandboxes) stays replaced per `worklog.md`.
 | iframe preview | Already static HTML; **click-to-inspect DOM + “ask agent”** added (фаза E lite) |
 | Hot-reload of a Next dev server | **Impossible here** without a per-user daemon. Inspector has «Обновить» for static HTML. |
 | apply-patch | **Ported** as `apply_patch` (exact replace + tiny unified diff) |
-| RAG / pgvector | **Replaced** with `retrieve_canon` (SQLite substring over notes/sections/entities) |
+| RAG / pgvector | **In product** — `RagChunk` + retrieve scoped by user/workspace. SQLite substring leftover replaced. |
 | Gitea | Keep local git |
 | BullMQ | Keep in-process analyzer poll |
 | MCP | Builtin adapters already; stdio honest “saved, not started” |
