@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
+import { remainingAdminsAfterDemote } from "./admin-role-lock";
 import {
   LAST_ADMIN_DELETE,
   LAST_ADMIN_DEMOTE,
+  MAX_ADMIN_USERS,
   ROLE_CHANGE_FAILED,
   SELF_ROLE_CHANGE,
   USERS_EMPTY,
@@ -19,6 +21,7 @@ import {
   roleChangeError,
   roleChangedToast,
   toPublicAdminUserListItem,
+  usersPageHasMore,
 } from "./admin-users-copy";
 
 const FAKE_HASH = "$2b$10$LEAKMEPASSWORDHASH99abcdefghijklmnopqrstuv";
@@ -49,6 +52,13 @@ describe("admin users list empty vs error vs loading vs 403", () => {
     expect(adminUsersListView(false, USERS_FORBIDDEN, 4)).toBe("forbidden");
     expect(adminUsersListView(false, null, 0)).toBe("empty");
     expect(adminUsersListView(false, null, 2)).toBe("ready");
+  });
+
+  test("hasMore is true only when the fetch overflowed the 500 cap", () => {
+    expect(MAX_ADMIN_USERS).toBe(500);
+    expect(usersPageHasMore(500, MAX_ADMIN_USERS)).toBe(false);
+    expect(usersPageHasMore(501, MAX_ADMIN_USERS)).toBe(true);
+    expect(usersPageHasMore(0, MAX_ADMIN_USERS)).toBe(false);
   });
 
   test("HTTP 403 maps to forbidden copy, not empty and not a generic 500", () => {
@@ -120,6 +130,12 @@ describe("last-admin demotion guard", () => {
       }),
     ).toBeNull();
     expect(roleChangeError("self")).toBe(SELF_ROLE_CHANGE);
+  });
+
+  test("remaining admin count after one demote never goes below the last admin", () => {
+    expect(remainingAdminsAfterDemote(1)).toBe(0);
+    expect(remainingAdminsAfterDemote(2)).toBe(1);
+    expect(remainingAdminsAfterDemote(2)).toBeGreaterThanOrEqual(1);
   });
 
   test("role-change toast copy is Russian and distinct from the failure string", () => {

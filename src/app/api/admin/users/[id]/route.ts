@@ -4,7 +4,9 @@
 //
 // Guards:
 //   PATCH  — never yourself («Нельзя изменить собственную роль»);
-//            demoting the LAST admin is refused (409).
+//            demoting the LAST admin is refused (409). Admin rows are
+//            locked FOR UPDATE so two concurrent last-admin demotes
+//            cannot both commit.
 //   DELETE — never yourself; workspace dirs are removed best-effort;
 //            the audit log keeps the trace (userId SetNull).
 // Both actions are audit-logged as admin.role_change / admin.user_delete.
@@ -20,6 +22,7 @@ import {
   roleChangeBlock,
   roleChangeError,
 } from "@/lib/admin-users-copy";
+import { lockAndCountAdmins } from "@/lib/admin-role-lock";
 import { publicUserDto } from "@/lib/user-dto";
 import { removeProjectDir } from "@/lib/workspace";
 
@@ -53,6 +56,7 @@ export async function PATCH(
   let updated;
   try {
     const result = await db.$transaction(async (tx) => {
+      const adminCount = await lockAndCountAdmins(tx);
       const target = await tx.user.findUnique({
         where: { id },
         select: {
@@ -67,7 +71,6 @@ export async function PATCH(
       if (!target) {
         throw Object.assign(new Error("not-found"), { code: "NOT_FOUND" });
       }
-      const adminCount = await tx.user.count({ where: { role: "admin" } });
       const block = roleChangeBlock({
         actorId: guard.userId,
         targetId: target.id,
@@ -90,6 +93,14 @@ export async function PATCH(
           onboardingDone: true,
         },
       });
+      const demotingAdmin =
+        target.role === "admin" && parsed.data.role === "client";
+      if (demotingAdmin) {
+        const remaining = await tx.user.count({ where: { role: "admin" } });
+        if (remaining < 1) {
+          throw Object.assign(new Error("last-admin"), { code: "last-admin" });
+        }
+      }
       return { from: target.role, user: row };
     });
     fromRole = result.from;

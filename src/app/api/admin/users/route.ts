@@ -4,21 +4,22 @@
 //   ?role=  — 'admin' | 'client'
 //
 // Counts and last-activity come from 3 groupBy queries (notes / threads /
-// projects), then everything is merged in JS. Personal-scale scope.
+// projects), then everything is merged in JS. Personal-scale cap 500;
+// JSON has hasMore when the unfiltered fetch overflowed. UI does not paginate yet.
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
 import { lastActivityOf } from "@/lib/admin-activity";
 import {
+  MAX_ADMIN_USERS,
   ROLE_PARAM_INVALID,
   USERS_LOAD_ERROR,
   toPublicAdminUserListItem,
+  usersPageHasMore,
 } from "@/lib/admin-users-copy";
 
 export const dynamic = "force-dynamic";
-
-const MAX_USERS = 500;
 
 export async function GET(req: Request) {
   const guard = await requireAdmin(req);
@@ -39,7 +40,7 @@ export async function GET(req: Request) {
     [users, noteAgg, threadAgg, projectAgg] = await Promise.all([
     db.user.findMany({
       orderBy: { createdAt: "desc" },
-      take: MAX_USERS,
+      take: MAX_ADMIN_USERS + 1,
       select: {
         id: true,
         email: true,
@@ -70,11 +71,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: USERS_LOAD_ERROR }, { status: 500 });
   }
 
+  const hasMore = usersPageHasMore(users.length, MAX_ADMIN_USERS);
+  const page = hasMore ? users.slice(0, MAX_ADMIN_USERS) : users;
+
   const noteBy = new Map(noteAgg.map((a) => [a.userId, a]));
   const threadBy = new Map(threadAgg.map((a) => [a.userId, a]));
   const projectBy = new Map(projectAgg.map((a) => [a.userId, a]));
 
-  const list = users
+  const list = page
     .filter((u) => (role ? u.role === role : true))
     .filter((u) =>
       q ? u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) : true,
@@ -100,5 +104,5 @@ export async function GET(req: Request) {
       });
     });
 
-  return NextResponse.json({ users: list });
+  return NextResponse.json({ users: list, hasMore });
 }

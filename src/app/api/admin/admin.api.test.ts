@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 
 import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { lockAndCountAdmins, remainingAdminsAfterDemote } from "@/lib/admin-role-lock";
 import {
   LAST_ADMIN_DEMOTE,
   SELF_ROLE_CHANGE,
@@ -92,9 +93,11 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
     expect(statsJson.error).toMatch(/администратор/i);
     const usersJson = (await users.json()) as {
       users?: unknown;
+      hasMore?: unknown;
       error: string;
     };
     expect(usersJson.users).toBeUndefined();
+    expect(usersJson.hasMore).toBeUndefined();
     expect(usersJson.error).toMatch(/администратор/i);
     expect(JSON.stringify(usersJson)).not.toMatch(/passwordHash|\$2[aby]\$/i);
     const auditJson = (await audit.json()) as {
@@ -152,8 +155,11 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
     expect(usersRes.status).toBe(200);
     const usersJson = (await usersRes.json()) as {
       users: { id: string; lastActivity: string | null; counts: { notes: number } }[];
+      hasMore: boolean;
     };
     expect(JSON.stringify(usersJson)).not.toMatch(/passwordHash|\$2[aby]\$/i);
+    expect(usersJson.hasMore).toBe(false);
+    expect(usersJson.users.length).toBeLessThanOrEqual(500);
     for (const row of usersJson.users) {
       expect(row).not.toHaveProperty("passwordHash");
     }
@@ -402,5 +408,136 @@ describe.skipIf(SKIP_PG)("admin stats / users / audit / AI providers", () => {
       (await db.user.findUnique({ where: { id: adminA.id }, select: { role: true } }))
         ?.role,
     ).toBe("admin");
+  });
+
+  test("sequential last-two demotes: second is 409 and unique admin count stays >= 1", async () => {
+    const passwordHash = await hashPassword("password-ok");
+    const adminA = await db.user.create({
+      data: {
+        name: "Админ lock A",
+        email: `admin-lock-a-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminA.id);
+    const adminB = await db.user.create({
+      data: {
+        name: "Админ lock B",
+        email: `admin-lock-b-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminB.id);
+
+    const tokenA = await tokenFor(adminA);
+    const before = await db.$transaction((tx) => lockAndCountAdmins(tx));
+    expect(before).toBeGreaterThanOrEqual(2);
+
+    const first = await adminPatchUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminB.id}`, tokenA, {
+        method: "PATCH",
+        body: { role: "client" },
+      }),
+      { params: Promise.resolve({ id: adminB.id }) },
+    );
+    expect(first.status).toBe(200);
+
+    const afterFirst = await db.$transaction((tx) => lockAndCountAdmins(tx));
+    expect(afterFirst).toBe(remainingAdminsAfterDemote(before));
+    expect(afterFirst).toBeGreaterThanOrEqual(1);
+    expect(
+      (await db.user.findUnique({ where: { id: adminB.id }, select: { role: true } }))
+        ?.role,
+    ).toBe("client");
+
+    const extras = afterFirst - 1; // admins besides A
+    const second = await adminPatchUser(
+      jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, tokenA, {
+        method: "PATCH",
+        body: { role: "client" },
+      }),
+      { params: Promise.resolve({ id: adminA.id }) },
+    );
+    expect(second.status).toBe(409);
+    const secondJson = (await second.json()) as { user?: unknown; error: string };
+    expect(secondJson.user).toBeUndefined();
+    expect(secondJson.error).toBe(
+      extras === 0 ? LAST_ADMIN_DEMOTE : SELF_ROLE_CHANGE,
+    );
+    expect(
+      (await db.user.findUnique({ where: { id: adminA.id }, select: { role: true } }))
+        ?.role,
+    ).toBe("admin");
+
+    const afterSecond = await db.$transaction((tx) => lockAndCountAdmins(tx));
+    expect(afterSecond).toBe(afterFirst);
+    expect(afterSecond).toBeGreaterThanOrEqual(1);
+  });
+
+  test("parallel peer demotes cannot leave zero admins", async () => {
+    const passwordHash = await hashPassword("password-ok");
+    const adminA = await db.user.create({
+      data: {
+        name: "Админ race A",
+        email: `admin-race-a-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminA.id);
+    const adminB = await db.user.create({
+      data: {
+        name: "Админ race B",
+        email: `admin-race-b-${stamp}@example.test`,
+        passwordHash,
+        role: "admin",
+      },
+    });
+    ids.push(adminB.id);
+
+    const tokenA = await tokenFor(adminA);
+    const tokenB = await tokenFor(adminB);
+    const others = await db.user.count({
+      where: { role: "admin", id: { notIn: [adminA.id, adminB.id] } },
+    });
+
+    const [r1, r2] = await Promise.all([
+      adminPatchUser(
+        jsonRequest(`http://localhost/api/admin/users/${adminB.id}`, tokenA, {
+          method: "PATCH",
+          body: { role: "client" },
+        }),
+        { params: Promise.resolve({ id: adminB.id }) },
+      ),
+      adminPatchUser(
+        jsonRequest(`http://localhost/api/admin/users/${adminA.id}`, tokenB, {
+          method: "PATCH",
+          body: { role: "client" },
+        }),
+        { params: Promise.resolve({ id: adminA.id }) },
+      ),
+    ]);
+
+    const remaining = await db.$transaction((tx) => lockAndCountAdmins(tx));
+    expect(remaining).toBeGreaterThanOrEqual(1);
+
+    const pairAdmins = await db.user.count({
+      where: { role: "admin", id: { in: [adminA.id, adminB.id] } },
+    });
+    if (others === 0) {
+      expect(pairAdmins).toBe(1);
+      const statuses = [r1.status, r2.status].sort((a, b) => a - b);
+      expect(statuses).toEqual([200, 409]);
+      const winner = r1.status === 200 ? r1 : r2;
+      const loser = r1.status === 409 ? r1 : r2;
+      const winnerJson = (await winner.json()) as { user: { role: string } };
+      expect(winnerJson.user.role).toBe("client");
+      const loserJson = (await loser.json()) as { error: string };
+      expect(loserJson.error).toBe(LAST_ADMIN_DEMOTE);
+    } else {
+      expect(remaining).toBeGreaterThanOrEqual(others);
+    }
   });
 });

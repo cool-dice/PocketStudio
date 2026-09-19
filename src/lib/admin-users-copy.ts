@@ -23,6 +23,17 @@ export const USER_NOT_FOUND = "Пользователь не найден";
 export const ROLE_CHANGE_FAILED = "Не удалось изменить роль";
 export const ROLE_PARAM_INVALID = "Параметр role должен быть admin или client";
 
+/** Personal-scale cap; GET /api/admin/users fetches cap+1 so hasMore is honest. */
+export const MAX_ADMIN_USERS = 500;
+
+/** Caller fetched `max + 1` rows. */
+export function usersPageHasMore(
+  fetchedCount: number,
+  max: number = MAX_ADMIN_USERS,
+): boolean {
+  return fetchedCount > max;
+}
+
 export type AdminUsersListView =
   | "loading"
   | "error"
