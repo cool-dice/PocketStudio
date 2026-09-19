@@ -1,6 +1,6 @@
 // PocketStudio agent — LLM access layer + tool-call parsing.
 // Chat goes through the shared OpenAI/Anthropic gateway (src/lib/ai).
-// The SDK has no native function calling, so:
+// Native provider function-calling is not used, so:
 //   - the full reply is fetched here and chunked by the transport layer
 //     (server.ts) for a streaming feel;
 //   - tools are called through a JSON protocol: the system prompt

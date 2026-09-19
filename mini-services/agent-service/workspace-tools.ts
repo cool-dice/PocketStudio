@@ -367,7 +367,7 @@ const checkDocument: ToolDef = {
       .join("\n\n")
       .slice(0, 60_000);
 
-    // 3. LLM-анализ (свой SDK, промпт как у Аналитика Next-стороны).
+    // 3. LLM-анализ через шлюз (промпт как у Аналитика Next-стороны).
     let drafts: FindingDraft[];
     try {
       const raw = await generateLLMResponse(ANALYST_SYSTEM, [
