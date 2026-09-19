@@ -7,6 +7,7 @@ import {
   emptyLayout,
   emptyRaster,
   parseDesignPayload,
+  tryParseDesignPayload,
 } from "@/lib/design-model";
 
 export const dynamic = "force-dynamic";
@@ -65,10 +66,17 @@ export async function PUT(req: Request, { params }: Params) {
     );
   }
   const mode = parsed.data.mode ?? "raster";
+  const normalized = tryParseDesignPayload(parsed.data.payload);
+  if (!normalized) {
+    return NextResponse.json(
+      { error: "Некорректный документ дизайна — не сохраняю, чтобы не затереть холст" },
+      { status: 400 },
+    );
+  }
   const existing = await db.designDoc.findFirst({
     where: { projectId: id, mode },
   });
-  const payload = JSON.stringify(parsed.data.payload ?? {});
+  const payload = JSON.stringify(normalized);
   const doc = existing
     ? await db.designDoc.update({
         where: { id: existing.id },

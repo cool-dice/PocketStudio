@@ -46,7 +46,7 @@ import { useAppUi } from "@/lib/store";
 
 const MAX_HEIGHT = 200;
 
-export function Composer() {
+export function Composer({ locked = false }: { locked?: boolean }) {
   const { busy, sendMessage, activeThread, updateThreadMode } = useThreads();
   const { getById } = useProjects();
   const openProject = useAppUi((s) => s.openProject);
@@ -78,13 +78,13 @@ export function Composer() {
 
   useEffect(() => {
     const pending = pendingAutoSend.current;
-    if (!pending || busy || !activeThread) return;
+    if (!pending || busy || locked || !activeThread) return;
     const have = activeThread.projectId ?? null;
     if (pending.projectId !== have) return;
     pendingAutoSend.current = null;
     setValue("");
     void sendMessage(pending.text);
-  }, [activeThread, busy, sendMessage]);
+  }, [activeThread, busy, locked, sendMessage]);
 
   const boundProject = getById(activeThread?.projectId ?? null);
 
@@ -299,7 +299,8 @@ export function Composer() {
     ta.style.height = `${Math.min(ta.scrollHeight, MAX_HEIGHT)}px`;
   }, [value]);
 
-  const canSend = !busy && !isRecording && value.trim().length > 0;
+  const blocked = busy || locked;
+  const canSend = !blocked && !isRecording && value.trim().length > 0;
 
   const submit = async () => {
     if (!canSend) return;
@@ -353,7 +354,7 @@ export function Composer() {
         }}
       >
         <SlashCommandsMenu
-          open={slashOpen && filteredCommands.length > 0 && !busy && !isRecording}
+          open={slashOpen && filteredCommands.length > 0 && !blocked && !isRecording}
           commands={filteredCommands}
           selectedIndex={slashIndex}
           onSelectIndex={setSlashIndex}
@@ -386,11 +387,13 @@ export function Composer() {
             placeholder={
               isRecording
                 ? "Слушаем вас…"
-                : busy
-                  ? "Студия печатает…"
-                  : "Напишите сообщение… или / для команд"
+                : locked && !busy
+                  ? "Подключаем чат воркспейса…"
+                  : blocked
+                    ? "Студия печатает…"
+                    : "Напишите сообщение… или / для команд"
             }
-            disabled={busy || isRecording}
+            disabled={blocked || isRecording}
             maxLength={MAX_MESSAGE_LENGTH}
             className="vf-scroll max-h-[200px] min-h-11 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
@@ -401,7 +404,7 @@ export function Composer() {
               variant="ghost"
               size="icon"
               onClick={() => void startRecording()}
-              disabled={busy}
+              disabled={blocked}
               className="size-11 shrink-0 self-center rounded-xl text-muted-foreground transition-colors duration-150 hover:text-foreground"
               aria-label="Записать голос"
               aria-pressed={false}
@@ -476,7 +479,9 @@ export function Composer() {
             ? "Идёт запись голоса"
             : voiceState === "processing"
               ? "Распознаём голос…"
-              : busy
+              : locked && !busy
+                ? "Подключаем чат воркспейса…"
+                : blocked
                 ? "Агент отвечает — подождите немного"
                 : "Enter — отправить · Shift+Enter — новая строка · / — команды"}
         </p>

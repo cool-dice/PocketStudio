@@ -106,7 +106,7 @@ export function providerDto(row: ProviderRow): ProviderPublicDto {
     visibleToUsers: row.visibleToUsers,
     markupPercent: row.markupPercent,
     markupMultiplier: row.markupMultiplier,
-    extraHeaders: row.extraHeaders,
+    extraHeaders: null,
     isPlatform: row.userId == null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

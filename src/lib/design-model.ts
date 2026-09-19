@@ -98,20 +98,54 @@ export function emptyLayout(width = 800, height = 600): LayoutDoc {
   };
 }
 
+export function tryParseDesignPayload(raw: unknown): DesignPayload | null {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const doc = parsed as Partial<DesignPayload>;
+  if (doc.kind === "raster" && Array.isArray(doc.layers)) {
+    const layers = doc.layers.filter(
+      (layer): layer is RasterLayer =>
+        Boolean(layer) &&
+        typeof layer.id === "string" &&
+        typeof layer.name === "string" &&
+        typeof layer.dataUrl === "string",
+    );
+    if (layers.length === 0) return null;
+    const width = typeof doc.width === "number" && doc.width > 0 ? doc.width : 800;
+    const height = typeof doc.height === "number" && doc.height > 0 ? doc.height : 600;
+    const activeLayerId =
+      typeof doc.activeLayerId === "string" && layers.some((l) => l.id === doc.activeLayerId)
+        ? doc.activeLayerId
+        : layers[0]!.id;
+    return { kind: "raster", width, height, layers, activeLayerId };
+  }
+  if (doc.kind === "layout" && Array.isArray(doc.frames)) {
+    const frames = doc.frames.filter(
+      (frame): frame is LayoutFrame =>
+        Boolean(frame) && typeof frame.id === "string" && typeof frame.name === "string",
+    );
+    if (frames.length === 0) return null;
+    const width = typeof doc.width === "number" && doc.width > 0 ? doc.width : 800;
+    const height = typeof doc.height === "number" && doc.height > 0 ? doc.height : 600;
+    const selectedId =
+      typeof doc.selectedId === "string" && frames.some((f) => f.id === doc.selectedId)
+        ? doc.selectedId
+        : frames[0]!.id;
+    return { kind: "layout", width, height, frames, selectedId };
+  }
+  return null;
+}
+
 export function parseDesignPayload(
   raw: string,
   mode: "raster" | "layout",
 ): DesignPayload {
-  try {
-    const parsed = JSON.parse(raw) as Partial<DesignPayload>;
-    if (parsed && parsed.kind === "raster" && Array.isArray(parsed.layers)) {
-      return parsed as RasterDoc;
-    }
-    if (parsed && parsed.kind === "layout" && Array.isArray(parsed.frames)) {
-      return parsed as LayoutDoc;
-    }
-  } catch {
-    // fall through
-  }
-  return mode === "layout" ? emptyLayout() : emptyRaster();
+  return tryParseDesignPayload(raw) ?? (mode === "layout" ? emptyLayout() : emptyRaster());
 }

@@ -191,9 +191,7 @@ export function WorkspaceChatTab({
               <h2 className="truncate text-sm font-semibold">
                 Оркестратор воркспейса «{workspace.title}»
               </h2>
-              <RagScopeBadge
-                scope={activeThread?.projectId ? "workspace" : "global"}
-              />
+              <RagScopeBadge scope="workspace" />
               <StageBadge stage="beta" />
             </div>
             <p className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -285,8 +283,8 @@ export function WorkspaceChatTab({
       </div>
 
       {/* ── Живой план + композер ── */}
-      <PlanCard tasks={tasks} busy={busy} phase={phase} />
-      <Composer />
+      <PlanCard tasks={isScoped ? tasks : []} busy={busy} phase={isScoped ? phase : null} />
+      <Composer locked={!isScoped} />
 
       <span aria-live="polite" className="sr-only">
         {busy ? "Оркестратор печатает" : ""}

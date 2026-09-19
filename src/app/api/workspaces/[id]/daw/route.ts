@@ -20,6 +20,14 @@ type DawRow = {
   updatedAt: Date;
 };
 
+function parseTracksJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw || "[]");
+  } catch {
+    return [];
+  }
+}
+
 function rowToDto(row: DawRow): DawProjectDto {
   const state = normalizeDawState({
     bpm: row.bpm,
@@ -27,7 +35,7 @@ function rowToDto(row: DawRow): DawProjectDto {
     masterVolume: row.masterVolume,
     transpose: row.transpose,
     metronome: row.metronome,
-    tracks: JSON.parse(row.tracks || "[]"),
+    tracks: parseTracksJson(row.tracks),
   });
   return {
     id: row.id,

@@ -52,3 +52,16 @@ describe("applyUnifiedDiff", () => {
     ).toThrow(PatchError);
   });
 });
+
+describe("workspace path stay inside the project", () => {
+  test("safeJoin rejects parent traversal", async () => {
+    const { safeJoin, WorkspaceError, projectRoot } = await import("./workspace");
+    const root = projectRoot("proj_ok");
+    expect(() => safeJoin(root, "../secret")).toThrow(WorkspaceError);
+    expect(() => safeJoin(root, "foo/../../etc/passwd")).toThrow(WorkspaceError);
+    expect(() => safeJoin(root, "/etc/passwd")).not.toThrow();
+    const inside = safeJoin(root, "/etc/passwd");
+    expect(inside.startsWith(root)).toBe(true);
+    expect(inside.includes("..")).toBe(false);
+  });
+});

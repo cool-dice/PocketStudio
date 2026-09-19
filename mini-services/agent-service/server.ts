@@ -68,6 +68,8 @@ const PROMPT_COMMITS = 5; // recent commits embedded in the system prompt
 const AUTO_CHECKPOINT_MESSAGE = "Агент: изменения за ход";
 const FALLBACK_REPLY =
   "Я обработал запрос, но что-то пошло не так — попробуйте переформулировать.";
+const TOOL_LOOP_CAP_REPLY =
+  "Достигнут лимит шагов инструментов за один ход. Напишите «продолжи», и я закончу с того места, где остановился.";
 const PLAN_MAX_TASKS = 20;
 const PLAN_MAX_TEXT_CHARS = 200;
 const REVIEWER_BUDGET_MS = 30000; // min remaining turn budget to run the reviewer
@@ -932,7 +934,9 @@ async function runAgentTurn(
     // 5. Final answer (or the fallback when the loop ended without text).
     //    Plan-mode answers may carry a ```план fence → save as Task rows.
     //    Done BEFORE streaming so the card appears with the answer.
-    let answerText = finalText ?? FALLBACK_REPLY;
+    let answerText =
+      finalText ??
+      (toolCallsSucceeded > 0 ? TOOL_LOOP_CAP_REPLY : FALLBACK_REPLY);
     if (thread.mode === "plan" && finalText) {
       const plan = parsePlanFence(answerText);
       if (plan) {

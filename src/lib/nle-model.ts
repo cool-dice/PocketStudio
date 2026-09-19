@@ -61,19 +61,34 @@ export function emptyTimeline(fps = 24): NleTimeline {
   };
 }
 
-export function parseTimeline(raw: string): NleTimeline {
-  try {
-    const parsed = JSON.parse(raw) as Partial<NleTimeline>;
-    if (parsed && Array.isArray(parsed.tracks) && parsed.tracks.length > 0) {
-      return {
-        fps: typeof parsed.fps === "number" ? parsed.fps : 24,
-        tracks: parsed.tracks as NleTrack[],
-      };
+export function tryParseTimeline(raw: unknown): NleTimeline | null {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
     }
-  } catch {
-    // fall through
   }
-  return emptyTimeline();
+  if (!parsed || typeof parsed !== "object") return null;
+  const doc = parsed as Partial<NleTimeline>;
+  if (!Array.isArray(doc.tracks) || doc.tracks.length === 0) return null;
+  const tracks = doc.tracks.filter(
+    (track): track is NleTrack =>
+      Boolean(track) &&
+      typeof track.id === "string" &&
+      typeof track.name === "string" &&
+      Array.isArray(track.clips),
+  );
+  if (tracks.length === 0) return null;
+  return {
+    fps: typeof doc.fps === "number" && doc.fps >= 12 && doc.fps <= 60 ? doc.fps : 24,
+    tracks,
+  };
+}
+
+export function parseTimeline(raw: string): NleTimeline {
+  return tryParseTimeline(raw) ?? emptyTimeline();
 }
 
 export function timelineDuration(tl: NleTimeline): number {

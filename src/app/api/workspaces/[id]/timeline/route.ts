@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
-import { emptyTimeline, parseTimeline } from "@/lib/nle-model";
+import { emptyTimeline, parseTimeline, tryParseTimeline } from "@/lib/nle-model";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +47,15 @@ export async function PUT(req: Request, { params }: Params) {
       { status: 400 },
     );
   }
-  const timeline = JSON.stringify(parsed.data.timeline ?? emptyTimeline());
-  const fps = parsed.data.fps ?? 24;
+  const normalized = tryParseTimeline(parsed.data.timeline ?? emptyTimeline());
+  if (!normalized) {
+    return NextResponse.json(
+      { error: "Некорректный таймлайн — не сохраняю, чтобы не затереть монтаж" },
+      { status: 400 },
+    );
+  }
+  const timeline = JSON.stringify(normalized);
+  const fps = parsed.data.fps ?? normalized.fps;
   const row = await db.videoProject.upsert({
     where: { projectId: id },
     create: { projectId: id, fps, timeline },
