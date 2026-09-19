@@ -63,7 +63,7 @@ setInterval(() => {
 // hot-reload flapping) must EXIT — otherwise the watchdog interval keeps
 // the process alive as a zombie and the supervisor cannot clean up.
 try {
-  await import("./server.ts");
+  await import("./server");
 } catch (err) {
   console.error("[bootstrap] server failed to start:", err);
   process.exit(1);

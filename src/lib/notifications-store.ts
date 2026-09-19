@@ -18,6 +18,7 @@
 
 import { create } from "zustand";
 
+import { api } from "@/lib/api";
 import { mergeNotification } from "@/lib/notification-merge";
 import type { Notification } from "@/lib/types";
 

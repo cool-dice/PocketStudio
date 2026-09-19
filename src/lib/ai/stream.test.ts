@@ -122,7 +122,7 @@ describe("OpenAI SSE chat", () => {
     const result = await chatCompletionStream(
       openaiRoute,
       [{ role: "user", content: "hi" }],
-      { onDelta: (d) => deltas.push(d) },
+      { onDelta: (d) => { deltas.push(d); } },
     );
     expect(deltas).toEqual(["Hel", "lo"]);
     expect(result.text).toBe("Hello");
@@ -203,7 +203,7 @@ describe("Anthropic SSE chat", () => {
         { role: "system", content: "sys" },
         { role: "user", content: "hi" },
       ],
-      { onDelta: (d) => deltas.push(d) },
+      { onDelta: (d) => { deltas.push(d); } },
     );
     expect(deltas).toEqual(["при", "вет"]);
     expect(result.text).toBe("привет");

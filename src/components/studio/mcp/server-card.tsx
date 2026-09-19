@@ -36,7 +36,7 @@ const CATEGORY_TONE: Record<McpServerDto["category"], string> = {
 };
 
 function StatusBadge({ server }: { server: McpServerDto }) {
-  if (server.runtimeStatus === "cli_missing" || (server.enabled && server.adapter === "browser" && server.runtimeStatus === "cli_missing")) {
+  if (server.runtimeStatus === "cli_missing") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
         <CloudOff className="size-3" aria-hidden="true" />
@@ -44,7 +44,7 @@ function StatusBadge({ server }: { server: McpServerDto }) {
       </span>
     );
   }
-  if (server.enabled && !server.external && server.runtimeStatus !== "cli_missing") {
+  if (server.enabled && !server.external) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
         <Check className="size-3" aria-hidden="true" />

@@ -36,6 +36,7 @@ import {
   scheduleIndexFinding,
   scheduleIndexSection,
 } from "../../src/lib/rag/hooks";
+import type { ToolContext, ToolDef } from "./tools";
 
 // ─────────────────────────── shared helpers ───────────────────────────
 
