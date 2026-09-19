@@ -12,7 +12,7 @@ import type {
   AiModelDto,
   AiProviderDto,
   AiToolDefaultDto,
-  AuditLogEntry,
+  AuditLogPage,
   Category,
   Tag,
   CheckpointResult,
@@ -783,10 +783,11 @@ export const api = {
     );
   },
 
-  adminAudit(limit = 50): Promise<AuditLogEntry[]> {
-    return request<{ entries: AuditLogEntry[] }>(
-      `/api/admin/audit?limit=${limit}`,
-    ).then((r) => r.entries);
+  adminAudit(limit = 50, offset = 0): Promise<AuditLogPage> {
+    const qs = new URLSearchParams();
+    qs.set("limit", String(limit));
+    if (offset > 0) qs.set("offset", String(offset));
+    return request<AuditLogPage>(`/api/admin/audit?${qs.toString()}`);
   },
 
   adminAiProviders(): Promise<AiProviderDto[]> {

@@ -358,6 +358,11 @@ export interface AuditLogEntry {
   user: { name: string; email: string } | null;
 }
 
+export interface AuditLogPage {
+  entries: AuditLogEntry[];
+  hasMore: boolean;
+}
+
 /* ── AI providers (admin + user settings) ── */
 
 export type AiProviderKind = "openai_compatible" | "anthropic_compatible";

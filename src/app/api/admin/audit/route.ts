@@ -1,9 +1,15 @@
-// GET /api/admin/audit?limit=50 — recent audit trail (who did what, when).
-// → { entries: [{id, action, entity, entityId, createdAt, user | null}] }
+// GET /api/admin/audit?limit=30&offset=0 — recent audit trail.
+// → { entries, hasMore }. Never returns meta / API keys.
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
+import {
+  AUDIT_LOAD_ERROR,
+  auditPageHasMore,
+  parseAuditPage,
+  toPublicAuditEntry,
+} from "@/lib/audit-copy";
 
 export const dynamic = "force-dynamic";
 
@@ -12,46 +18,38 @@ export async function GET(req: Request) {
   if (!guard.ok) return guard.response;
 
   const url = new URL(req.url);
-  const limitRaw = url.searchParams.get("limit");
-  let limit = 50;
-  if (limitRaw !== null && limitRaw !== "") {
-    const n = Number(limitRaw);
-    if (!Number.isInteger(n) || n < 1 || n > 200) {
-      return NextResponse.json(
-        { error: "Параметр limit должен быть целым числом от 1 до 200" },
-        { status: 400 },
-      );
-    }
-    limit = n;
+  const page = parseAuditPage(
+    url.searchParams.get("limit"),
+    url.searchParams.get("offset"),
+  );
+  if (!page.ok) {
+    return NextResponse.json({ error: page.error }, { status: 400 });
   }
 
-  let entries;
+  let rows;
   try {
-    entries = await db.auditLog.findMany({
+    rows = await db.auditLog.findMany({
       orderBy: { createdAt: "desc" },
-      take: limit,
-      include: {
+      skip: page.offset,
+      take: page.limit + 1,
+      select: {
+        id: true,
+        action: true,
+        entity: true,
+        entityId: true,
+        createdAt: true,
         user: { select: { name: true, email: true } },
       },
     });
   } catch {
     console.error("[admin/audit] failed");
-    return NextResponse.json(
-      { error: "Не удалось загрузить журнал" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: AUDIT_LOAD_ERROR }, { status: 500 });
   }
 
+  const hasMore = auditPageHasMore(rows.length, page.limit);
+  const slice = hasMore ? rows.slice(0, page.limit) : rows;
   return NextResponse.json({
-    entries: entries.map((e) => ({
-      id: e.id,
-      action: e.action,
-      entity: e.entity,
-      entityId: e.entityId,
-      createdAt: e.createdAt.toISOString(),
-      user: e.user
-        ? { name: e.user.name, email: e.user.email }
-        : null,
-    })),
+    entries: slice.map(toPublicAuditEntry),
+    hasMore,
   });
 }

@@ -10,7 +10,8 @@
  *  - Users: searchable, role-filterable list with per-user counters and
  *    last activity; actions — promote/demote (guarded server-side) and
  *    delete (AlertDialog + workspace dir cleanup server-side).
- *  Plus the recent audit trail (who did what, when).
+ *  Plus the recent audit trail (who did what, when) — own empty / error /
+ *  loading / 403 states; rows never include raw meta or API keys.
  *
  * Non-admins with a stale session see an access notice (the REST layer
  * refuses with 403 anyway — the DB role is the source of truth).
@@ -40,6 +41,7 @@ import {
 import { toast } from "sonner";
 
 import { AdminAiPanel } from "@/components/app/admin-ai-panel";
+import { AdminAuditPanel } from "@/components/app/admin-audit-panel";
 import { AdminInvitesPanel } from "@/components/app/admin-invites-panel";
 import { AdminOffersPanel } from "@/components/app/admin-offers-panel";
 import { AdminPayoutsPanel } from "@/components/app/admin-payouts-panel";
@@ -73,7 +75,6 @@ import { api, ApiError } from "@/lib/api";
 import type {
   AdminStats,
   AdminUserListItem,
-  AuditLogEntry,
   Role,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -90,11 +91,11 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
-  const [audit, setAudit] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [usersError, setUsersError] = useState<string | null>(null);
+  const [auditRefresh, setAuditRefresh] = useState(0);
 
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("");
@@ -103,15 +104,14 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<AdminTab>("overview");
 
-  /* ── Initial load: stats + audit (users load through the filter effect) ── */
+  /* ── Initial load: stats (audit has its own panel + refreshNonce) ── */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [s, a] = await Promise.all([api.adminStats(), api.adminAudit(30)]);
+        const s = await api.adminStats();
         if (!cancelled) {
           setStats(s);
-          setAudit(a);
         }
       } catch (err) {
         if (!cancelled) {
@@ -159,10 +159,10 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
   const refreshAll = async () => {
     setRefreshing(true);
     try {
-      const [s, a] = await Promise.all([api.adminStats(), api.adminAudit(30)]);
+      const s = await api.adminStats();
       setStats(s);
-      setAudit(a);
       setError(null);
+      setAuditRefresh((n) => n + 1);
       await loadUsers(query, roleFilter);
     } catch (err) {
       const message =
@@ -187,10 +187,10 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
           : `${u.name} теперь обычный пользователь`,
       );
       // The admins counter + audit trail changed — silently resync.
-      void Promise.all([api.adminStats(), api.adminAudit(30)])
-        .then(([s, a]) => {
+      void api.adminStats()
+        .then((s) => {
           setStats(s);
-          setAudit(a);
+          setAuditRefresh((n) => n + 1);
         })
         .catch(() => {});
     } catch (err) {
@@ -210,10 +210,10 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
       setUsers((prev) => prev.filter((x) => x.id !== deleteTarget.id));
       toast.success(`Пользователь ${deleteTarget.name} удалён`);
       setDeleteTarget(null);
-      void Promise.all([api.adminStats(), api.adminAudit(30)])
-        .then(([s, a]) => {
+      void api.adminStats()
+        .then((s) => {
           setStats(s);
-          setAudit(a);
+          setAuditRefresh((n) => n + 1);
         })
         .catch(() => {});
     } catch (err) {
@@ -584,40 +584,7 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
               </div>
 
               {/* ── Audit trail ── */}
-              <div className="rounded-2xl border bg-card p-4 sm:p-6">
-                <h2 className="text-sm font-semibold">Журнал событий</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  последние {audit.length} записей — входы, регистрации и
-                  действия администраторов
-                </p>
-                <ul className="mt-3">
-                  {audit.length === 0 ? (
-                    <li className="py-6 text-center text-sm text-muted-foreground">
-                      Журнал пока пуст
-                    </li>
-                  ) : (
-                    audit.map((e) => (
-                      <li
-                        key={e.id}
-                        className="flex items-center gap-2 border-b py-2.5 text-sm last:border-b-0"
-                      >
-                        <Badge
-                          variant={e.action.startsWith("admin.") ? "default" : "secondary"}
-                          className="shrink-0 rounded-full px-1.5 font-mono text-[10px]"
-                        >
-                          {e.action}
-                        </Badge>
-                        <span className="min-w-0 truncate text-xs text-muted-foreground">
-                          {e.user ? `${e.user.name} · ${e.user.email}` : "система"}
-                        </span>
-                        <span className="ml-auto shrink-0 text-[11px] text-muted-foreground/80">
-                          {relativeTime(e.createdAt)}
-                        </span>
-                      </li>
-                    ))
-                  )}
-                </ul>
-              </div>
+              <AdminAuditPanel refreshNonce={auditRefresh} />
             </>
           ) : null}
         </div>
