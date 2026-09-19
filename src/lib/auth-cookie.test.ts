@@ -4,6 +4,7 @@ import {
   attachSessionCookie,
   getUserFromRequest,
   signSession,
+  verifyToken,
 } from "./auth";
 import {
   LEGACY_SESSION_COOKIE,
@@ -61,6 +62,22 @@ describe("session cookie branding", () => {
       }),
     );
     expect(payload?.sub).toBe("bearer-user");
+  });
+});
+
+describe("signSession", () => {
+  test("re-issue in the same second gets a distinct token (jti)", async () => {
+    const payload = {
+      sub: "user-jti",
+      email: "jti@example.test",
+      name: "Jti",
+      role: "client" as const,
+    };
+    const a = await signSession(payload);
+    const b = await signSession(payload);
+    expect(a).not.toBe(b);
+    expect((await verifyToken(a, "session"))?.sub).toBe("user-jti");
+    expect((await verifyToken(b, "session"))?.sub).toBe("user-jti");
   });
 });
 

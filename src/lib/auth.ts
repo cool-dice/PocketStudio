@@ -30,6 +30,7 @@ export async function signSession(payload: SessionPayload): Promise<string> {
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)
     .setIssuedAt()
+    .setJti(crypto.randomUUID())
     .setAudience("session")
     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
     .sign(secretKey);
