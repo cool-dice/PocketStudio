@@ -324,6 +324,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Design/NLE/DAW persist | PUT→GET round-trip; invalid JSON 400 without wipe; empty timeline/DAW export honest; empty canvas save OK; `?doc=` restores last manuscript |
 | 2026-09-19 | Documents + Code holes | Откат главы возвращает текст и переиндексирует RAG; история — строки API; `?doc=` / missing id → 404 не 500; write vs rewrite; чекпоинты list/create/restore только этого Project.id; zip владельца; iframe `running: false`; Monaco save → RAG |
 | 2026-09-19 | Restore + file RAG | `git reset --hard` ставит в очередь переиндекс файлов проекта и чистит чанки удалённых путей; чекпоинт эмбеддинги не снапшотит; вкладка картинок отличает пустую галерею от ошибки загрузки |
-| 2026-09-19 | Entities + portraits | CRUD только владельца (IDOR 404); портрет через image-tool, UNCONFIGURED по-русски без фейковой картинки; сбой генерации не затирает прошлый портрет; save → RAG, delete → purge чанков; empty/error карточки не выглядят как «в мире нет персонажей» |
+| 2026-09-19 | Entity sheet meta | Атрибуты, теги и связи на карточке правятся и пишутся в PATCH (JSON-колонки + EntityLink); битый JSON 400 без затирания; save → RAG; IDOR 404 |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

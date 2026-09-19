@@ -258,6 +258,197 @@ describe.skipIf(SKIP_PG)("entities: CRUD, IDOR, portrait, RAG", () => {
     expect(still?.name).toBe("Марина Л.");
   });
 
+  test("owner PATCH attributes/tags/links; junk JSON does not wipe; IDOR 404", async () => {
+    const owner = await seedUser("meta");
+    const attacker = await seedUser("meta-atk");
+    const attrMarker = `entity-attr-${stamp}-foghorn`;
+    const marina = await db.entity.create({
+      data: {
+        projectId: owner.ws.id,
+        kind: "character",
+        name: "Марина",
+        description: "смотрительница",
+        attributes: JSON.stringify([{ label: "Возраст", value: "17" }]),
+        tags: JSON.stringify(["канон"]),
+      },
+    });
+    const lighthouse = await db.entity.create({
+      data: {
+        projectId: owner.ws.id,
+        kind: "location",
+        name: "Маяк",
+        description: "скала",
+      },
+    });
+    const attackerPeer = await db.entity.create({
+      data: {
+        projectId: attacker.ws.id,
+        kind: "character",
+        name: "Чужая",
+        description: "не отсюда",
+      },
+    });
+    const entParams = { params: Promise.resolve({ id: marina.id }) };
+
+    const stolen = await patchEntity(
+      jsonRequest(
+        `http://localhost/api/entities/${marina.id}`,
+        "PATCH",
+        {
+          attributes: [{ label: "взлом", value: "да" }],
+          tags: ["взлом"],
+          related: [lighthouse.id],
+        },
+        attacker.token,
+      ),
+      entParams,
+    );
+    expect(stolen.status).toBe(404);
+    const stolenJson = (await stolen.json()) as { entity?: unknown };
+    expect(stolenJson.entity).toBeUndefined();
+    const afterSteal = await db.entity.findUnique({ where: { id: marina.id } });
+    expect(JSON.parse(afterSteal?.attributes ?? "[]")).toEqual([
+      { label: "Возраст", value: "17" },
+    ]);
+    expect(JSON.parse(afterSteal?.tags ?? "[]")).toEqual(["канон"]);
+    expect(
+      await db.entityLink.count({
+        where: { OR: [{ fromId: marina.id }, { toId: marina.id }] },
+      }),
+    ).toBe(0);
+
+    const junk = await patchEntity(
+      new Request(`http://localhost/api/entities/${marina.id}`, {
+        method: "PATCH",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: `Bearer ${owner.token}`,
+        },
+        body: "{not-json",
+      }),
+      entParams,
+    );
+    expect(junk.status).toBe(400);
+    const junkJson = (await junk.json()) as { error: string; entity?: unknown };
+    expect(junkJson.error).toMatch(/JSON/i);
+    expect(junkJson.entity).toBeUndefined();
+
+    const badShape = await patchEntity(
+      jsonRequest(
+        `http://localhost/api/entities/${marina.id}`,
+        "PATCH",
+        { attributes: "{broken" },
+        owner.token,
+      ),
+      entParams,
+    );
+    expect(badShape.status).toBe(400);
+
+    const afterJunk = await db.entity.findUnique({ where: { id: marina.id } });
+    expect(JSON.parse(afterJunk?.attributes ?? "[]")).toEqual([
+      { label: "Возраст", value: "17" },
+    ]);
+    expect(JSON.parse(afterJunk?.tags ?? "[]")).toEqual(["канон"]);
+    expect(afterJunk?.name).toBe("Марина");
+
+    const foreignLink = await patchEntity(
+      jsonRequest(
+        `http://localhost/api/entities/${marina.id}`,
+        "PATCH",
+        { related: [attackerPeer.id] },
+        owner.token,
+      ),
+      entParams,
+    );
+    expect(foreignLink.status).toBe(400);
+    expect(
+      await db.entityLink.count({
+        where: { OR: [{ fromId: marina.id }, { toId: marina.id }] },
+      }),
+    ).toBe(0);
+
+    const patched = await patchEntity(
+      jsonRequest(
+        `http://localhost/api/entities/${marina.id}`,
+        "PATCH",
+        {
+          attributes: [{ label: "Примета", value: attrMarker }],
+          tags: ["упрямая", "маяк"],
+          related: [lighthouse.id],
+        },
+        owner.token,
+      ),
+      entParams,
+    );
+    expect(patched.status).toBe(200);
+    const patchedJson = (await patched.json()) as {
+      entity: {
+        attributes: Array<{ label: string; value: string }>;
+        tags: string[];
+        related: string[];
+      };
+    };
+    expect(patchedJson.entity.attributes).toEqual([
+      { label: "Примета", value: attrMarker },
+    ]);
+    expect(patchedJson.entity.tags).toEqual(["упрямая", "маяк"]);
+    expect(patchedJson.entity.related).toEqual([lighthouse.id]);
+
+    const live = await db.entity.findUnique({ where: { id: marina.id } });
+    expect(JSON.parse(live?.attributes ?? "[]")).toEqual([
+      { label: "Примета", value: attrMarker },
+    ]);
+    expect(JSON.parse(live?.tags ?? "[]")).toEqual(["упрямая", "маяк"]);
+    const links = await db.entityLink.findMany({
+      where: { fromId: marina.id },
+    });
+    expect(links.map((l) => l.toId)).toEqual([lighthouse.id]);
+
+    const got = await getEntity(
+      jsonRequest(
+        `http://localhost/api/entities/${marina.id}`,
+        "GET",
+        undefined,
+        owner.token,
+      ),
+      entParams,
+    );
+    expect(got.status).toBe(200);
+    const gotJson = (await got.json()) as { entity: { related: string[] } };
+    expect(gotJson.entity.related).toEqual([lighthouse.id]);
+
+    const cleared = await patchEntity(
+      jsonRequest(
+        `http://localhost/api/entities/${marina.id}`,
+        "PATCH",
+        { related: [] },
+        owner.token,
+      ),
+      entParams,
+    );
+    expect(cleared.status).toBe(200);
+    expect(
+      await db.entityLink.count({
+        where: { OR: [{ fromId: marina.id }, { toId: marina.id }] },
+      }),
+    ).toBe(0);
+    const stillAttrs = await db.entity.findUnique({ where: { id: marina.id } });
+    expect(JSON.parse(stillAttrs?.attributes ?? "[]")).toEqual([
+      { label: "Примета", value: attrMarker },
+    ]);
+
+    await flushRagQueue();
+    await indexEntityById(db, marina.id);
+    const hits = await retrieve(db, {
+      scope: ragScopeFromThread(owner.user.id, owner.ws.id),
+      query: attrMarker,
+      limit: 8,
+    });
+    expect(hits.hits.some((h) => h.sourceId === marina.id)).toBe(true);
+    expect(hits.hits.some((h) => h.excerpt.includes(attrMarker))).toBe(true);
+  });
+
   test("unconfigured portrait is UNCONFIGURED_TOOL_MESSAGE and does not fake an image", async () => {
     const { user, token, ws } = await seedUser("noportrait");
     const entity = await db.entity.create({

@@ -1135,7 +1135,7 @@ export const api = {
     body: Partial<
       Pick<
         EntityDto,
-        "name" | "short" | "description" | "attributes" | "tags" | "portrait" | "favorite"
+        "name" | "short" | "description" | "attributes" | "tags" | "related" | "portrait" | "favorite"
       >
     >,
   ): Promise<EntityDto> {

@@ -1,17 +1,12 @@
 "use client";
 
 /**
- * Универсальная панель сущности (Фаза A, данные из REST API): вид и набор,
- * правка name/short/description (кнопка «Сохранить» + автосейв при
- * закрытии), «Сгенерировать описание» — живой LLM (~15–20 с, «Студия
- * пишет…»), блок персистентного изображения (PS-6: генерация по kind,
- * сохраняется в БД, живёт и после перезагрузки), атрибуты, теги, связи-чипы
- * и упоминания. Экспортирует хелпер useEntityDraft — общий для панелей
- * сущности и персонажа.
+ * Универсальная панель сущности: правка name/short/description,
+ * атрибутов, тегов и связей (PATCH), «Сгенерировать описание»,
+ * персистентное изображение. Хук драфта — entity-draft.
  */
 
-import { BookOpenText, Check, FileText, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { BookOpenText, Check, FileText, ImagePlus, Loader2, MapPin, Save, Sparkles, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,57 +21,24 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  ENTITY_SHEET_NO_ATTRIBUTES,
-  ENTITY_SHEET_NO_LINKS,
   ENTITY_SHEET_NO_REFS_NARRATIVE,
   ENTITY_SHEET_NO_REFS_PRODUCT,
-  ENTITY_SHEET_NO_TAGS,
   ENTITY_SHEET_OPEN_ERROR,
   ENTITY_SHEET_OPEN_ERROR_HINT,
 } from "@/lib/entity-copy";
 import type { EntityDto } from "@/lib/workspace-types";
 import { MiniChip } from "./narrative-chip";
 import { ENTITY_KIND_META, refsLabel } from "./entities-data";
+import {
+  buildEntitySavePatch,
+  useEntityDraft,
+  type EntityDraftPatch,
+} from "./entity-draft";
+import { AttributesEditor, LinksEditor, TagsEditor } from "./entity-meta-editors";
 import { agoFromISO } from "./types";
 
-export type EntityDraftPatch = {
-  name?: string;
-  short?: string | null;
-  description?: string;
-};
-
-/** Драфт правок сущности: незагрязнённые поля следуют за entity (обновления
- *  из aiDescribe подхватываются сразу), правки пользователя — приоритет. */
-export function useEntityDraft(entity: EntityDto | null) {
-  const [raw, setRaw] = useState({ name: "", short: "", description: "" });
-  const [dirty, setDirty] = useState({ name: false, short: false, description: false });
-
-  const draft = {
-    name: dirty.name ? raw.name : (entity?.name ?? ""),
-    short: dirty.short ? raw.short : (entity?.short ?? ""),
-    description: dirty.description ? raw.description : (entity?.description ?? ""),
-  };
-
-  function update(patch: Partial<{ name: string; short: string; description: string }>) {
-    setDirty((prev) => ({
-      ...prev,
-      ...Object.fromEntries(Object.keys(patch).map((key) => [key, true])),
-    }));
-    setRaw((prev) => ({ ...prev, ...patch }));
-  }
-
-  const isDirty =
-    Boolean(entity) &&
-    (dirty.name || dirty.short || dirty.description) &&
-    Boolean(
-      entity &&
-        (draft.name !== entity.name ||
-          draft.short !== (entity.short ?? "") ||
-          draft.description !== entity.description),
-    );
-
-  return { draft, update, isDirty };
-}
+export type { EntityDraftPatch };
+export { useEntityDraft };
 
 export function EntitySheet({
   entity,
@@ -93,7 +55,6 @@ export function EntitySheet({
   onDelete,
 }: {
   entity: EntityDto | null;
-  /** Сущности набора — для имён связей. */
   entities: EntityDto[];
   onClose: () => void;
   onOpenEntity: (id: string) => void;
@@ -112,15 +73,13 @@ export function EntitySheet({
   const isNarrative = entity?.domain === "narrative";
   const refs = entity ? refsLabel(entity.domain) : null;
 
+  function persist() {
+    if (!entity) return;
+    onSave(entity.id, buildEntitySavePatch(draft, entity));
+  }
+
   function handleClose() {
-    // Автосейв при закрытии: если были правки — сохраняем до закрытия.
-    if (entity && isDirty) {
-      onSave(entity.id, {
-        name: draft.name.trim() || entity.name,
-        short: draft.short.trim() || null,
-        description: draft.description,
-      });
-    }
+    if (entity && isDirty) persist();
     onClose();
   }
 
@@ -165,7 +124,6 @@ export function EntitySheet({
             </SheetHeader>
 
             <div className="vf-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
-              {/* Изображение (PS-6): персистентная генерация по kind */}
               {isNarrative ? (
                 <div className="relative">
                   {entity.image ? (
@@ -234,65 +192,20 @@ export function EntitySheet({
               </section>
 
               <Separator />
-
-              {/* Атрибуты */}
-              <section aria-label="Атрибуты">
-                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Атрибуты
-                </h4>
-                <dl className="mt-2 grid grid-cols-1 gap-1.5">
-                  {entity.attributes.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">{ENTITY_SHEET_NO_ATTRIBUTES}</p>
-                  ) : (
-                    entity.attributes.map((attribute) => (
-                      <div
-                        key={attribute.label}
-                        className="flex items-baseline justify-between gap-3 rounded-lg border bg-background px-3 py-2"
-                      >
-                        <dt className="shrink-0 text-xs text-muted-foreground">{attribute.label}</dt>
-                        <dd className="min-w-0 truncate text-right text-xs font-medium">
-                          {attribute.value}
-                        </dd>
-                      </div>
-                    ))
-                  )}
-                </dl>
-              </section>
-
+              <AttributesEditor
+                attributes={draft.attributes}
+                onChange={(attributes) => update({ attributes })}
+              />
+              <Separator />
+              <LinksEditor
+                relatedIds={draft.related}
+                entityId={entity.id}
+                entities={entities}
+                onChange={(related) => update({ related })}
+                onOpen={onOpenEntity}
+              />
               <Separator />
 
-              {/* Связи */}
-              <section aria-label="Связанные сущности">
-                <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <Link2 className="size-3.5" aria-hidden="true" />
-                  Связи
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.related && entity.related.length > 0 ? (
-                    entity.related.map((relatedId) => {
-                      const related = entities.find((candidate) => candidate.id === relatedId);
-                      if (!related) return null;
-                      const RelatedIcon = ENTITY_KIND_META[related.kind].icon;
-                      return (
-                        <MiniChip
-                          key={relatedId}
-                          onClick={() => onOpenEntity(relatedId)}
-                          title={`Открыть «${related.name}»`}
-                        >
-                          <RelatedIcon className="size-3" aria-hidden="true" />
-                          {related.name}
-                        </MiniChip>
-                      );
-                    })
-                  ) : (
-                    <p className="text-xs text-muted-foreground">{ENTITY_SHEET_NO_LINKS}</p>
-                  )}
-                </div>
-              </section>
-
-              <Separator />
-
-              {/* Упоминания: главы или разделы документации */}
               <section aria-label={isNarrative ? "Упоминания в главах" : "Разделы документации"}>
                 <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   {isNarrative ? (
@@ -321,22 +234,14 @@ export function EntitySheet({
                 </p>
               </section>
 
-              {/* Теги */}
-              <section aria-label="Теги сущности">
-                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Теги
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.tags.length > 0 ? (
-                    entity.tags.map((tag) => <MiniChip key={tag}>#{tag}</MiniChip>)
-                  ) : (
-                    <p className="text-xs text-muted-foreground">{ENTITY_SHEET_NO_TAGS}</p>
-                  )}
-                </div>
-              </section>
+              <TagsEditor
+                tags={draft.tags}
+                input={draft.tagDraft}
+                onChange={(tags) => update({ tags })}
+                onInputChange={(tagDraft) => update({ tagDraft })}
+              />
             </div>
 
-            {/* Действия */}
             <div className="shrink-0 space-y-2 border-t px-5 py-3">
               {isNarrative ? (
                 <Button
@@ -382,13 +287,7 @@ export function EntitySheet({
                 variant="outline"
                 className="w-full"
                 disabled={!isDirty}
-                onClick={() =>
-                  onSave(entity.id, {
-                    name: draft.name.trim() || entity.name,
-                    short: draft.short.trim() || null,
-                    description: draft.description,
-                  })
-                }
+                onClick={persist}
               >
                 {isDirty ? (
                   <>

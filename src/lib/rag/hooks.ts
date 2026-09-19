@@ -171,6 +171,7 @@ export async function indexEntityById(db: PrismaClient, entityId: string) {
       short: true,
       description: true,
       attributes: true,
+      tags: true,
       projectId: true,
       project: { select: { userId: true } },
     },
@@ -182,7 +183,9 @@ export async function indexEntityById(db: PrismaClient, entityId: string) {
     sourceType: "entity",
     sourceId: entity.id,
     title: entity.name,
-    body: [entity.short, entity.description, entity.attributes].filter(Boolean).join("\n"),
+    body: [entity.short, entity.description, entity.attributes, entity.tags]
+      .filter(Boolean)
+      .join("\n"),
   });
 }
 

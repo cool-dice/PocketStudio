@@ -22,6 +22,11 @@ export const ENTITY_SHEET_OPEN_ERROR_HINT =
 export const ENTITY_SHEET_NO_ATTRIBUTES = "Атрибутов у этой карточки пока нет.";
 export const ENTITY_SHEET_NO_LINKS = "Связей у этой карточки пока нет.";
 export const ENTITY_SHEET_NO_TAGS = "Тегов у этой карточки пока нет.";
+export const ENTITY_SHEET_NO_PEERS =
+  "В этом наборе пока некого связать с этой карточкой.";
+export const ENTITY_SHEET_ADD_ATTRIBUTE = "Добавить атрибут";
+export const ENTITY_SHEET_ADD_TAG = "Добавить тег";
+export const ENTITY_SHEET_ADD_LINK = "Связать с…";
 export const ENTITY_SHEET_NO_REFS_NARRATIVE =
   "В главах эта карточка пока не упомянута.";
 export const ENTITY_SHEET_NO_REFS_PRODUCT =

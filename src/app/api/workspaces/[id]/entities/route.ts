@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { relatedFromLinks } from "@/lib/entity-meta";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { entityDto } from "@/lib/workspace-shapes";
 import { scheduleIndexEntity } from "@/lib/rag";
@@ -20,12 +21,15 @@ export async function GET(req: Request, { params }: Params) {
   const entities = await db.entity.findMany({
     where: { projectId: id },
     orderBy: { updatedAt: "desc" },
-    include: { linksFrom: { select: { toId: true } } },
+    include: {
+      linksFrom: { select: { toId: true } },
+      linksTo: { select: { fromId: true } },
+    },
   });
 
   return NextResponse.json({
     entities: entities.map((e) =>
-      entityDto(e, e.linksFrom.map((l) => l.toId)),
+      entityDto(e, relatedFromLinks(e.linksFrom, e.linksTo)),
     ),
   });
 }

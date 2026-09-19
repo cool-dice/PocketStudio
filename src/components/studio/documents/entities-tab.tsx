@@ -153,7 +153,17 @@ export function EntitiesTab({
   const handleSave = useCallback(async (id: string, patch: EntityDraftPatch) => {
     try {
       const updated = await api.updateEntity(id, patch);
-      setEntities((prev) => prev.map((entity) => (entity.id === id ? updated : entity)));
+      setEntities((prev) => {
+        const linked = new Set(updated.related ?? []);
+        return prev.map((entity) => {
+          if (entity.id === id) return updated;
+          const had = (entity.related ?? []).includes(id);
+          const has = linked.has(entity.id);
+          if (had === has) return entity;
+          const rest = (entity.related ?? []).filter((r) => r !== id);
+          return { ...entity, related: has ? [...rest, id] : rest };
+        });
+      });
       toast.success("Сохранено", {
         description: `Карточка «${updated.name}» обновлена.`,
       });

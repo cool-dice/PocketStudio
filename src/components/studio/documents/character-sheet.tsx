@@ -1,14 +1,11 @@
 "use client";
 
 /**
- * Панель персонажа (Фаза A, EntityDto из API): портрет-градиент
- * (или реальная картинка после генерации), редактируемая биография
- * и имя, черты-теги, связи-чипы, упоминания в главах. «Сгенерировать
- * портрет» — живой aiGenerateImage (~40 с): тайл появляется в Альбоме,
- * а картинка — и здесь. «Сгенерировать описание» — LLM (~15–20 с).
+ * Панель персонажа: имя, подпись, биография, черты-теги, атрибуты и связи
+ * правятся и уходят в PATCH. Портрет — живой image-tool; описание — LLM.
  */
 
-import { Check, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ImagePlus, Loader2, MapPin, Save, Sparkles, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +20,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  CHARACTER_SHEET_NO_LINKS,
   CHARACTER_SHEET_NO_PORTRAIT,
   CHARACTER_SHEET_NO_REFS,
   CHARACTER_SHEET_NO_TRAITS,
@@ -31,8 +27,13 @@ import {
 import type { EntityDto } from "@/lib/workspace-types";
 import { GradientArt } from "./art-placeholder";
 import { MiniChip } from "./narrative-chip";
-import { useEntityDraft, type EntityDraftPatch } from "./entity-sheet";
-import { ENTITY_KIND_META, ROLE_CATEGORY_META, roleCategoryOf } from "./entities-data";
+import {
+  buildEntitySavePatch,
+  useEntityDraft,
+  type EntityDraftPatch,
+} from "./entity-draft";
+import { AttributesEditor, LinksEditor, TagsEditor } from "./entity-meta-editors";
+import { ROLE_CATEGORY_META, roleCategoryOf } from "./entities-data";
 import { agoFromISO } from "./types";
 
 export function CharacterSheet({
@@ -68,14 +69,13 @@ export function CharacterSheet({
   const { draft, update, isDirty } = useEntityDraft(entity);
   const roleMeta = entity ? ROLE_CATEGORY_META[roleCategoryOf(entity)] : null;
 
+  function persist() {
+    if (!entity) return;
+    onSave(entity.id, buildEntitySavePatch(draft, entity));
+  }
+
   function handleClose() {
-    if (entity && isDirty) {
-      onSave(entity.id, {
-        name: draft.name.trim() || entity.name,
-        short: draft.short.trim() || null,
-        description: draft.description,
-      });
-    }
+    if (entity && isDirty) persist();
     onClose();
   }
 
@@ -180,75 +180,27 @@ export function CharacterSheet({
 
               <Separator />
 
-              {/* Черты */}
-              <section aria-label="Черты характера">
-                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Черты
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.tags.length > 0 ? (
-                    entity.tags.map((tag) => <MiniChip key={tag}>#{tag}</MiniChip>)
-                  ) : (
-                    <p className="text-xs text-muted-foreground">{CHARACTER_SHEET_NO_TRAITS}</p>
-                  )}
-                </div>
-              </section>
-
-              {/* Атрибуты */}
-              {entity.attributes.length > 0 ? (
-                <>
-                  <Separator />
-                  <section aria-label="Атрибуты персонажа">
-                    <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      Атрибуты
-                    </h4>
-                    <dl className="mt-2 grid grid-cols-1 gap-1.5">
-                      {entity.attributes.map((attribute) => (
-                        <div
-                          key={attribute.label}
-                          className="flex items-baseline justify-between gap-3 rounded-lg border bg-background px-3 py-2"
-                        >
-                          <dt className="shrink-0 text-xs text-muted-foreground">{attribute.label}</dt>
-                          <dd className="min-w-0 truncate text-right text-xs font-medium">
-                            {attribute.value}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </section>
-                </>
-              ) : null}
-
+              <TagsEditor
+                tags={draft.tags}
+                input={draft.tagDraft}
+                onChange={(tags) => update({ tags })}
+                onInputChange={(tagDraft) => update({ tagDraft })}
+                title="Черты"
+                emptyText={CHARACTER_SHEET_NO_TRAITS}
+              />
               <Separator />
-
-              {/* Связи */}
-              <section aria-label="Связи персонажа">
-                <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <Link2 className="size-3.5" aria-hidden="true" />
-                  Связи
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.related && entity.related.length > 0 ? (
-                    entity.related.map((relatedId) => {
-                      const related = entities.find((candidate) => candidate.id === relatedId);
-                      if (!related) return null;
-                      const RelatedIcon = ENTITY_KIND_META[related.kind].icon;
-                      return (
-                        <MiniChip
-                          key={relatedId}
-                          onClick={() => onOpenEntity(relatedId)}
-                          title={`Открыть «${related.name}»`}
-                        >
-                          <RelatedIcon className="size-3" aria-hidden="true" />
-                          {related.name}
-                        </MiniChip>
-                      );
-                    })
-                  ) : (
-                    <p className="text-xs text-muted-foreground">{CHARACTER_SHEET_NO_LINKS}</p>
-                  )}
-                </div>
-              </section>
+              <AttributesEditor
+                attributes={draft.attributes}
+                onChange={(attributes) => update({ attributes })}
+              />
+              <Separator />
+              <LinksEditor
+                relatedIds={draft.related}
+                entityId={entity.id}
+                entities={entities}
+                onChange={(related) => update({ related })}
+                onOpen={onOpenEntity}
+              />
 
               <Separator />
 
@@ -321,13 +273,7 @@ export function CharacterSheet({
                   type="button"
                   variant="ghost"
                   className={cn("w-full text-xs")}
-                  onClick={() =>
-                    onSave(entity.id, {
-                      name: draft.name.trim() || entity.name,
-                      short: draft.short.trim() || null,
-                      description: draft.description,
-                    })
-                  }
+                  onClick={persist}
                 >
                   <Save className="size-3.5" aria-hidden="true" />
                   Сохранить правки
