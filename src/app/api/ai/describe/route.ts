@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { aiChatText } from "@/lib/ai";
+import { aiChatText, aiErrorResponse } from "@/lib/ai";
 import { ensureOwned } from "@/lib/workspace-api";
 import { db } from "@/lib/db";
 
@@ -37,6 +37,8 @@ export async function POST(req: Request) {
 
   try {
     const description = await aiChatText(
+      check.userId,
+      "describe",
       DESCRIBE_SYSTEM,
       `Вид: ${entity.kind}\nНазвание: ${entity.name}\nПодпись: ${entity.short ?? "—"}\nТекущее описание: ${entity.description || "(пусто)"}`,
     );
@@ -48,10 +50,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ entityId: updated.id, description });
   } catch (err) {
-    console.error("[ai/describe] failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Не удалось сгенерировать описание — попробуйте ещё раз" },
-      { status: 502 },
+    const mapped = aiErrorResponse(
+      err,
+      "Не удалось сгенерировать описание — попробуйте ещё раз",
     );
+    if (mapped.status >= 500) {
+      console.error("[ai/describe] failed:", err instanceof Error ? err.message : err);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { aiGenerateImage } from "@/lib/ai";
+import { aiErrorResponse, aiGenerateImage } from "@/lib/ai";
 import { ensureOwned } from "@/lib/workspace-api";
 import { artifactDto, entityDto } from "@/lib/workspace-shapes";
 
@@ -45,7 +45,7 @@ export async function POST(req: Request, { params }: Params) {
   const prompt = `${style}. ${entity.name}: ${bio}`;
 
   try {
-    const { url } = await aiGenerateImage(prompt, "1024x1024");
+    const { url } = await aiGenerateImage(check.userId, prompt, "1024x1024");
     const [updated, artifact] = await db.$transaction([
       db.entity.update({
         where: { id },
@@ -67,11 +67,14 @@ export async function POST(req: Request, { params }: Params) {
       { status: 201 },
     );
   } catch (err) {
-    console.error("[entity/portrait] failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Не удалось нарисовать портрет — попробуйте ещё раз" },
-      { status: 502 },
+    const mapped = aiErrorResponse(
+      err,
+      "Не удалось нарисовать портрет — попробуйте ещё раз",
     );
+    if (mapped.status >= 500) {
+      console.error("[entity/portrait] failed:", err instanceof Error ? err.message : err);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }
 

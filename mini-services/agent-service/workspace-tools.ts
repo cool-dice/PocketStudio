@@ -8,9 +8,8 @@
 //
 // Паттерн повторяет tools.ts 1:1: ToolDef + ручная валидация аргументов
 // (невалидные → {error: "..."} вместо throw), userId-scoped, БД напрямую
-// через db-client. Медиа генерируется СВОИМ z-ai-web-dev-sdk (getZai из
-// agent.ts — у мини-сервиса нет пользовательского JWT для Next REST), файлы
-// кладутся в /home/z/my-project/public/gen и раздаются Next'ом как /gen/…
+// через db-client. Медиа генерируется шлюзом src/lib/ai (OpenAI/Anthropic),
+// файлы кладутся в public/gen и раздаются Next'ом как /gen/…
 // (абсолютный путь: сервис запущен с cwd mini-services/agent-service).
 //
 // Авторизация инструментов = userId оркестратора (так же, как create_note
@@ -21,7 +20,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 import { db } from "./db-client";
-import { generateLLMResponse, getZai } from "./agent";
+import { generateLLMResponse } from "./agent";
+import { generateImage, synthesizeSpeech } from "../../src/lib/ai/connector";
+import { resolveToolRoute } from "../../src/lib/ai/resolve";
 import type { ToolContext, ToolDef } from "./tools";
 
 // ─────────────────────────── shared helpers ───────────────────────────
@@ -371,7 +372,7 @@ const checkDocument: ToolDef = {
     try {
       const raw = await generateLLMResponse(ANALYST_SYSTEM, [
         { role: "user", content: docText },
-      ]);
+      ], { userId, toolId: "document_check", jsonMode: true });
       drafts = parseFindings(raw);
     } catch (err) {
       return {
@@ -448,15 +449,9 @@ const generateImage: ToolDef = {
     if ("error" in ws) return { error: ws.error };
 
     try {
-      const zai = await getZai();
-      const response = await zai.images.generations.create({
-        prompt,
-        size: size as "1024x1024",
-      });
-      const base64 = response.data[0]?.base64;
-      if (!base64) return { error: "Генерация вернула пустой результат — попробуйте ещё раз" };
-
-      const url = saveGenFile(Buffer.from(base64, "base64"), "png");
+      const route = await resolveToolRoute(db, userId, "image");
+      const { buffer } = await generateImage(route, { prompt, size });
+      const url = saveGenFile(buffer, "png");
       const artifact = await db.artifact.create({
         data: {
           projectId: ws.id,
@@ -519,15 +514,8 @@ const ttsNarration: ToolDef = {
     if ("error" in ws) return { error: ws.error };
 
     try {
-      const zai = await getZai();
-      const response = await zai.audio.tts.create({
-        input: text,
-        voice: voice as (typeof TTS_VOICES)[number],
-        speed: 1.0,
-        response_format: "wav",
-        stream: false,
-      });
-      const buffer = Buffer.from(new Uint8Array(await response.arrayBuffer()));
+      const route = await resolveToolRoute(db, userId, "tts");
+      const buffer = await synthesizeSpeech(route, { text, voice, speed: 1.0 });
       if (buffer.length === 0) {
         return { error: "Озвучка вернула пустой файл — попробуйте ещё раз" };
       }

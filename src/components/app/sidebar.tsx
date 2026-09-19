@@ -12,6 +12,7 @@ import {
   Check,
   FolderKanban,
   House,
+  KeyRound,
   Library,
   LogOut,
   MessageSquare,
@@ -529,6 +530,15 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <ThemeToggleItem />
+            <DropdownMenuItem
+              onSelect={() => {
+                onNavigate?.();
+                setMainArea("settings");
+              }}
+            >
+              <KeyRound className="size-4" aria-hidden="true" />
+              Настройки ИИ
+            </DropdownMenuItem>
             {user?.role === "admin" && (
               <DropdownMenuItem
                 onSelect={() => {

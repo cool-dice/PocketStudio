@@ -1,6 +1,6 @@
 // PocketStudio agent — LLM access layer + tool-call parsing.
-// LLM access via z-ai-web-dev-sdk (backend-only). The SDK has no native
-// streaming and no native function calling, so:
+// Chat goes through the shared OpenAI/Anthropic gateway (src/lib/ai).
+// The SDK has no native function calling, so:
 //   - the full reply is fetched here and chunked by the transport layer
 //     (server.ts) for a streaming feel;
 //   - tools are called through a JSON protocol: the system prompt
@@ -8,7 +8,10 @@
 //     {"tool":"<name>","args":{...}} when it wants a tool, and parseToolCall
 //     below detects that shape. The tool-calling loop lives in server.ts.
 
-import ZAI from "z-ai-web-dev-sdk";
+import { chatCompletion } from "../../src/lib/ai/connector";
+import { resolveToolRoute } from "../../src/lib/ai/resolve";
+import type { AiToolId } from "../../src/lib/ai/tools";
+import { db } from "./db-client";
 
 /** LLM conversation turn (system prompt is passed separately). */
 export interface LlmMessage {
@@ -22,30 +25,14 @@ export interface ToolCall {
   args: Record<string, unknown>;
 }
 
-type ZaiInstance = Awaited<ReturnType<typeof ZAI.create>>;
-
-// Module-level cached instance (one SDK client per process).
-let zaiInstance: ZaiInstance | null = null;
-
-export async function getZai(): Promise<ZaiInstance> {
-  if (!zaiInstance) zaiInstance = await ZAI.create();
-  return zaiInstance;
+export interface GenerateOpts {
+  userId: string;
+  toolId?: AiToolId;
+  jsonMode?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Extract text from an OpenAI-shaped chat completion response. */
-function extractContent(completion: unknown): string {
-  const c = completion as {
-    choices?: Array<{ message?: { content?: unknown } }>;
-    content?: unknown;
-  };
-  const fromChoices = c?.choices?.[0]?.message?.content;
-  if (typeof fromChoices === "string" && fromChoices.trim()) return fromChoices;
-  if (typeof c?.content === "string" && c.content.trim()) return c.content;
-  return "";
 }
 
 const MAX_ATTEMPTS = 3; // initial call + 2 retries
@@ -59,25 +46,31 @@ const RETRY_BACKOFF_MS = 800;
 export async function generateLLMResponse(
   systemPrompt: string,
   history: LlmMessage[],
+  opts: GenerateOpts,
 ): Promise<string> {
   let lastError: unknown = null;
+  const toolId = opts.toolId ?? "agent";
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const zai = await getZai();
-      const completion = await zai.chat.completions.create({
-        messages: [{ role: "system", content: systemPrompt }, ...history],
-        thinking: { type: "disabled" },
+      const route = await resolveToolRoute(db, opts.userId, toolId);
+      const messages = [
+        { role: "system" as const, content: systemPrompt },
+        ...history.map((m) => ({ role: m.role, content: m.content })),
+      ];
+      const result = await chatCompletion(route, messages, {
+        jsonMode: opts.jsonMode,
       });
-      const content = extractContent(completion);
-      if (!content) throw new Error("LLM returned empty content");
-      return content;
+      if (!result.text) throw new Error("LLM returned empty content");
+      return result.text;
     } catch (err) {
       lastError = err;
       console.warn(
         `[agent] LLM attempt ${attempt}/${MAX_ATTEMPTS} failed:`,
         err instanceof Error ? err.message : String(err),
       );
+      const status = (err as { status?: number })?.status;
+      if (typeof status === "number" && status < 500) break;
       if (attempt < MAX_ATTEMPTS) await sleep(RETRY_BACKOFF_MS);
     }
   }

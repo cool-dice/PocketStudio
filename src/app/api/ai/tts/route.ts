@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { aiTts, saveGeneratedFile, TTS_VOICES, type TtsVoice } from "@/lib/ai";
+import { aiErrorResponse, aiTts, saveGeneratedFile, TTS_VOICES, type TtsVoice } from "@/lib/ai";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { artifactDto } from "@/lib/workspace-shapes";
 
@@ -35,7 +35,12 @@ export async function POST(req: Request) {
   if (!check.ok) return check.response;
 
   try {
-    const buffer = await aiTts(text, (voice ?? "tongtong") as TtsVoice, speed ?? 1.0);
+    const buffer = await aiTts(
+      check.userId,
+      text,
+      (voice ?? "alloy") as TtsVoice,
+      speed ?? 1.0,
+    );
     const url = saveGeneratedFile(buffer, "wav");
     const artifact = await db.artifact.create({
       data: {
@@ -45,15 +50,18 @@ export async function POST(req: Request) {
         prompt: text.slice(0, 500),
         url,
         stage: "Озвучка",
-        meta: JSON.stringify({ voice: voice ?? "tongtong", chars: text.length }),
+        meta: JSON.stringify({ voice: voice ?? "alloy", chars: text.length }),
       },
     });
     return NextResponse.json({ artifact: artifactDto(artifact) }, { status: 201 });
   } catch (err) {
-    console.error("[ai/tts] failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Не удалось озвучить текст — попробуйте ещё раз" },
-      { status: 502 },
+    const mapped = aiErrorResponse(
+      err,
+      "Не удалось озвучить текст — попробуйте ещё раз",
     );
+    if (mapped.status >= 500) {
+      console.error("[ai/tts] failed:", err instanceof Error ? err.message : err);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }

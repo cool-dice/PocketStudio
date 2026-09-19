@@ -9,6 +9,9 @@
 import type {
   AdminStats,
   AdminUserListItem,
+  AiModelDto,
+  AiProviderDto,
+  AiToolDefaultDto,
   AuditLogEntry,
   Category,
   CheckpointResult,
@@ -29,6 +32,7 @@ import type {
   ThreadListItem,
   ThreadMode,
   User,
+  UserAiSettingsDto,
 } from "@/lib/types";
 import type { StylePalette } from "@/lib/palette";
 import type { DawProjectDto, DawState } from "@/lib/daw-model";
@@ -571,6 +575,146 @@ export const api = {
     return request<{ entries: AuditLogEntry[] }>(
       `/api/admin/audit?limit=${limit}`,
     ).then((r) => r.entries);
+  },
+
+  adminAiProviders(): Promise<AiProviderDto[]> {
+    return request<{ providers: AiProviderDto[] }>("/api/admin/ai/providers").then(
+      (r) => r.providers,
+    );
+  },
+
+  adminCreateAiProvider(body: Record<string, unknown>): Promise<AiProviderDto> {
+    return request<{ provider: AiProviderDto }>("/api/admin/ai/providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.provider);
+  },
+
+  adminUpdateAiProvider(
+    id: string,
+    body: Record<string, unknown>,
+  ): Promise<AiProviderDto> {
+    return request<{ provider: AiProviderDto }>(
+      `/api/admin/ai/providers/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.provider);
+  },
+
+  async adminDeleteAiProvider(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/admin/ai/providers/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  adminTestAiProvider(id: string): Promise<{ ok: true; detail: string }> {
+    return request<{ ok: true; detail: string }>(
+      `/api/admin/ai/providers/${encodeURIComponent(id)}/test`,
+      { method: "POST" },
+    );
+  },
+
+  adminCreateAiModel(
+    providerId: string,
+    body: Record<string, unknown>,
+  ): Promise<AiModelDto> {
+    return request<{ model: AiModelDto }>(
+      `/api/admin/ai/providers/${encodeURIComponent(providerId)}/models`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.model);
+  },
+
+  adminUpdateAiModel(id: string, body: Record<string, unknown>): Promise<AiModelDto> {
+    return request<{ model: AiModelDto }>(
+      `/api/admin/ai/models/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.model);
+  },
+
+  async adminDeleteAiModel(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/admin/ai/models/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  adminAiDefaults(): Promise<AiToolDefaultDto[]> {
+    return request<{ defaults: AiToolDefaultDto[] }>("/api/admin/ai/defaults").then(
+      (r) => r.defaults,
+    );
+  },
+
+  adminSetAiDefault(toolId: string, modelId: string): Promise<void> {
+    return request<{ ok: boolean }>("/api/admin/ai/defaults", {
+      method: "PUT",
+      body: JSON.stringify({ toolId, modelId }),
+    }).then(() => undefined);
+  },
+
+  userAiSettings(): Promise<UserAiSettingsDto> {
+    return request<UserAiSettingsDto>("/api/settings/ai");
+  },
+
+  userCreateAiProvider(body: Record<string, unknown>): Promise<AiProviderDto> {
+    return request<{ provider: AiProviderDto }>("/api/settings/ai/providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.provider);
+  },
+
+  userUpdateAiProvider(
+    id: string,
+    body: Record<string, unknown>,
+  ): Promise<AiProviderDto> {
+    return request<{ provider: AiProviderDto }>(
+      `/api/settings/ai/providers/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.provider);
+  },
+
+  async userDeleteAiProvider(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/settings/ai/providers/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  userTestAiProvider(id: string): Promise<{ ok: true; detail: string }> {
+    return request<{ ok: true; detail: string }>(
+      `/api/settings/ai/providers/${encodeURIComponent(id)}/test`,
+      { method: "POST" },
+    );
+  },
+
+  userCreateAiModel(
+    providerId: string,
+    body: Record<string, unknown>,
+  ): Promise<AiModelDto> {
+    return request<{ model: AiModelDto }>(
+      `/api/settings/ai/providers/${encodeURIComponent(providerId)}/models`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.model);
+  },
+
+  userUpdateAiModel(id: string, body: Record<string, unknown>): Promise<AiModelDto> {
+    return request<{ model: AiModelDto }>(
+      `/api/settings/ai/models/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.model);
+  },
+
+  async userDeleteAiModel(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/settings/ai/models/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  userSetToolModel(toolId: string, modelId: string | null): Promise<void> {
+    return request<{ ok: boolean }>(
+      `/api/settings/ai/tools/${encodeURIComponent(toolId)}`,
+      { method: "PUT", body: JSON.stringify({ modelId }) },
+    ).then(() => undefined);
   },
 
   /* ── Workspaces / Documents / Entities / Artifacts / AI (Фаза A) ── */

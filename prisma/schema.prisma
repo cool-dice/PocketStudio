@@ -31,6 +31,8 @@ model User {
   notifications Notification[]
   auditLogs     AuditLog[]
   mcpServers    McpServer[]
+  aiProviders   AiProvider[]
+  toolModels    UserToolModel[]
 }
 
 // ─────────────────────────── Notebook ───────────────────────────
@@ -498,19 +500,81 @@ model SystemSetting {
   updatedAt DateTime @updatedAt
 }
 
-model AIProvider {
-  id        String   @id @default(cuid())
-  name      String
-  baseUrl   String
-  apiKey    String
-  model     String
-  priority  Int      @default(10)
-  enabled   Boolean  @default(true)
-  kind      String   @default("chat")
+/// LLM / media provider. `userId` null = platform (admin, proxied, markup-ready);
+/// set = user BYOK. The server always holds the key and proxies requests.
+model AiProvider {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 'openai_compatible' | 'anthropic_compatible'
+  kind   String
+  name   String
+  /// OpenAI: https://api.openai.com/v1 · Anthropic: https://api.anthropic.com
+  baseUrl String
+  /// AES-256-GCM encrypted (enc:v1:…). Never returned in full to clients.
+  apiKey      String
+  apiKeyLast4 String  @default("")
+  enabled     Boolean @default(true)
+  /// Platform only: end users may pick this provider as a proxied option.
+  visibleToUsers   Boolean @default(true)
+  /// Future billing: percent markup (20 = +20%) on platform providers.
+  markupPercent    Float?
+  /// Future billing: multiplier (1.2 = +20%). Applied if percent is unset.
+  markupMultiplier Float?
+  /// Optional extra HTTP headers as a JSON object.
+  extraHeaders     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([enabled, priority])
+  models AiModel[]
+
+  @@index([userId, enabled])
+  @@index([enabled, visibleToUsers])
+}
+
+model AiModel {
+  id          String     @id @default(cuid())
+  providerId  String
+  provider    AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  /// Upstream id, e.g. gpt-4o-mini / claude-sonnet-4-5-20250929
+  modelId     String
+  displayName String
+  capChat        Boolean @default(true)
+  capImage       Boolean @default(false)
+  capTts         Boolean @default(false)
+  capAsr         Boolean @default(false)
+  capEmbeddings  Boolean @default(false)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  toolDefaults  ToolModelDefault[]
+  userOverrides UserToolModel[]
+
+  @@unique([providerId, modelId])
+  @@index([providerId, enabled])
+}
+
+/// Platform-level default model for a studio tool (admin-managed).
+model ToolModelDefault {
+  toolId    String   @id
+  modelId   String
+  model     AiModel  @relation(fields: [modelId], references: [id], onDelete: Restrict)
+  updatedAt DateTime @updatedAt
+}
+
+/// Per-user override: null modelId = «Студия (по умолчанию)».
+model UserToolModel {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  toolId    String
+  modelId   String?
+  model     AiModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, toolId])
 }
 
 model AuditLog {

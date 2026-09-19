@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { aiChatJson } from "@/lib/ai";
+import { aiChatJson, aiErrorResponse } from "@/lib/ai";
 import { db } from "@/lib/db";
 import {
   normalizeStylePalette,
@@ -39,8 +39,11 @@ const PALETTE_SYSTEM = `Ты — арт-директор студии. По бр
 - advice — практичный, без общих слов.`;
 
 /** LLM → нормализованная палитра; бросает ошибку, если ответ нечитаем. */
-async function requestPalette(briefText: string): Promise<StylePalette> {
-  const raw = await aiChatJson<unknown>(PALETTE_SYSTEM, briefText);
+async function requestPalette(
+  userId: string,
+  briefText: string,
+): Promise<StylePalette> {
+  const raw = await aiChatJson<unknown>(userId, "palette", PALETTE_SYSTEM, briefText);
   const palette =
     normalizeStylePalette(raw) ??
     (typeof raw === "string"
@@ -86,19 +89,19 @@ export async function POST(req: Request) {
   /* LLM → строгий JSON с фолбэком и понятной 502 при провале. */
   let palette: StylePalette;
   try {
-    palette = await requestPalette(briefText);
+    palette = await requestPalette(check.userId, briefText);
   } catch (err) {
-    console.error(
-      "[ai/palette] failed:",
-      err instanceof Error ? err.message : err,
+    const mapped = aiErrorResponse(
+      err,
+      "Модель вернула нечитаемую палитру — попробуйте ещё раз или уточните бриф",
     );
-    return NextResponse.json(
-      {
-        error:
-          "Модель вернула нечитаемую палитру — попробуйте ещё раз или уточните бриф",
-      },
-      { status: 502 },
-    );
+    if (mapped.status >= 500) {
+      console.error(
+        "[ai/palette] failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 
   /* Сохраняем как артефакт воркспейса (type file, stage style). */

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { aiGenerateImage } from "@/lib/ai";
+import { aiErrorResponse, aiGenerateImage } from "@/lib/ai";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { artifactDto } from "@/lib/workspace-shapes";
 
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   if (!check.ok) return check.response;
 
   try {
-    const { url } = await aiGenerateImage(prompt, size ?? "1024x1024");
+    const { url } = await aiGenerateImage(check.userId, prompt, size ?? "1024x1024");
     const artifact = await db.artifact.create({
       data: {
         projectId,
@@ -50,10 +50,13 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ artifact: artifactDto(artifact) }, { status: 201 });
   } catch (err) {
-    console.error("[ai/image] failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Не удалось сгенерировать изображение — попробуйте ещё раз" },
-      { status: 502 },
+    const mapped = aiErrorResponse(
+      err,
+      "Не удалось сгенерировать изображение — попробуйте ещё раз",
     );
+    if (mapped.status >= 500) {
+      console.error("[ai/image] failed:", err instanceof Error ? err.message : err);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }

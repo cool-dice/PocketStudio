@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { aiChatJson } from "@/lib/ai";
+import { aiChatJson, aiErrorResponse } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { documentDto } from "@/lib/workspace-shapes";
@@ -197,17 +197,22 @@ export async function POST(req: Request) {
 
   let plan: MonetizePlan;
   try {
-    const normalized = normalizePlan(await aiChatJson(MONETIZE_SYSTEM, userPrompt));
+    const normalized = normalizePlan(
+      await aiChatJson(check.userId, "monetize", MONETIZE_SYSTEM, userPrompt),
+    );
     if (!normalized) {
       throw new Error("Пустой или неструктурированный ответ модели");
     }
     plan = normalized;
   } catch (err) {
-    console.error("[ai/monetize] failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Модель не собрала план — попробуйте ещё раз" },
-      { status: 502 },
+    const mapped = aiErrorResponse(
+      err,
+      "Модель не собрала план — попробуйте ещё раз",
     );
+    if (mapped.status >= 500) {
+      console.error("[ai/monetize] failed:", err instanceof Error ? err.message : err);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 
   try {

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 
 import { CaptureDialog } from "@/components/app/capture-dialog";
 import { AdminScreen } from "@/components/app/admin-screen";
+import { AiSettingsScreen } from "@/components/app/ai-settings-screen";
 import { ChatArea } from "@/components/app/chat-area";
 import { ContextPanel } from "@/components/app/context-panel";
 import { CreateProjectDialog } from "@/components/app/create-project-dialog";
@@ -109,6 +110,8 @@ export function AppShell() {
         />
       ) : mainArea === "admin" ? (
         <AdminScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "settings" ? (
+        <AiSettingsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : mainArea === "documents" ? (
         <DocumentsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : mainArea === "images" ? (

@@ -33,11 +33,13 @@ import {
   Search,
   Shield,
   ShieldAlert,
+  Sparkles,
   Trash2,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { AdminAiPanel } from "@/components/app/admin-ai-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -78,6 +80,7 @@ interface AdminScreenProps {
 }
 
 type RoleFilter = "" | "admin" | "client";
+type AdminTab = "overview" | "ai";
 
 export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
   const { user } = useAuth();
@@ -94,6 +97,7 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
   const [deleteTarget, setDeleteTarget] = useState<AdminUserListItem | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<AdminTab>("overview");
 
   /* ── Initial load: stats + audit (users load through the filter effect) ── */
   useEffect(() => {
@@ -255,12 +259,16 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
         onOpenMobileNav={onOpenMobileNav}
         onRefresh={() => void refreshAll()}
         refreshing={refreshing}
+        tab={tab}
+        onTab={setTab}
       />
 
       {/* ── Feed ── */}
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl space-y-6 p-4 sm:p-6">
-          {error ? (
+          {tab === "ai" ? (
+            <AdminAiPanel />
+          ) : error ? (
             <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card p-10 text-center">
               <span className="flex size-12 items-center justify-center rounded-full bg-destructive/10">
                 <ShieldAlert className="size-6 text-destructive" aria-hidden="true" />
@@ -627,10 +635,14 @@ function Header({
   onOpenMobileNav,
   onRefresh,
   refreshing,
+  tab,
+  onTab,
 }: {
   onOpenMobileNav: () => void;
   onRefresh?: () => void;
   refreshing?: boolean;
+  tab?: AdminTab;
+  onTab?: (tab: AdminTab) => void;
 }) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
@@ -646,6 +658,19 @@ function Header({
       <h1 className="truncate text-sm font-semibold sm:text-[15px]">
         🛡 Админ-панель
       </h1>
+      {onTab && (
+        <Tabs value={tab} onValueChange={(v) => onTab(v as AdminTab)}>
+          <TabsList className="h-8 rounded-xl">
+            <TabsTrigger value="overview" className="h-6 rounded-lg text-xs">
+              Обзор
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="h-6 rounded-lg gap-1 text-xs">
+              <Sparkles className="size-3" />
+              Модели ИИ
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
       <div className="flex-1" />
       {onRefresh && (
         <Button

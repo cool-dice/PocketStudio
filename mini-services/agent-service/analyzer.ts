@@ -250,7 +250,7 @@ async function analyzeNote(noteId: string): Promise<void> {
     try {
       const raw = await generateLLMResponse(ANALYSIS_SYSTEM_PROMPT, [
         { role: "user", content: userMessage },
-      ]);
+      ], { userId: note.userId, toolId: "notes", jsonMode: true });
       analysis = parseAnalysisResult(raw);
     } catch (err) {
       lastError = err;

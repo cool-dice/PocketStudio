@@ -243,9 +243,9 @@ welcome-чипы открывают воркспейсы; промпт аген�
 ## Фазы функционализации
 
 ### Фаза A — Ядро оркестратора + Документы/NarrativeCore (первая)
-1. **Единый AI-интерфейс** (`src/lib/ai/`): один модуль-обёртка над z-ai-web-dev-sdk
-   (chat/vision/generate-image/tts/asr) + реестр возможностей + фолбеки.
-   Все модули студии и агент зовут только его.
+1. **Единый AI-интерфейс** (`src/lib/ai/`): шлюз OpenAI-compatible + Anthropic-compatible
+   (chat / image / tts / asr). Провайдеры и модели настраиваются в админке; пользователи
+   могут подключить свой ключ (BYOK) или выбрать платформенный прокси. z-ai удалён.
 2. **Схема БД**: `Document`, `DocumentChapter` (текст, статус, версии);
    NarrativeCore: `WorldEntity` (лор: локации/события/предметы/фракции, связи),
    `Character` + `CharacterState` (состояния по главам), `Portrait`/`Illustration`

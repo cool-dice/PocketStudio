@@ -1,6 +1,6 @@
 // PocketStudio agent tools — notebook + project/file tools.
 //
-// The z-ai SDK has no native function calling, so tools are described in the
+// Модели отвечают JSON-протоколом, native function calling не требуется.
 // system prompt (JSON protocol) and the model's JSON reply is parsed by
 // agent.ts:parseToolCall. Every tool is userId-scoped and validates its args
 // manually — invalid args return {error: "..."} instead of throwing, so the

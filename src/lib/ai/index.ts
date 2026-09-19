@@ -1,29 +1,31 @@
 /**
- * Единый AI-интерфейс платформы (Фаза A) — единственная точка обращения
- * к z-ai-web-dev-sdk в Next-приложении. Только server-side: модуль
- * импортируется исключительно API routes.
- *
- * Возможности:
- * - chatJson: LLM-запрос со строгим JSON-выводом (анализ документов,
- *   генерация описаний сущностей);
- * - generateImage: text-to-image → base64 PNG;
- * - tts: text-to-speech → WAV Buffer.
+ * Единый AI-интерфейс платформы — точка обращения Next API routes.
+ * Шлюз: OpenAI-совместимые и Anthropic-совместимые провайдеры
+ * (ключи в БД, сервер проксирует). Только server-side.
  */
 
-import ZAI from "z-ai-web-dev-sdk";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
 import { db } from "@/lib/db";
+import {
+  chatCompletion,
+  generateImage,
+  synthesizeSpeech,
+  transcribeAudio,
+  type ChatMessage,
+} from "./connector";
+import { GatewayError, isGatewayError } from "./errors";
+import { resolveToolRoute } from "./resolve";
+import type { AiToolId } from "./tools";
 
-type ZaiClient = Awaited<ReturnType<typeof ZAI.create>>;
-let zaiPromise: Promise<ZaiClient> | null = null;
-
-async function getZai(): Promise<ZaiClient> {
-  zaiPromise ??= ZAI.create();
-  return zaiPromise;
-}
+export { GatewayError, isGatewayError } from "./errors";
+export { AI_TOOLS, AI_TOOL_IDS, UNCONFIGURED_TOOL_MESSAGE } from "./tools";
+export type { AiToolId } from "./tools";
+export { maskApiKey, last4OfKey } from "./crypto";
+export { resolveToolRoute } from "./resolve";
+export { testConnection, mapTtsVoice } from "./connector";
 
 /** Папка для сгенерированных файлов (раздаётся Next как статика /gen/...). */
 const GEN_DIR = path.join(process.cwd(), "public", "gen");
@@ -45,12 +47,8 @@ export function saveGeneratedFile(
   return `/gen/${name}`;
 }
 
-/* ─────────────────────────── LLM (JSON) ─────────────────────────── */
-
-/** Вытащить первый JSON-объект/массив из ответа модели.
- *  Сбалансированное сканирование скобок (учитывая строки) надёжнее
- *  lastIndexOf: переживает текст и скобки после JSON. */
-function extractJson(text: string): unknown {
+/** Вытащить первый JSON-объект/массив из ответа модели. */
+export function extractJson(text: string): unknown {
   const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
   const start = cleaned.search(/[[{]/);
   if (start < 0) throw new Error("Модель не вернула JSON");
@@ -90,48 +88,61 @@ function extractJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-/** LLM → JSON с одним автоповтором: LLM иногда выдаёт битый JSON,
- *  вторая попытка почти всегда валидна. */
-export async function aiChatJson<T>(system: string, user: string): Promise<T> {
-  const zai = await getZai();
+async function chatForTool(
+  userId: string,
+  toolId: AiToolId,
+  messages: ChatMessage[],
+  jsonMode = false,
+): Promise<string> {
+  const route = await resolveToolRoute(db, userId, toolId);
+  const result = await chatCompletion(route, messages, { jsonMode });
+  return result.text;
+}
+
+/** LLM → JSON с одним автоповтором. */
+export async function aiChatJson<T>(
+  userId: string,
+  toolId: AiToolId,
+  system: string,
+  user: string,
+): Promise<T> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await zai.chat.completions.create({
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      thinking: { type: "disabled" },
-    });
-    const content = response.choices[0]?.message?.content ?? "";
     try {
+      const content = await chatForTool(
+        userId,
+        toolId,
+        [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        true,
+      );
       return extractJson(content) as T;
     } catch (err) {
+      if (isGatewayError(err) && err.status === 400) throw err;
       lastError = err;
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Модель не вернула JSON");
 }
 
-/** LLM-текст (не JSON) — для генерации описаний. */
-export async function aiChatText(system: string, user: string): Promise<string> {
-  const zai = await getZai();
-  const response = await zai.chat.completions.create({
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-    thinking: { type: "disabled" },
-  });
-  return (response.choices[0]?.message?.content ?? "").trim();
+/** LLM-текст (не JSON). */
+export async function aiChatText(
+  userId: string,
+  toolId: AiToolId,
+  system: string,
+  user: string,
+): Promise<string> {
+  return chatForTool(userId, toolId, [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ]);
 }
 
-/* ─────────────────────────── Image generation ─────────────────────────── */
-
 /**
- * Санитайзер размера картинки: апстрим-требования — стороны 512–2880,
- * кратные 32, и суммарно ≤ 2^22 пикселей. Пресеты вида «1440x720»
- * доводятся до ближайших валидных (720 → 736), пропорция сохраняется.
+ * Санитайзер размера картинки: стороны 512–2880, кратные 32,
+ * суммарно ≤ 2^22 пикселей.
  */
 function sanitizeImageSize(size: string): string {
   const m = /^(\d{3,4})x(\d{3,4})$/.exec(size.trim());
@@ -145,34 +156,34 @@ function sanitizeImageSize(size: string): string {
     const scale = Math.sqrt(MAX_PIXELS / (w * h));
     w = round32(w * scale);
     h = round32(h * scale);
-    // Округление кратности могло снова превысить бюджет — жмём стороны.
     while (w * h > MAX_PIXELS && w > 512) w = round32(w - 32);
     while (w * h > MAX_PIXELS && h > 512) h = round32(h - 32);
   }
   return `${w}x${h}`;
 }
 
-/** Сгенерировать изображение и сохранить в public/gen → {url}. */
 export async function aiGenerateImage(
+  userId: string,
   prompt: string,
   size = "1024x1024",
 ): Promise<{ url: string }> {
-  const zai = await getZai();
-  const safeSize = sanitizeImageSize(size);
-  const response = await zai.images.generations.create({
+  const route = await resolveToolRoute(db, userId, "image");
+  const { buffer } = await generateImage(route, {
     prompt,
-    size: safeSize as "1024x1024",
+    size: sanitizeImageSize(size),
   });
-  const base64 = response.data[0]?.base64;
-  if (!base64) throw new Error("Пустой ответ генерации изображения");
-  const buffer = Buffer.from(base64, "base64");
   const url = saveGeneratedFile(buffer, "png");
   return { url };
 }
 
-/* ─────────────────────────── TTS ─────────────────────────── */
-
 export const TTS_VOICES = [
+  "alloy",
+  "nova",
+  "shimmer",
+  "echo",
+  "onyx",
+  "fable",
+  "sage",
   "tongtong",
   "chuichui",
   "xiaochen",
@@ -183,25 +194,24 @@ export const TTS_VOICES = [
 ] as const;
 export type TtsVoice = (typeof TTS_VOICES)[number];
 
-/** Озвучить текст → WAV Buffer. */
 export async function aiTts(
+  userId: string,
   text: string,
-  voice: TtsVoice = "tongtong",
+  voice: TtsVoice = "alloy",
   speed = 1.0,
 ): Promise<Buffer> {
-  const zai = await getZai();
-  const response = await zai.audio.tts.create({
-    input: text,
-    voice,
-    speed,
-    response_format: "wav",
-    stream: false,
-  });
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(new Uint8Array(arrayBuffer));
+  const route = await resolveToolRoute(db, userId, "tts");
+  return synthesizeSpeech(route, { text, voice, speed });
 }
 
-/* ─────────────────────────── Пайплайны ─────────────────────────── */
+export async function aiTranscribe(
+  userId: string,
+  buffer: Buffer,
+  mime?: string,
+): Promise<string> {
+  const route = await resolveToolRoute(db, userId, "asr");
+  return transcribeAudio(route, { buffer, mime });
+}
 
 type FindingType = "contradiction" | "omission" | "inconsistency";
 type FindingSeverity = "info" | "warning" | "critical";
@@ -224,14 +234,12 @@ const ANALYST_SYSTEM = `Ты — редактор-аналитик текста 
 {"type":"contradiction|omission|inconsistency","severity":"info|warning|critical","title":"краткое описание проблемы на русском","quote":"точная цитата из текста (если есть)","advice":"конкретный совет, что сделать","sourceRef":"глава/раздел, напр. «гл. 2 · гл. 7»"}
 Если проблем нет — верни [].`;
 
-/** Анализ документа: секции → LLM → черновики находок. */
 export async function aiAnalyzeDocument(
+  userId: string,
   sections: { title: string; content: string }[],
 ): Promise<AnalystFindingDraft[]> {
-  const doc = sections
-    .map((s) => `### ${s.title}\n${s.content}`)
-    .join("\n\n");
-  const raw = await aiChatJson<unknown>(ANALYST_SYSTEM, doc);
+  const doc = sections.map((s) => `### ${s.title}\n${s.content}`).join("\n\n");
+  const raw = await aiChatJson<unknown>(userId, "document_check", ANALYST_SYSTEM, doc);
   if (!Array.isArray(raw)) return [];
   const allowedTypes = ["contradiction", "omission", "inconsistency"];
   const allowedSev = ["info", "warning", "critical"];
@@ -248,9 +256,6 @@ export async function aiAnalyzeDocument(
     .filter((f) => f.title.length > 0);
 }
 
-/* ─────────────────────────── Хелперы ─────────────────────────── */
-
-/** Принадлежит ли воркспейс пользователю. */
 export async function assertProjectOwner(
   projectId: string,
   userId: string,
@@ -260,4 +265,15 @@ export async function assertProjectOwner(
     select: { userId: true },
   });
   return project?.userId === userId;
+}
+
+/** Map a thrown error to a JSON API response payload. */
+export function aiErrorResponse(err: unknown, fallback: string): {
+  error: string;
+  status: number;
+} {
+  if (err instanceof GatewayError) {
+    return { error: err.message, status: err.status };
+  }
+  return { error: fallback, status: 502 };
 }

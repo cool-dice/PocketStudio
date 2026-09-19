@@ -337,6 +337,70 @@ export interface AuditLogEntry {
   user: { name: string; email: string } | null;
 }
 
+/* ── AI providers (admin + user settings) ── */
+
+export type AiProviderKind = "openai_compatible" | "anthropic_compatible";
+
+export interface AiModelDto {
+  id: string;
+  providerId: string;
+  modelId: string;
+  displayName: string;
+  capChat: boolean;
+  capImage: boolean;
+  capTts: boolean;
+  capAsr: boolean;
+  capEmbeddings: boolean;
+  enabled: boolean;
+}
+
+export interface AiProviderDto {
+  id: string;
+  kind: AiProviderKind | string;
+  name: string;
+  baseUrl: string;
+  apiKeyMasked: string;
+  enabled: boolean;
+  visibleToUsers: boolean;
+  markupPercent: number | null;
+  markupMultiplier: number | null;
+  extraHeaders: string | null;
+  isPlatform: boolean;
+  createdAt: string;
+  updatedAt: string;
+  models: AiModelDto[];
+}
+
+export interface AiToolDefaultDto {
+  toolId: string;
+  label: string;
+  description?: string;
+  capability: string;
+  modelId: string | null;
+  model: {
+    id: string;
+    modelId: string;
+    displayName: string;
+    providerId: string;
+    providerName: string;
+  } | null;
+}
+
+export interface UserAiToolChoice {
+  id: string;
+  label: string;
+  description: string;
+  capability: string;
+  modelId: string | null;
+  useStudioDefault: boolean;
+}
+
+export interface UserAiSettingsDto {
+  tools: UserAiToolChoice[];
+  platformProviders: AiProviderDto[];
+  ownProviders: AiProviderDto[];
+}
+
 /* ── Global search (Stage 4) ── */
 
 export interface SearchThreadHit {

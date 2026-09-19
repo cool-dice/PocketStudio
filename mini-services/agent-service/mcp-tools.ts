@@ -2,8 +2,8 @@
 //
 // Три инструмента, которые включает/выключает пользователь на экране
 // «Интеграции» (строки McpServer в общей SQLite):
-//   fetch      → fetch_url  (page_reader через z-ai-web-dev-sdk)
-//              → web_search (web_search через SDK)
+//   fetch      → fetch_url  (обычный HTTP + HTML→текст)
+//              → web_search (DuckDuckGo HTML)
 //   browser    → browser_read (agent-browser CLI: open + read + close)
 //   filesystem → list_files/read_file/write_file/delete_file/checkpoint
 //                (определены в tools.ts и тегированы mcpAdapter)
@@ -14,7 +14,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { getZai } from "./agent";
 import type { ToolDef } from "./tools";
 
 const execFileAsync = promisify(execFile);
@@ -100,10 +99,21 @@ const fetchUrl: ToolDef = {
     }
 
     try {
-      const zai = await getZai();
-      const page = await zai.functions.invoke("page_reader", { url });
-      const html = page?.data?.html ?? "";
-      const title = (page?.data?.title ?? url).toString().slice(0, 200);
+      const res = await fetch(url, {
+        redirect: "follow",
+        headers: {
+          "user-agent":
+            "PocketStudio/1.0 (+https://pocketstudio.local; fetch_url)",
+          accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
+        },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) {
+        return { error: `Страница недоступна (HTTP ${res.status})` };
+      }
+      const html = await res.text();
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const title = (titleMatch?.[1] ? htmlToText(titleMatch[1]) : url).slice(0, 200);
       const text = htmlToText(html).slice(0, MAX_PAGE_TEXT);
       if (!text) {
         return { error: "Страница пустая или недоступна для чтения" };
@@ -111,8 +121,8 @@ const fetchUrl: ToolDef = {
       return {
         message: `Страница прочитана: ${title} (${text.length} симв.)`,
         title,
-        url: page?.data?.url ?? url,
-        publishedTime: page?.data?.publishedTime ?? null,
+        url: res.url || url,
+        publishedTime: null,
         text,
       };
     } catch (err) {
@@ -153,20 +163,50 @@ const webSearch: ToolDef = {
     }
 
     try {
-      const zai = await getZai();
-      const items = await zai.functions.invoke("web_search", {
-        query,
-        num,
+      const searchUrl =
+        "https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query);
+      const res = await fetch(searchUrl, {
+        headers: {
+          "user-agent":
+            "PocketStudio/1.0 (+https://pocketstudio.local; web_search)",
+          accept: "text/html",
+        },
+        signal: AbortSignal.timeout(15_000),
       });
-      const results = (Array.isArray(items) ? items : [])
-        .filter((r): r is NonNullable<typeof items[number]> => typeof r === "object" && r !== null)
-        .map((r) => ({
-          title: String(r.name ?? "").slice(0, 200),
-          url: String(r.url ?? ""),
-          snippet: String(r.snippet ?? "").slice(0, 400),
-          host: String(r.host_name ?? ""),
-        }))
-        .filter((r) => r.url);
+      if (!res.ok) {
+        return { error: `Поиск недоступен (HTTP ${res.status})` };
+      }
+      const html = await res.text();
+      const results: Array<{
+        title: string;
+        url: string;
+        snippet: string;
+        host: string;
+      }> = [];
+      const re =
+        /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>|<td[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/td>)/gi;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(html)) && results.length < num) {
+        const href = match[1] ?? "";
+        const title = htmlToText(match[2] ?? "").slice(0, 200);
+        const snippet = htmlToText(match[3] || match[4] || "").slice(0, 400);
+        let resolved = href;
+        try {
+          const u = new URL(href, "https://duckduckgo.com");
+          const uddg = u.searchParams.get("uddg");
+          resolved = uddg ? decodeURIComponent(uddg) : u.toString();
+        } catch {
+          continue;
+        }
+        if (!resolved.startsWith("http")) continue;
+        let host = "";
+        try {
+          host = new URL(resolved).host;
+        } catch {
+          host = "";
+        }
+        results.push({ title: title || resolved, url: resolved, snippet, host });
+      }
       if (results.length === 0) {
         return { error: `По запросу «${query}» ничего не нашлось` };
       }

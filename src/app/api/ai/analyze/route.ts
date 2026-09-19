@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { aiAnalyzeDocument } from "@/lib/ai";
+import { aiAnalyzeDocument, aiErrorResponse } from "@/lib/ai";
 import { ensureOwned } from "@/lib/workspace-api";
 import { findingDto } from "@/lib/workspace-shapes";
 
@@ -45,6 +45,7 @@ export async function POST(req: Request) {
 
   try {
     const drafts = await aiAnalyzeDocument(
+      check.userId,
       filled.map((s) => ({ title: s.title, content: s.content })),
     );
 
@@ -71,10 +72,13 @@ export async function POST(req: Request) {
       { status: 201 },
     );
   } catch (err) {
-    console.error("[ai/analyze] failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Аналитик не справился — попробуйте ещё раз" },
-      { status: 502 },
+    const mapped = aiErrorResponse(
+      err,
+      "Аналитик не справился — попробуйте ещё раз",
     );
+    if (mapped.status >= 500) {
+      console.error("[ai/analyze] failed:", err instanceof Error ? err.message : err);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }

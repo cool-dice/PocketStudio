@@ -511,6 +511,7 @@ async function runPlanner(
   thread: ThreadTurnInfo,
   content: string,
   existingTree: string[],
+  userId: string,
 ): Promise<string[] | null> {
   try {
     const prompt = buildPlannerPrompt({
@@ -520,7 +521,7 @@ async function runPlanner(
     });
     const raw = await generateLLMResponse(prompt, [
       { role: "user", content: content.slice(0, MAX_CONTENT_LENGTH) },
-    ]);
+    ], { userId, toolId: "agent" });
     const steps = parsePlannerSteps(raw);
     if (steps && steps.length >= 2) return steps;
     return null;
@@ -737,7 +738,7 @@ async function runAgentTurn(
           // tree is a nice-to-have for the planner
         }
       }
-      const steps = await runPlanner(thread, content, existingTree);
+      const steps = await runPlanner(thread, content, existingTree, user.sub);
       if (steps) {
         orchestrated = true;
         await savePlanTasks(threadId, user.sub, steps);
@@ -761,7 +762,10 @@ async function runAgentTurn(
       io.to(room).emit("agent:thinking", { threadId });
 
       const history = await buildLLMHistory(threadId);
-      const raw = await generateLLMResponse(systemPrompt, history);
+      const raw = await generateLLMResponse(systemPrompt, history, {
+        userId: user.sub,
+        toolId: "agent",
+      });
 
       const call = parseToolCall(raw);
       if (!call) {
@@ -818,7 +822,10 @@ async function runAgentTurn(
               `Шаги плана: ${pending.map((t) => `#${t.order} «${t.text}»`).join("; ")}. ` +
               "Вызывай complete_task ТОЛЬКО для шагов, которые ты реально уже выполнил в этом диалоге. Если ни один не выполнен — просто ответь текстом.",
           });
-          const raw = await generateLLMResponse(systemPrompt, sweepHistory);
+          const raw = await generateLLMResponse(systemPrompt, sweepHistory, {
+            userId: user.sub,
+            toolId: "agent",
+          });
           const call = parseToolCall(raw);
           if (!call) break; // model answered with text — accept it
           sweepCalls++;
@@ -900,7 +907,10 @@ async function runAgentTurn(
             tasksNow.map((t) => ({ text: t.text, done: t.done })),
           );
           const reviewerHistory = await buildLLMHistory(threadId);
-          const reviewRaw = await generateLLMResponse(reviewerPrompt, reviewerHistory);
+          const reviewRaw = await generateLLMResponse(reviewerPrompt, reviewerHistory, {
+            userId: user.sub,
+            toolId: "agent",
+          });
           const reviewClean = sanitizeTextAnswer(reviewRaw);
           if (reviewClean && reviewClean.length >= 20) {
             answerText = reviewClean;
