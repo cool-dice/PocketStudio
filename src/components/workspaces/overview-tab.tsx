@@ -24,7 +24,6 @@ import {
   RotateCcw,
   Wand2,
 } from "lucide-react";
-import { toast } from "sonner";
 
 import { ArtifactCard } from "@/components/workspaces/shared/artifact-card";
 import {
@@ -52,6 +51,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { useThreads } from "@/hooks/use-threads";
+import { overviewAskDraft } from "@/lib/overview-copy";
 import { useAppUi } from "@/lib/store";
 import {
   WORKSPACE_PIPELINE_TITLE,
@@ -74,6 +75,8 @@ const COUNT_ITEMS = [
 
 export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
   const setWorkspaceTab = useAppUi((s) => s.setWorkspaceTab);
+  const setComposerDraft = useAppUi((s) => s.setComposerDraft);
+  const { threads, selectThread, startProjectThread } = useThreads();
 
   /** Артефакты из БД, снабжённые id воркспейса (null — грузится/сменился id). */
   const [loaded, setLoaded] = useState<{
@@ -127,9 +130,15 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
   }
 
   function askOrchestrator() {
-    toast.info("Оркестратор", {
-      description: `Запрос «${prompt.title}» отправлен — ответ появится во вкладке «Чат».`,
-    });
+    const draft = overviewAskDraft(workspace.name, stageLabel, prompt);
+    setComposerDraft(draft, { autoSendProjectId: workspace.id });
+    const existing = threads.find((t) => t.projectId === workspace.id);
+    if (existing) {
+      void selectThread(existing.id);
+    } else {
+      void startProjectThread(workspace.id, `Чат · ${workspace.name}`);
+    }
+    setWorkspaceTab("chat");
   }
 
   function renderArtifact(artifact: ArtifactItem) {

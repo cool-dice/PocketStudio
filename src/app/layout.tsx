@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppProviders } from "@/components/app/providers";
+import { LANDING_META_DESCRIPTION } from "@/lib/landing-copy";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,8 +18,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "PocketStudio — идея → продукт → доход",
-  description:
-    "PocketStudio — карманная творческая студия: диалог с ИИ превращает идею в тексты, изображения, аудио и видео, собирает приложение и публикует его. Один оркестратор на весь творческий конвейер.",
+  description: LANDING_META_DESCRIPTION,
   keywords: ["PocketStudio", "ИИ", "творческая студия", "генерация", "аудио", "видео", "деплой", "агент"],
   icons: {
     icon: "/logo.svg",

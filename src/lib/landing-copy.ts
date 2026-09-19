@@ -17,6 +17,9 @@ export function firstUserAdminHint(firstUserBecomesAdmin = false): string {
     : "";
 }
 
+export const LANDING_META_DESCRIPTION =
+  "PocketStudio — карманная творческая студия: диалог с ИИ превращает идею в тексты, изображения, аудио, видео и код приложения. Публикация на внешний хост и карточные выплаты — отдельные шаги.";
+
 export const LANDING_HERO_SUB =
   "PocketStudio превращает диалог с ИИ в творческий конвейер: книги и статьи, изображения, аудио и видео, код приложения — от первой мысли до оффера в студии. Выплаты симулируются: карточная сеть не подключена.";
 
@@ -69,6 +72,7 @@ export function landingCtaBandNote(firstUserBecomesAdmin = false): string {
 
 export function landingMarketingBlob(): string {
   return [
+    LANDING_META_DESCRIPTION,
     LANDING_HERO_SUB,
     landingHeroNote(false),
     landingHeroNote(true),

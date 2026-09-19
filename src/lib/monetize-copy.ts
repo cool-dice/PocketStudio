@@ -16,3 +16,10 @@ export function monetizeGenerateErrorHint(message: string): string {
     ? MONETIZE_UNCONFIGURED_HINT
     : MONETIZE_PLAN_FAILED_HINT;
 }
+
+export const MONETIZE_ASSETS_TITLE = "Готовые файлы воркспейса";
+export const MONETIZE_ASSETS_HINT =
+  "Артефакты с файлом — открыть или скачать. Это не публикация на хост.";
+export const MONETIZE_ASSETS_EMPTY = "В воркспейсе пока нет артефактов";
+export const MONETIZE_ASSETS_NO_FILE =
+  "Файлов пока нет — только концепты без url";

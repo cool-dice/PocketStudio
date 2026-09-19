@@ -6,6 +6,11 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppUi } from "@/lib/store";
+import {
+  WORKSPACES_EMPTY,
+  WORKSPACES_LOAD_ERROR,
+  WORKSPACES_RETRY,
+} from "@/lib/workspace-copy";
 
 /**
  * Loading / error / empty for the global «choose a workspace» chip bars.
@@ -44,11 +49,11 @@ export function WorkspacePickerStatus({
       >
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
-          Не удалось загрузить воркспейсы
+          {WORKSPACES_LOAD_ERROR}
         </p>
         <Button size="sm" variant="outline" onClick={onRetry}>
           <RefreshCw className="size-4" aria-hidden="true" />
-          Повторить
+          {WORKSPACES_RETRY}
         </Button>
       </div>
     );
@@ -58,7 +63,7 @@ export function WorkspacePickerStatus({
     return (
       <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
         <p className="text-sm text-muted-foreground">
-          Пока нет ни одного воркспейса — сначала создайте его.
+          {WORKSPACES_EMPTY} — сначала создайте его.
         </p>
         <Button size="sm" onClick={() => setMainArea("workspaces")}>
           К воркспейсам

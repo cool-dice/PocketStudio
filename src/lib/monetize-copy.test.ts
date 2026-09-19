@@ -6,6 +6,8 @@ import {
   MONETIZE_PLAN_FAILED,
   MONETIZE_PLAN_FAILED_HINT,
   MONETIZE_UNCONFIGURED_HINT,
+  MONETIZE_ASSETS_HINT,
+  MONETIZE_ASSETS_TITLE,
   monetizeGenerateErrorHint,
 } from "./monetize-copy";
 
@@ -25,5 +27,14 @@ describe("monetize plan honesty copy", () => {
       MONETIZE_UNCONFIGURED_HINT,
     );
     expect(monetizeGenerateErrorHint("таймаут")).toBe(MONETIZE_PLAN_FAILED_HINT);
+  });
+
+  test("assets list does not claim a live publish", () => {
+    expect(MONETIZE_ASSETS_TITLE).toMatch(/[А-Яа-яЁё]/);
+    expect(MONETIZE_ASSETS_HINT).toMatch(/не публикация на хост/i);
+    expect(MONETIZE_ASSETS_TITLE).not.toMatch(/публикац/i);
+    expect(`${MONETIZE_ASSETS_TITLE}\n${MONETIZE_ASSETS_HINT}`).not.toMatch(
+      /publish-ить|опубликовано|stripe/i,
+    );
   });
 });

@@ -6,6 +6,7 @@ import {
   LANDING_DEPLOY_BLURB,
   LANDING_LOGIN_HREF,
   LANDING_MCP_BLURB,
+  LANDING_META_DESCRIPTION,
   LANDING_MONETIZE_BLURB,
   LANDING_REGISTER_HREF,
   firstUserAdminHint,
@@ -16,7 +17,7 @@ import {
 } from "./landing-copy";
 
 const FORBIDDEN =
-  /живой хостинг|опубликовано на хосте|выплачено картой|выплата на карту|GitHub MCP подключ|MCP GitHub подключ|подключён GitHub MCP|github mcp connected/i;
+  /живой хостинг|опубликовано на хосте|выплачено картой|выплата на карту|GitHub MCP подключ|MCP GitHub подключ|подключён GitHub MCP|github mcp connected|публикует его/i;
 
 describe("landing CTA and honesty copy", () => {
   test("CTAs go to /login or register tab", () => {
@@ -47,6 +48,8 @@ describe("landing CTA and honesty copy", () => {
     expect(LANDING_MONETIZE_BLURB).toMatch(/карточная сеть не подключена/i);
     expect(LANDING_CHAT_MOCK_PILL).toMatch(/симуляц/i);
     expect(LANDING_CHAT_MOCK_PILL).not.toMatch(/продаж/i);
+    expect(LANDING_META_DESCRIPTION).toMatch(/отдельные шаги/i);
+    expect(LANDING_META_DESCRIPTION).not.toMatch(/публикует его/i);
   });
 
   test("chat mock is labeled as a mock", () => {

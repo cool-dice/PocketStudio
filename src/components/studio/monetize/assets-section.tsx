@@ -1,10 +1,8 @@
 "use client";
 
 /**
- * Monetize (5-c) — «Активы к публикации»: РЕАЛЬНЫЕ артефакты воркспейса
- * из БД. Счётчики по типам + список готового (с url) со ссылкой
- * «открыть» и бейджем избранного. Честная подпись: что уже можно
- * publish-ить прямо сейчас.
+ * Monetize — список артефактов с url. Счётчики по типам + ссылка
+ * «открыть». Это файлы в студии, не публикация на хост.
  */
 
 import {
@@ -24,6 +22,12 @@ import {
 } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  MONETIZE_ASSETS_EMPTY,
+  MONETIZE_ASSETS_HINT,
+  MONETIZE_ASSETS_NO_FILE,
+  MONETIZE_ASSETS_TITLE,
+} from "@/lib/monetize-copy";
 import type { ArtifactDto, ArtifactType } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 
@@ -80,13 +84,12 @@ export function AssetsSection({
 
   return (
     <section
-      aria-label="Активы к публикации"
+      aria-label={MONETIZE_ASSETS_TITLE}
       className="rounded-xl border bg-card p-4 shadow-sm sm:p-6"
     >
-      <h2 className="text-base font-semibold">Активы к публикации</h2>
+      <h2 className="text-base font-semibold">{MONETIZE_ASSETS_TITLE}</h2>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        Что уже можно publish-ить прямо сейчас — реальные артефакты этого
-        воркспейса
+        {MONETIZE_ASSETS_HINT}
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
@@ -132,8 +135,8 @@ export function AssetsSection({
           />
           <p className="text-sm text-muted-foreground">
             {artifacts.length === 0
-              ? "В воркспейсе пока нет артефактов"
-              : "Готовых к публикации артефактов пока нет"}
+              ? MONETIZE_ASSETS_EMPTY
+              : MONETIZE_ASSETS_NO_FILE}
           </p>
           <p className="max-w-md text-xs text-muted-foreground/70">
             Сгенерируйте изображения, обложки или озвучку в соответствующих
