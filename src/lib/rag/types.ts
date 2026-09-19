@@ -64,3 +64,6 @@ export const RAG_EMBEDDING_DIM = 1536;
 
 export const UNCONFIGURED_EMBEDDINGS_MESSAGE =
   "Модель эмбеддингов не настроена. Админ → Модели ИИ → инструмент «Эмбеддинги».";
+
+export const EMBEDDING_DIM_MISMATCH_MESSAGE =
+  `Модель эмбеддингов вернула векторы не той длины. Студия хранит ${RAG_EMBEDDING_DIM} измерений (например text-embedding-3-small). Смените модель в Админ → Модели ИИ.`;

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
 import { sectionDto } from "@/lib/workspace-shapes";
+import { scheduleIndexSection } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,8 @@ export async function POST(req: Request, { params }: Params) {
       data: { updatedAt: new Date() },
     }),
   ]);
+
+  scheduleIndexSection(db, updated.id);
 
   return NextResponse.json({ section: sectionDto(updated) });
 }

@@ -7,7 +7,11 @@ import type { PrismaClient } from "@prisma/client";
 import { createEmbeddings } from "../ai/connector";
 import { GatewayError } from "../ai/errors";
 import { resolveToolRoute } from "../ai/resolve";
-import { UNCONFIGURED_EMBEDDINGS_MESSAGE } from "./types";
+import {
+  EMBEDDING_DIM_MISMATCH_MESSAGE,
+  RAG_EMBEDDING_DIM,
+  UNCONFIGURED_EMBEDDINGS_MESSAGE,
+} from "./types";
 
 export async function embedTexts(
   db: PrismaClient,
@@ -17,6 +21,10 @@ export async function embedTexts(
   if (texts.length === 0) return [];
   const route = await resolveToolRoute(db, userId, "embeddings");
   const { vectors } = await createEmbeddings(route, texts);
+  const dim = vectors[0]?.length ?? 0;
+  if (vectors.length > 0 && dim !== RAG_EMBEDDING_DIM) {
+    throw new GatewayError(EMBEDDING_DIM_MISMATCH_MESSAGE, 400);
+  }
   return vectors;
 }
 

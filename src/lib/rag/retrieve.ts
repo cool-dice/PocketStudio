@@ -9,9 +9,66 @@ import { rankCanonHits } from "../retrieve";
 import { tryEmbedTexts } from "./embed";
 import { chunkMatchesScope } from "./scope";
 import { loadScopedChunks, searchVector } from "./store";
-import type { RagHit, RagScope, RetrieveResult } from "./types";
+import type { RagChunkRow, RagHit, RagScope, RetrieveResult } from "./types";
 
 const KEYWORD_NOTICE = "поиск без эмбеддингов";
+
+/** Drop chunks whose project was archived (global chat) or whose note/section is gone. */
+async function filterLiveChunks(
+  db: PrismaClient,
+  scope: RagScope,
+  rows: RagChunkRow[],
+): Promise<RagChunkRow[]> {
+  if (rows.length === 0) return rows;
+  let next = rows;
+  if (scope.kind === "global") {
+    const projectIds = [
+      ...new Set(next.map((r) => r.projectId).filter((id): id is string => Boolean(id))),
+    ];
+    if (projectIds.length > 0) {
+      const archived = await db.project.findMany({
+        where: { id: { in: projectIds }, archived: true },
+        select: { id: true },
+      });
+      const skip = new Set(archived.map((p) => p.id));
+      next = next.filter((r) => !r.projectId || !skip.has(r.projectId));
+    }
+  }
+  const noteIds = [
+    ...new Set(next.filter((r) => r.sourceType === "note").map((r) => r.sourceId)),
+  ];
+  const sectionIds = [
+    ...new Set(next.filter((r) => r.sourceType === "section").map((r) => r.sourceId)),
+  ];
+  const liveNotes =
+    noteIds.length === 0
+      ? null
+      : new Set(
+          (
+            await db.note.findMany({
+              where: { id: { in: noteIds } },
+              select: { id: true },
+            })
+          ).map((n) => n.id),
+        );
+  const liveSections =
+    sectionIds.length === 0
+      ? null
+      : new Set(
+          (
+            await db.documentSection.findMany({
+              where: { id: { in: sectionIds } },
+              select: { id: true },
+            })
+          ).map((s) => s.id),
+        );
+  if (!liveNotes && !liveSections) return next;
+  return next.filter((r) => {
+    if (r.sourceType === "note" && liveNotes) return liveNotes.has(r.sourceId);
+    if (r.sourceType === "section" && liveSections) return liveSections.has(r.sourceId);
+    return true;
+  });
+}
 
 export async function retrieve(
   db: PrismaClient,
@@ -41,7 +98,8 @@ export async function retrieve(
       limit: limit * 2,
     });
     const scoped = rows.filter((r) => chunkMatchesScope(r, opts.scope));
-    const hits = scoped.slice(0, limit).map(rowToHit);
+    const live = await filterLiveChunks(db, opts.scope, scoped);
+    const hits = live.slice(0, limit).map(rowToHit);
     if (hits.length > 0) {
       return {
         query,
@@ -77,9 +135,10 @@ export async function keywordRetrieve(
     take: 400,
   });
   const scoped = rows.filter((r) => chunkMatchesScope(r, scope));
+  const live = await filterLiveChunks(db, scope, scoped);
   const ranked = rankCanonHits(
     query,
-    scoped.map((r) => ({
+    live.map((r) => ({
       kind: (r.sourceType === "section" || r.sourceType === "entity" || r.sourceType === "note"
         ? r.sourceType
         : "note") as "note" | "section" | "entity",
@@ -90,7 +149,7 @@ export async function keywordRetrieve(
     })),
     opts.limit,
   );
-  const byId = new Map(scoped.map((r) => [r.id, r]));
+  const byId = new Map(live.map((r) => [r.id, r]));
   return ranked.map((h) => {
     const row = byId.get(h.id);
     return {

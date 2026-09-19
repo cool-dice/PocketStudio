@@ -29,6 +29,10 @@ describe.skipIf(SKIP_PG)("retrieve scope isolation (postgres)", () => {
   let userB = "";
   let book = "";
   let coder = "";
+  let bookSectionId = "";
+  let inboxNoteId = "";
+  let otherSectionId = "";
+  let archived = "";
 
   async function seed() {
     if (userA) return;
@@ -54,17 +58,67 @@ describe.skipIf(SKIP_PG)("retrieve scope isolation (postgres)", () => {
     const coderRow = await db.project.create({
       data: { userId: userA, name: "coder", type: "app" },
     });
+    const archivedRow = await db.project.create({
+      data: { userId: userA, name: "Архив", type: "book", archived: true },
+    });
     book = bookRow.id;
     coder = coderRow.id;
+    archived = archivedRow.id;
     await db.project.create({
       data: { userId: userB, name: "Чужая книга", type: "book" },
+    });
+
+    const bookDoc = await db.document.create({
+      data: { projectId: book, title: "Тишина" },
+    });
+    const bookSec = await db.documentSection.create({
+      data: {
+        documentId: bookDoc.id,
+        title: "гл. 2",
+        content: "У Марины карие глаза. Тишина, глава 2.",
+      },
+    });
+    bookSectionId = bookSec.id;
+
+    const inbox = await db.note.create({
+      data: {
+        userId: userA,
+        rawText: "инбокс: идея клипа без воркспейса",
+      },
+    });
+    inboxNoteId = inbox.id;
+
+    const otherBook = await db.project.findFirst({
+      where: { userId: userB, name: "Чужая книга" },
+    });
+    const otherDoc = await db.document.create({
+      data: { projectId: otherBook!.id, title: "Чужое" },
+    });
+    const otherSec = await db.documentSection.create({
+      data: {
+        documentId: otherDoc.id,
+        title: "гл. 1",
+        content: "У Марины карие глаза — но это чужой канон.",
+      },
+    });
+    otherSectionId = otherSec.id;
+
+    const archivedDoc = await db.document.create({
+      data: { projectId: archived, title: "Старое" },
+    });
+    const archivedSec = await db.documentSection.create({
+      data: {
+        documentId: archivedDoc.id,
+        title: "архив",
+        content: "заархивированная глава про маяк",
+      },
     });
 
     await upsertChunk(db, {
       userId: userA,
       projectId: book,
       sourceType: "section",
-      sourceId: "sec-book",
+      sourceId: bookSectionId,
       path: "гл. 2",
       ordinal: 0,
       content: "У Марины карие глаза. Тишина, глава 2.",
@@ -88,7 +142,7 @@ describe.skipIf(SKIP_PG)("retrieve scope isolation (postgres)", () => {
       userId: userA,
       projectId: null,
       sourceType: "note",
-      sourceId: "note-inbox",
+      sourceId: inboxNoteId,
       path: null,
       ordinal: 0,
       content: "инбокс: идея клипа без воркспейса",
@@ -98,15 +152,27 @@ describe.skipIf(SKIP_PG)("retrieve scope isolation (postgres)", () => {
     });
     await upsertChunk(db, {
       userId: userB,
-      projectId: null,
+      projectId: otherBook!.id,
       sourceType: "section",
-      sourceId: "sec-other",
+      sourceId: otherSectionId,
       path: null,
       ordinal: 0,
       content: "У Марины карие глаза — но это чужой канон.",
       tokenCount: 12,
       contentHash: "h-other",
       embedding: unitVec(0),
+    });
+    await upsertChunk(db, {
+      userId: userA,
+      projectId: archived,
+      sourceType: "section",
+      sourceId: archivedSec.id,
+      path: "архив",
+      ordinal: 0,
+      content: "заархивированная глава про маяк",
+      tokenCount: 8,
+      contentHash: "h-arch",
+      embedding: unitVec(3),
     });
   }
 
@@ -148,6 +214,28 @@ describe.skipIf(SKIP_PG)("retrieve scope isolation (postgres)", () => {
     expect(result.hits.every((h) => h.excerpt.includes("чужой"))).toBe(true);
     expect(result.hits.some((h) => h.workspaceId === book)).toBe(false);
     expect(result.hits.some((h) => h.workspaceId === coder)).toBe(false);
+  });
+
+  test("global retrieve skips archived workspaces", async () => {
+    await seed();
+    const result = await retrieve(db, {
+      scope: ragScopeFromThread(userA, null),
+      query: "заархивированная глава маяк",
+      limit: 12,
+    });
+    expect(result.hits.some((h) => h.workspaceId === archived)).toBe(false);
+  });
+
+  test("deleted note is dropped even if the chunk remains", async () => {
+    await seed();
+    await db.note.delete({ where: { id: inboxNoteId } });
+    const result = await retrieve(db, {
+      scope: ragScopeFromThread(userA, null),
+      query: "инбокс идея клипа",
+      limit: 12,
+    });
+    expect(result.hits.some((h) => h.sourceId === inboxNoteId)).toBe(false);
+    expect(result.hits.some((h) => h.excerpt.includes("инбокс"))).toBe(false);
   });
 
   test("vector: mocked /v1/embeddings still honors workspace filter", async () => {

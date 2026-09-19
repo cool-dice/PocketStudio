@@ -81,7 +81,9 @@ export async function indexDocument(
     );
     if (error && !vectors) {
       const permanent =
-        /не настроена|Anthropic не умеет|не умеет считать эмбеддинги/i.test(error);
+        /не настроена|Anthropic не умеет|не умеет считать эмбеддинги|не той длины|измерений/i.test(
+          error,
+        );
       if (!permanent) embedFailed = true;
     }
     for (let j = 0; j < batch.length; j++) {

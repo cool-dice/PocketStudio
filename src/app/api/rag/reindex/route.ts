@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/admin";
 import { getUserFromRequest } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { reindexAllUsers, reindexUserData } from "@/lib/rag";
-import { UNCONFIGURED_EMBEDDINGS_MESSAGE } from "@/lib/rag/types";
+import { EMBEDDING_DIM_MISMATCH_MESSAGE, UNCONFIGURED_EMBEDDINGS_MESSAGE } from "@/lib/rag/types";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +73,10 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Не удалось переиндексировать";
-    const status = msg === UNCONFIGURED_EMBEDDINGS_MESSAGE ? 400 : 500;
+    const status =
+      msg === UNCONFIGURED_EMBEDDINGS_MESSAGE || msg === EMBEDDING_DIM_MISMATCH_MESSAGE
+        ? 400
+        : 500;
     return NextResponse.json({ error: msg }, { status });
   }
 }

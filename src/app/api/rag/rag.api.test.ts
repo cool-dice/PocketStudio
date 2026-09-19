@@ -70,11 +70,22 @@ describe.skipIf(SKIP_PG)("POST /api/rag", () => {
     bookId = book.id;
     appId = app.id;
 
+    const bookDoc = await db.document.create({
+      data: { projectId: book.id, title: "Тишина" },
+    });
+    const bookSec = await db.documentSection.create({
+      data: {
+        documentId: bookDoc.id,
+        title: "гл. 2",
+        content: "карие глаза Марины в книге Тишина",
+      },
+    });
+
     await upsertChunk(db, {
       userId: user.id,
       projectId: book.id,
       sourceType: "section",
-      sourceId: "api-sec",
+      sourceId: bookSec.id,
       path: "гл. 2",
       ordinal: 0,
       content: "карие глаза Марины в книге Тишина",

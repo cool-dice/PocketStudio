@@ -21,6 +21,6 @@ export {
   scheduleRemove,
   indexFileContent,
 } from "./hooks";
-export { reindexUserData, reindexAllUsers } from "./reindex";
+export { reindexUserData, reindexAllUsers, purgeStaleChunks } from "./reindex";
 export { shouldSkipPath } from "./skip";
 export { embeddingsConfigured } from "./embed";

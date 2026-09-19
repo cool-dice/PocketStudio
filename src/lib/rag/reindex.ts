@@ -8,7 +8,7 @@ import path from "node:path";
 
 import type { PrismaClient } from "@prisma/client";
 
-import { embeddingsConfigured } from "./embed";
+import { embeddingsConfigured, tryEmbedTexts } from "./embed";
 import {
   indexArtifactById,
   indexEntityById,
@@ -20,7 +20,8 @@ import {
 } from "./hooks";
 import { indexDocument } from "./indexer";
 import { isProbablyBinary, shouldSkipFileBytes, shouldSkipPath } from "./skip";
-import { UNCONFIGURED_EMBEDDINGS_MESSAGE } from "./types";
+import { deleteSourceChunks } from "./store";
+import { EMBEDDING_DIM_MISMATCH_MESSAGE, UNCONFIGURED_EMBEDDINGS_MESSAGE } from "./types";
 import { projectRoot } from "../workspace";
 
 export interface ReindexReport {
@@ -32,6 +33,99 @@ export interface ReindexReport {
   findings: number;
   files: number;
   threads: number;
+}
+
+/** Drop chunks whose source row is gone. Idempotent with a full reindex. */
+export async function purgeStaleChunks(
+  db: PrismaClient,
+  userId: string,
+  projectId: string | null,
+): Promise<number> {
+  const rows = await db.ragChunk.findMany({
+    where: {
+      userId,
+      ...(projectId ? { projectId } : {}),
+    },
+    select: { sourceType: true, sourceId: true },
+  });
+  const unique = new Map<string, { sourceType: string; sourceId: string }>();
+  for (const row of rows) {
+    unique.set(`${row.sourceType}:${row.sourceId}`, row);
+  }
+
+  const idList = (kind: string) =>
+    [...unique.values()].filter((r) => r.sourceType === kind).map((r) => r.sourceId);
+
+  const noteIds = idList("note");
+  const sectionIds = idList("section");
+  const entityIds = idList("entity");
+  const artifactIds = idList("artifact");
+  const skillIds = idList("skill");
+  const findingIds = idList("finding");
+
+  const live: Record<string, Set<string>> = {
+    note: new Set(
+      noteIds.length === 0
+        ? []
+        : (await db.note.findMany({ where: { id: { in: noteIds } }, select: { id: true } })).map(
+            (r) => r.id,
+          ),
+    ),
+    section: new Set(
+      sectionIds.length === 0
+        ? []
+        : (
+            await db.documentSection.findMany({
+              where: { id: { in: sectionIds } },
+              select: { id: true },
+            })
+          ).map((r) => r.id),
+    ),
+    entity: new Set(
+      entityIds.length === 0
+        ? []
+        : (
+            await db.entity.findMany({ where: { id: { in: entityIds } }, select: { id: true } })
+          ).map((r) => r.id),
+    ),
+    artifact: new Set(
+      artifactIds.length === 0
+        ? []
+        : (
+            await db.artifact.findMany({
+              where: { id: { in: artifactIds } },
+              select: { id: true },
+            })
+          ).map((r) => r.id),
+    ),
+    skill: new Set(
+      skillIds.length === 0
+        ? []
+        : (await db.skill.findMany({ where: { id: { in: skillIds } }, select: { id: true } })).map(
+            (r) => r.id,
+          ),
+    ),
+    finding: new Set(
+      findingIds.length === 0
+        ? []
+        : (
+            await db.finding.findMany({
+              where: { id: { in: findingIds } },
+              select: { id: true },
+            })
+          ).map((r) => r.id),
+    ),
+  };
+
+  let removed = 0;
+  for (const row of unique.values()) {
+    const set = live[row.sourceType];
+    if (!set) continue;
+    if (set.has(row.sourceId)) continue;
+    await deleteSourceChunks(db, userId, row.sourceType, row.sourceId);
+    removed += 1;
+  }
+  return removed;
 }
 
 export async function reindexUserData(
@@ -47,6 +141,10 @@ export async function reindexUserData(
     const ok = await embeddingsConfigured(db, opts.actorUserId);
     if (!ok) {
       throw new Error(UNCONFIGURED_EMBEDDINGS_MESSAGE);
+    }
+    const probe = await tryEmbedTexts(db, opts.actorUserId, ["pocketstudio"]);
+    if (probe.error && probe.error === EMBEDDING_DIM_MISMATCH_MESSAGE) {
+      throw new Error(EMBEDDING_DIM_MISMATCH_MESSAGE);
     }
   }
 
@@ -65,6 +163,7 @@ export async function reindexUserData(
     ? { userId: opts.targetUserId, links: { some: { projectId: opts.projectId } } }
     : { userId: opts.targetUserId };
   const notes = await db.note.findMany({ where: noteWhere, select: { id: true } });
+  await purgeStaleChunks(db, opts.targetUserId, opts.projectId ?? null);
   for (const n of notes) {
     await indexNoteById(db, n.id);
     report.notes += 1;
@@ -221,6 +320,10 @@ export async function reindexAllUsers(
 ): Promise<{ users: number }> {
   const ok = await embeddingsConfigured(db, actorUserId);
   if (!ok) throw new Error(UNCONFIGURED_EMBEDDINGS_MESSAGE);
+  const probe = await tryEmbedTexts(db, actorUserId, ["pocketstudio"]);
+  if (probe.error === EMBEDDING_DIM_MISMATCH_MESSAGE) {
+    throw new Error(EMBEDDING_DIM_MISMATCH_MESSAGE);
+  }
   const users = await db.user.findMany({ select: { id: true } });
   for (const u of users) {
     await reindexUserData(db, {
