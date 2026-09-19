@@ -82,7 +82,7 @@ function appliedMarkup(provider: ResolvedProvider): number {
   return 1;
 }
 
-function withUsage(
+export function withUsage(
   tokensIn: number | null,
   tokensOut: number | null,
   provider: ResolvedProvider,
@@ -92,7 +92,7 @@ function withUsage(
   return { tokensIn, tokensOut, billableTokensOut: billable };
 }
 
-function authHeaders(route: ResolvedRoute): Record<string, string> {
+export function authHeaders(route: ResolvedRoute): Record<string, string> {
   const extra = parseExtraHeaders(route.provider.extraHeaders);
   const headers: Record<string, string> = { ...extra };
   if (route.provider.kind === "anthropic_compatible") {
@@ -126,7 +126,7 @@ function splitSystem(messages: ChatMessage[]): {
   return { system, rest };
 }
 
-function extractOpenAiText(payload: unknown): string {
+export function extractOpenAiText(payload: unknown): string {
   const p = payload as {
     choices?: Array<{ message?: { content?: unknown } }>;
     content?: unknown;
@@ -149,7 +149,7 @@ function extractOpenAiText(payload: unknown): string {
   return "";
 }
 
-function extractAnthropicText(payload: unknown): string {
+export function extractAnthropicText(payload: unknown): string {
   const p = payload as { content?: Array<{ type?: string; text?: string }> | string };
   if (typeof p?.content === "string" && p.content.trim()) return p.content;
   if (Array.isArray(p?.content)) {
@@ -181,6 +181,64 @@ function anthropicUsage(payload: unknown): {
   };
 }
 
+export function chatUrl(route: ResolvedRoute): string {
+  if (route.provider.kind === "anthropic_compatible") {
+    return joinUrl(
+      route.provider.baseUrl.endsWith("/v1")
+        ? route.provider.baseUrl
+        : joinUrl(route.provider.baseUrl, "v1"),
+      "messages",
+    );
+  }
+  return joinUrl(route.provider.baseUrl, "chat/completions");
+}
+
+export function buildChatBody(
+  route: ResolvedRoute,
+  messages: ChatMessage[],
+  opts: { jsonMode?: boolean; maxTokens?: number; stream?: boolean } = {},
+): Record<string, unknown> {
+  const maxTokens = opts.maxTokens ?? 4096;
+  if (route.provider.kind === "anthropic_compatible") {
+    const { system, rest } = splitSystem(messages);
+    const systemText = opts.jsonMode
+      ? [system, "Отвечай СТРОГО валидным JSON без markdown-ограждений."]
+          .filter(Boolean)
+          .join("\n")
+      : system;
+    return {
+      model: route.model.modelId,
+      max_tokens: maxTokens,
+      ...(systemText ? { system: systemText } : {}),
+      messages: rest.map((m) => ({ role: m.role, content: m.content })),
+      ...(opts.stream ? { stream: true } : {}),
+    };
+  }
+  const body: Record<string, unknown> = {
+    model: route.model.modelId,
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    max_tokens: maxTokens,
+  };
+  if (opts.jsonMode) body.response_format = { type: "json_object" };
+  if (opts.stream) body.stream = true;
+  return body;
+}
+
+export function extractChatText(route: ResolvedRoute, payload: unknown): string {
+  return route.provider.kind === "anthropic_compatible"
+    ? extractAnthropicText(payload)
+    : extractOpenAiText(payload);
+}
+
+export function extractChatUsage(
+  route: ResolvedRoute,
+  payload: unknown,
+): { tokensIn: number | null; tokensOut: number | null } {
+  return route.provider.kind === "anthropic_compatible"
+    ? anthropicUsage(payload)
+    : openaiUsage(payload);
+}
+
 export async function chatCompletion(
   route: ResolvedRoute,
   messages: ChatMessage[],
@@ -197,62 +255,20 @@ export async function chatCompletion(
     ...authHeaders(route),
     "content-type": "application/json",
   };
-
-  if (route.provider.kind === "anthropic_compatible") {
-    const { system, rest } = splitSystem(messages);
-    const systemText = opts.jsonMode
-      ? [system, "Отвечай СТРОГО валидным JSON без markdown-ограждений."]
-          .filter(Boolean)
-          .join("\n")
-      : system;
-    const url = joinUrl(
-      route.provider.baseUrl.endsWith("/v1")
-        ? route.provider.baseUrl
-        : joinUrl(route.provider.baseUrl, "v1"),
-      "messages",
-    );
-    const res = await fetchWithTimeout(
-      url,
-      {
-        method: "POST",
-        headers,
-        signal: opts.signal,
-        body: JSON.stringify({
-          model: route.model.modelId,
-          max_tokens: maxTokens,
-          ...(systemText ? { system: systemText } : {}),
-          messages: rest.map((m) => ({ role: m.role, content: m.content })),
-        }),
-      },
-      timeoutMs,
-    );
-    await throwIfNotOk(res);
-    const payload: unknown = await res.json();
-    const text = extractAnthropicText(payload).trim();
-    if (!text) throw new GatewayError("Модель вернула пустой ответ", 502);
-    const usage = anthropicUsage(payload);
-    return { text, usage: withUsage(usage.tokensIn, usage.tokensOut, route.provider) };
-  }
-
-  const url = joinUrl(route.provider.baseUrl, "chat/completions");
-  const body: Record<string, unknown> = {
-    model: route.model.modelId,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    max_tokens: maxTokens,
-  };
-  if (opts.jsonMode) {
-    body.response_format = { type: "json_object" };
-  }
+  const url = chatUrl(route);
+  const body = JSON.stringify(
+    buildChatBody(route, messages, { jsonMode: opts.jsonMode, maxTokens }),
+  );
   const res = await fetchWithTimeout(
     url,
-    { method: "POST", headers, body: JSON.stringify(body), signal: opts.signal },
+    { method: "POST", headers, body, signal: opts.signal },
     timeoutMs,
   );
   await throwIfNotOk(res);
   const payload: unknown = await res.json();
-  const text = extractOpenAiText(payload).trim();
+  const text = extractChatText(route, payload).trim();
   if (!text) throw new GatewayError("Модель вернула пустой ответ", 502);
-  const usage = openaiUsage(payload);
+  const usage = extractChatUsage(route, payload);
   return { text, usage: withUsage(usage.tokensIn, usage.tokensOut, route.provider) };
 }
 

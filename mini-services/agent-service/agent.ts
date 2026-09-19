@@ -1,15 +1,16 @@
 // PocketStudio agent — LLM access layer + tool-call parsing.
 // Chat goes through the shared OpenAI/Anthropic gateway (src/lib/ai).
 // Native provider function-calling is not used, so:
-//   - the full reply is fetched here and chunked by the transport layer
-//     (server.ts) for a streaming feel;
+//   - replies stream over SSE (`stream: true`) and server.ts forwards
+//     tokens on the existing `message:delta` socket event;
 //   - tools are called through a JSON protocol: the system prompt
 //     (prompts.ts) tells the model to answer with a single JSON object
 //     {"tool":"<name>","args":{...}} when it wants a tool, and parseToolCall
-//     below detects that shape. The tool-calling loop lives in server.ts.
+//     below detects that shape. Partial JSON is never executed — wait until
+//     a complete object is parseable. The tool-calling loop lives in server.ts.
 
 import { sleepAbortable } from "../../src/lib/abort-flag";
-import { chatCompletion } from "../../src/lib/ai/connector";
+import { chatCompletionStream } from "../../src/lib/ai/stream";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
 import type { AiToolId } from "../../src/lib/ai/tools";
 import { db } from "./db-client";
@@ -31,6 +32,8 @@ export interface GenerateOpts {
   toolId?: AiToolId;
   jsonMode?: boolean;
   signal?: AbortSignal;
+  /** Live token callback. JSON tool-only turns (jsonMode) skip SSE. */
+  onDelta?: (delta: string) => void | Promise<void>;
 }
 
 const MAX_ATTEMPTS = 3; // initial call + 2 retries
@@ -39,7 +42,9 @@ const RETRY_BACKOFF_MS = 800;
 /**
  * One raw LLM call: [systemPrompt, ...history] → reply text (may be either a
  * plain-text answer or a JSON tool call — parsing is the caller's job).
- * Retries up to 2 times with 800ms backoff. Throws on final failure.
+ * Native SSE when the provider supports it; jsonMode stays one-shot so a
+ * partial `{"tool"` object cannot fire. Retries up to 2 times with 800ms
+ * backoff unless tokens were already emitted. Throws on final failure.
  */
 export async function generateLLMResponse(
   systemPrompt: string,
@@ -50,15 +55,23 @@ export async function generateLLMResponse(
   const toolId = opts.toolId ?? "agent";
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let emitted = false;
     try {
       const route = await resolveToolRoute(db, opts.userId, toolId);
       const messages = [
         { role: "system" as const, content: systemPrompt },
         ...history.map((m) => ({ role: m.role, content: m.content })),
       ];
-      const result = await chatCompletion(route, messages, {
+      const result = await chatCompletionStream(route, messages, {
         jsonMode: opts.jsonMode,
+        allowStream: !opts.jsonMode,
         signal: opts.signal,
+        onDelta: opts.onDelta
+          ? async (delta) => {
+              emitted = true;
+              await opts.onDelta!(delta);
+            }
+          : undefined,
       });
       if (!result.text) throw new Error("LLM returned empty content");
       return result.text;
@@ -70,12 +83,23 @@ export async function generateLLMResponse(
       );
       const status = (err as { status?: number })?.status;
       if (opts.signal?.aborted || status === 499) break;
+      if (emitted) break;
       if (typeof status === "number" && status < 500) break;
       if (attempt < MAX_ATTEMPTS) await sleepAbortable(RETRY_BACKOFF_MS, opts.signal);
     }
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/** True when the reply is still (or already) a JSON/fence tool candidate. */
+export function looksLikeToolStart(text: string): boolean {
+  const t = text.trimStart();
+  if (!t) return false;
+  if (t.startsWith("{")) return true;
+  if (t.startsWith("```")) return true;
+  if (/^\[TOOL_CALL\b/i.test(t)) return true;
+  return false;
 }
 
 function extractFencedBlock(text: string): string | null {
@@ -296,43 +320,4 @@ export function parsePlannerSteps(raw: string): string[] | null {
     if (cleaned.length >= 2) return cleaned;
   }
   return null;
-}
-
-/**
- * Split a full reply into chunks of ~4–10 words for simulated streaming.
- * Concatenating the chunks reproduces the original text exactly
- * (whitespace preserved).
- */
-export function chunkText(
-  text: string,
-  opts: { minWords?: number; maxWords?: number } = {},
-): string[] {
-  const minWords = opts.minWords ?? 4;
-  const maxWords = opts.maxWords ?? 10;
-
-  // Split keeping the whitespace separators so concatenation is lossless.
-  const parts = text.split(/(\s+)/).filter((p) => p.length > 0);
-  const chunks: string[] = [];
-
-  let i = 0;
-  while (i < parts.length) {
-    const target =
-      minWords + Math.floor(Math.random() * (maxWords - minWords + 1));
-    let words = 0;
-    let chunk = "";
-    while (i < parts.length && words < target) {
-      const part = parts[i];
-      chunk += part;
-      if (!/^\s+$/.test(part)) words++;
-      i++;
-    }
-    // Attach trailing whitespace to the current chunk.
-    while (i < parts.length && /^\s+$/.test(parts[i])) {
-      chunk += parts[i];
-      i++;
-    }
-    if (chunk.length > 0) chunks.push(chunk);
-  }
-
-  return chunks;
 }

@@ -1,4 +1,7 @@
 #!/bin/bash
+# LEGACY: tests the z-ai/SQLite sandbox packager in .zscripts/.
+# Not a product runtime test. PocketStudio uses PostgreSQL; `bun run test`
+# does not invoke this file.
 
 set -euo pipefail
 

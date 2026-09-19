@@ -17,7 +17,7 @@
 //   Message shape: {id, threadId, role: 'user'|'assistant', content, createdAt}
 //
 // Agent turn = up to 8 LLM iterations. Each LLM reply is either plain text
-// (→ streamed to the client via message:start/delta/end, loop ends) or a JSON
+// (→ native SSE tokens forwarded on message:start/delta/end, loop ends) or a JSON
 // tool call (→ tool row persisted, tool executed with ToolContext
 // {threadId, mode, projectId} from the thread row, tool:start/tool:end
 // emitted, result fed back into the next LLM call via [TOOL_CALL]/
@@ -38,7 +38,7 @@ import {
   generateLLMResponse,
   parseToolCall,
   parsePlannerSteps,
-  chunkText,
+  looksLikeToolStart,
   type LlmMessage,
 } from "./agent";
 import {
@@ -66,7 +66,6 @@ import {
   abortedToolResult,
   decideAfterTool,
   isAbortFlag,
-  sleepAbortable,
   throwIfAborted,
 } from "../../src/lib/abort-flag";
 
@@ -388,44 +387,102 @@ function sanitizeTextAnswer(raw: string): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
+/** Live SSE → socket forwarding for one LLM call. */
+interface LiveStream {
+  messageId: string | null;
+  mode: "peek" | "text" | "tool";
+  acc: string;
+}
+
+function newLiveStream(): LiveStream {
+  return { messageId: null, mode: "peek", acc: "" };
+}
+
+async function startAssistantMessage(
+  live: LiveStream,
+  room: string,
+  threadId: string,
+): Promise<void> {
+  if (live.messageId) return;
+  const row = await db.message.create({
+    data: { threadId, role: "assistant", content: "" },
+  });
+  live.messageId = row.id;
+  io.to(room).emit("message:start", { threadId, messageId: row.id });
+}
+
 /**
- * Stream a final text answer to the thread room (emulated streaming):
- * assistant row (empty) → message:start → message:delta ×N → persist →
- * message:end.
+ * Forward provider tokens on the existing `message:delta` event.
+ * JSON / fenced tool candidates are buffered until `parseToolCall` can
+ * see a complete object — partial `{"tool"` never reaches the UI or tools.
+ */
+function attachLiveDeltas(
+  room: string,
+  threadId: string,
+  live: LiveStream,
+): (delta: string) => Promise<void> {
+  return async (delta: string) => {
+    live.acc += delta;
+    if (live.mode === "peek") {
+      const t = live.acc.trimStart();
+      if (!t) return;
+      if (looksLikeToolStart(t)) {
+        live.mode = "tool";
+        return;
+      }
+      live.mode = "text";
+      await startAssistantMessage(live, room, threadId);
+      io.to(room).emit("message:delta", {
+        threadId,
+        messageId: live.messageId,
+        delta: live.acc,
+      });
+      return;
+    }
+    if (live.mode === "text") {
+      await startAssistantMessage(live, room, threadId);
+      io.to(room).emit("message:delta", {
+        threadId,
+        messageId: live.messageId,
+        delta,
+      });
+    }
+  };
+}
+
+/**
+ * Finalize a text answer on the existing `message:delta` protocol:
+ * reuse a live bubble when tokens already went out, otherwise start →
+ * one delta (full text, e.g. abort / buffered JSON that wasn't a tool) → end.
  */
 async function streamFinalResponse(
   room: string,
   threadId: string,
   text: string,
-  signal?: AbortSignal,
+  existingId?: string | null,
 ): Promise<void> {
+  if (existingId) {
+    const assistantMessage = await db.message.update({
+      where: { id: existingId },
+      data: { content: text },
+    });
+    io.to(room).emit("message:end", {
+      threadId,
+      message: serializeMessage(assistantMessage),
+    });
+    return;
+  }
   let assistantMessage = await db.message.create({
     data: { threadId, role: "assistant", content: "" },
   });
   io.to(room).emit("message:start", { threadId, messageId: assistantMessage.id });
-
-  const chunks = signal?.aborted ? [text] : chunkText(text);
-  for (let i = 0; i < chunks.length; i++) {
-    const delta = chunks[i]!;
-    io.to(room).emit("message:delta", { threadId, messageId: assistantMessage.id, delta });
-    if (signal?.aborted) continue;
-    if (i < chunks.length - 1) {
-      try {
-        await sleepAbortable(25 + Math.random() * 10, signal);
-      } catch {
-        const rest = chunks.slice(i + 1).join("");
-        if (rest) {
-          io.to(room).emit("message:delta", {
-            threadId,
-            messageId: assistantMessage.id,
-            delta: rest,
-          });
-        }
-        break;
-      }
-    }
+  if (text) {
+    io.to(room).emit("message:delta", {
+      threadId,
+      messageId: assistantMessage.id,
+      delta: text,
+    });
   }
-
   assistantMessage = await db.message.update({
     where: { id: assistantMessage.id },
     data: { content: text },
@@ -832,6 +889,7 @@ async function runAgentTurn(
   const room = `thread:${threadId}`;
   const userRoom = `user:${user.sub}`;
   const turnStart = Date.now();
+  const live = newLiveStream();
 
   try {
     // 1. Persist user message.
@@ -924,12 +982,16 @@ async function runAgentTurn(
       io.to(room).emit("agent:thinking", { threadId });
 
       const history = await buildLLMHistory(threadId);
+      live.acc = "";
+      live.mode = "peek";
+      const onDelta = attachLiveDeltas(room, threadId, live);
       let raw: string;
       try {
         raw = await generateLLMResponse(systemPrompt, history, {
           userId: user.sub,
           toolId: "agent",
           signal,
+          onDelta,
         });
       } catch (err) {
         if (signal.aborted || isAbortErr(err)) {
@@ -937,6 +999,13 @@ async function runAgentTurn(
           break;
         }
         throw err;
+      }
+
+      // Streamed prose is a text answer. Tool JSON is only parsed when we
+      // buffered a complete object — never on a partial `{"tool"` prefix.
+      if (live.mode === "text") {
+        finalText = sanitizeTextAnswer(raw) || live.acc.trim() || raw.trim();
+        break;
       }
 
       const call = parseToolCall(raw);
@@ -1069,7 +1138,7 @@ async function runAgentTurn(
     //    Done BEFORE streaming so the card appears with the answer.
     let answerText =
       signal.aborted
-        ? ABORT_REPLY
+        ? (live.messageId && live.acc.trim() ? live.acc.trim() : ABORT_REPLY)
         : (finalText ??
           (toolCallsSucceeded > 0 ? TOOL_LOOP_CAP_REPLY : FALLBACK_REPLY));
     if (thread.mode === "plan" && finalText) {
@@ -1121,7 +1190,7 @@ async function runAgentTurn(
       }
     }
 
-    await streamFinalResponse(room, threadId, answerText, signal);
+    await streamFinalResponse(room, threadId, answerText, live.messageId);
     emitPhase(room, threadId, "idle");
 
     // NOTE: nothing slow may happen after the final message:end emit —
@@ -1132,7 +1201,9 @@ async function runAgentTurn(
   } catch (err) {
     if (signal.aborted || isAbortErr(err)) {
       try {
-        await streamFinalResponse(room, threadId, ABORT_REPLY, signal);
+        const abortText =
+          live.messageId && live.acc.trim() ? live.acc.trim() : ABORT_REPLY;
+        await streamFinalResponse(room, threadId, abortText, live.messageId);
         emitPhase(room, threadId, "idle");
       } catch {
         socket.emit("error", { message: ABORT_REPLY });

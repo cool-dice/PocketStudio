@@ -22,7 +22,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { api } from "@/lib/api";
+import { applyMessageDelta } from "@/lib/message-delta";
 import { useAppUi } from "@/lib/store";
 import {
   isEmptyAssistantBubble,
@@ -711,27 +711,9 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       messageId,
       delta,
     }: WsMessageDeltaPayload) => {
-      if (threadId !== activeIdRef.current) return;
-      setMessages((prev) => {
-        const idx = prev.findIndex((m) => m.id === messageId);
-        if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = { ...copy[idx], content: copy[idx].content + delta };
-          return copy;
-        }
-        // User switched back mid-stream: create the bubble on first delta.
-        return [
-          ...prev,
-          {
-            id: messageId,
-            threadId,
-            role: "assistant",
-            content: delta,
-            createdAt: new Date().toISOString(),
-            streaming: true,
-          },
-        ];
-      });
+      setMessages((prev) =>
+        applyMessageDelta(prev, { threadId, messageId, delta }, activeIdRef.current),
+      );
     };
 
     const onMessageEnd = ({ threadId, message }: WsMessageEndPayload) => {

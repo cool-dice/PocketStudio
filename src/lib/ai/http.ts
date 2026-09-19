@@ -76,6 +76,44 @@ export async function fetchWithTimeout(
   }
 }
 
+/**
+ * Like fetchWithTimeout, but the abort/timeout stay attached until the
+ * caller finishes reading `res.body`. Required for native SSE streaming —
+ * the header-only helper would drop the listener after headers arrive.
+ */
+export async function fetchForStream(
+  url: string,
+  init: RequestInit,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<{ res: Response; dispose: () => void }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const external = init.signal;
+  const onExternal = () => controller.abort();
+  if (external?.aborted) controller.abort();
+  else external?.addEventListener("abort", onExternal);
+
+  const dispose = () => {
+    clearTimeout(timer);
+    external?.removeEventListener("abort", onExternal);
+  };
+
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return { res, dispose };
+  } catch (err) {
+    dispose();
+    if (err instanceof Error && err.name === "AbortError") {
+      if (external?.aborted) {
+        throw new GatewayError("Генерация остановлена", 499);
+      }
+      throw new GatewayError("Провайдер не ответил вовремя", 504);
+    }
+    const msg = err instanceof Error ? redactSecrets(err.message) : "сеть";
+    throw new GatewayError(`Не удалось связаться с провайдером (${msg})`, 502);
+  }
+}
+
 export async function readErrorBody(res: Response): Promise<string> {
   try {
     const text = await res.text();

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parsePlannerSteps, parseToolCall } from "./agent";
+import { parsePlannerSteps, parseToolCall, looksLikeToolStart } from "./agent";
 import { TOOLS } from "./tools";
 
 describe("parseToolCall", () => {
@@ -73,8 +73,22 @@ describe("parseToolCall", () => {
     expect(call?.args.query).toBe("глаза");
   });
 
+  test("returns null for a partial tool JSON object", () => {
+    expect(parseToolCall('{"tool":"create_note","args":{"te')).toBeNull();
+    expect(parseToolCall('{"tool":"create_note"')).toBeNull();
+  });
+
   test("returns null for a plain answer", () => {
     expect(parseToolCall("Готово: глава лежит в документах.")).toBeNull();
+  });
+});
+
+describe("looksLikeToolStart", () => {
+  test("detects JSON, fences, and the legacy bracket form", () => {
+    expect(looksLikeToolStart('{"tool":')).toBe(true);
+    expect(looksLikeToolStart('  ```json\n{"tool"')).toBe(true);
+    expect(looksLikeToolStart("[TOOL_CALL create_note] {}")).toBe(true);
+    expect(looksLikeToolStart("Привет, вот план")).toBe(false);
   });
 });
 

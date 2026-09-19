@@ -58,6 +58,12 @@ DATABASE_URL=postgresql://… bun scripts/migrate-sqlite-to-postgres.ts
 
 На этом этапе свежий `db push` на пустой Postgres — нормальный путь.
 
+## Legacy packagers (не продукт)
+
+`.zscripts/` и `tests/database-runtime-build.sh` — leftover **z-ai / SQLite** упаковщики
+песочницы (`file:./db/custom.db`). Это не способ запустить PocketStudio: в `package.json`
+их нет. См. `.zscripts/README.md`.
+
 ## Postgres не поднимается
 
 - `docker compose up -d postgres` требует **Docker daemon**. Если демона нет, поставьте PostgreSQL 16 + [pgvector](https://github.com/pgvector/pgvector) сами и пропишите `DATABASE_URL` в `.env`.
