@@ -8,7 +8,10 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-process.env.DATABASE_URL ||= "postgresql://pocketstudio:pocketstudio@127.0.0.1:5432/pocketstudio";
+if (!(process.env.DATABASE_URL ?? "").startsWith("postgres")) {
+  process.env.DATABASE_URL =
+    "postgresql://pocketstudio:pocketstudio@127.0.0.1:5432/pocketstudio";
+}
 process.env.AUTH_SECRET ||= "vf-local-dev-secret-9f2c";
 process.env.VIBEFLOW_WORKSPACE_ROOT ||= path.join(REPO_ROOT, "workspace");
 process.env.VIBEFLOW_TEMPLATE_ROOT ||= path.join(REPO_ROOT, "templates/nextjs-basic");

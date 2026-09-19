@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 
 import { POST as register } from "./auth/register/route";
 import { POST as createNote, GET as listNotes } from "./notes/route";
-import { POST as createWorkspace } from "./workspaces/route";
+import { GET as listWorkspaces, POST as createWorkspace } from "./workspaces/route";
 import { POST as aiImage } from "./ai/image/route";
 import { db } from "@/lib/db";
 import { hashPassword, signSession } from "@/lib/auth";
@@ -110,6 +110,15 @@ describe.skipIf(SKIP_PG)("MVP smoke: workspaces + notes", () => {
     const wsJson = (await wsRes.json()) as { workspace: { id: string; name: string } };
     expect(wsJson.workspace.name).toBe("Маяк");
     workspaceId = wsJson.workspace.id;
+
+    const listWs = await listWorkspaces(
+      jsonRequest("http://localhost/api/workspaces", "GET", undefined, token),
+    );
+    expect(listWs.status).toBe(200);
+    const listWsJson = (await listWs.json()) as {
+      workspaces: Array<{ id: string; name: string }>;
+    };
+    expect(listWsJson.workspaces.some((w) => w.id === workspaceId)).toBe(true);
 
     const noteRes = await createNote(
       jsonRequest(
