@@ -2,7 +2,7 @@
 
 /**
  * AuthProvider — session state via /api/auth/me on mount,
- * login/register/logout actions. Russian errors come from the API.
+ * login/register/logout/logout-all actions. Russian errors come from the API.
  */
 
 import {
@@ -29,6 +29,8 @@ interface AuthContextValue {
     invite?: string,
   ) => Promise<User>;
   logout: () => Promise<void>;
+  /** Increment tokenVersion and clear this cookie — every device 401s. */
+  logoutAll: () => Promise<void>;
   markOnboardingDone: () => void;
   /** After PATCH /api/me — replace the in-memory session user. */
   applyUser: (next: User) => void;
@@ -82,6 +84,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const logoutAll = useCallback(async () => {
+    await api.logoutAll();
+    setUser(null);
+    resetWorkspacesCache();
+  }, []);
+
   const markOnboardingDone = useCallback(() => {
     setUser((u) => (u ? { ...u, onboardingDone: true } : u));
   }, []);
@@ -98,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         register,
         logout,
+        logoutAll,
         markOnboardingDone,
         applyUser,
       }}

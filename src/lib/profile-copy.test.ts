@@ -3,6 +3,9 @@ import { describe, expect, test } from "bun:test";
 import {
   DISPLAY_NAME_MAX,
   DISPLAY_NAME_MIN,
+  LOGOUT_ALL_BUTTON,
+  LOGOUT_ALL_FAILED,
+  LOGOUT_ALL_HINT,
   PROFILE_NAME_EMPTY,
   PROFILE_NAME_TOO_LONG,
   PROFILE_NAME_TOO_SHORT,
@@ -75,5 +78,20 @@ describe("profile save toast after PATCH", () => {
     expect(PROFILE_SAVED).toMatch(/[А-Яа-яЁё]/);
     expect(PROFILE_SAVE_FAILED).toMatch(/не удалось/i);
     expect(PROFILE_SAVED).not.toMatch(/не удалось/i);
+  });
+});
+
+describe("logout-all copy", () => {
+  test("profile button is exactly «Выйти на всех устройствах»", () => {
+    expect(LOGOUT_ALL_BUTTON).toBe("Выйти на всех устройствах");
+    expect(LOGOUT_ALL_BUTTON).toMatch(/[А-Яа-яЁё]/);
+  });
+
+  test("hint: regular logout is this device; this button kills every session", () => {
+    expect(LOGOUT_ALL_HINT).toMatch(/это устройство/i);
+    expect(LOGOUT_ALL_HINT).toMatch(/все сессии|всех устройств/i);
+    expect(LOGOUT_ALL_HINT).not.toMatch(/Redis|denylist/i);
+    expect(LOGOUT_ALL_FAILED).toMatch(/не удалось/i);
+    expect(LOGOUT_ALL_FAILED).toMatch(/[А-Яа-яЁё]/);
   });
 });

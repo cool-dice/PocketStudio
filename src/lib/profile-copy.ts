@@ -16,6 +16,17 @@ export const PROFILE_NAME_LABEL = "Отображаемое имя";
 export const PROFILE_THEME_LABEL = "Тема";
 export const PROFILE_OPEN = "Профиль";
 
+export const LOGOUT_ALL_SECTION_TITLE = "Сессии";
+export const LOGOUT_ALL_HINT =
+  "Обычный «Выйти» закрывает только это устройство. Эта кнопка гасит все сессии сразу.";
+export const LOGOUT_ALL_BUTTON = "Выйти на всех устройствах";
+export const LOGOUT_ALL_CONFIRM_TITLE = "Выйти на всех устройствах?";
+export const LOGOUT_ALL_CONFIRM =
+  "Другие устройства сразу потеряют доступ. Этот браузер тоже выйдет. Потом можно войти снова.";
+export const LOGOUT_ALL_SUBMITTING = "Выходим…";
+export const LOGOUT_ALL_DONE = "Вышли на всех устройствах";
+export const LOGOUT_ALL_FAILED = "Не удалось выйти на всех устройствах";
+
 export const DISPLAY_NAME_MIN = 2;
 export const DISPLAY_NAME_MAX = 60;
 

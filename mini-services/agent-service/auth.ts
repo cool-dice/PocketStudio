@@ -2,7 +2,7 @@
 // The main app issues short-lived ws-tokens via GET /api/auth/ws-token
 // (jose HS256, audience "ws", 60s). Session tokens (audience "session") are
 // accepted as a fallback so existing cookies work too.
-// User.tokenVersion must match the JWT claim — password change kills both.
+// User.tokenVersion must match the JWT claim — password change / logout-all kill both.
 
 import { jwtVerify } from "jose";
 

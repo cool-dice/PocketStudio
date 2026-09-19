@@ -7,7 +7,7 @@
 Стек: Next.js 16, bun, Prisma + **PostgreSQL / pgvector**, socket.io-агент на `:3003`.
 Ключи ИИ **не** кладутся в `.env` — их задаёт админ в панели (OpenAI-совместимый или Anthropic-совместимый шлюз). z-ai не используется.
 
-Сессия: cookie `ps_session` (httpOnly) и `ps_token` в localStorage. Старые `vf_session` / `vf_token` ещё читаются, чтобы не выкинуть уже вошедших. Смена пароля поднимает `User.tokenVersion` — прежние JWT сразу 401.
+Сессия: cookie `ps_session` (httpOnly) и `ps_token` в localStorage. Старые `vf_session` / `vf_token` ещё читаются, чтобы не выкинуть уже вошедших. Смена пароля и «Выйти на всех устройствах» поднимают `User.tokenVersion` — прежние JWT сразу 401. Обычный «Выйти» чистит только cookie этого браузера.
 
 **SQLite не является рабочим хранилищем.** Продукт поднимается на пустом Postgres.
 

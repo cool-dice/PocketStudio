@@ -297,6 +297,11 @@ export const api = {
     }
   },
 
+  async logoutAll(): Promise<void> {
+    await request<{ ok: boolean }>("/api/auth/logout-all", { method: "POST" });
+    clearAuthToken();
+  },
+
   wsToken(): Promise<{ token: string; expiresIn: number }> {
     return request<{ token: string; expiresIn: number }>("/api/auth/ws-token");
   },

@@ -1,14 +1,23 @@
 "use client";
 
 /**
- * Profile dialog — PATCH /api/me (name) and PATCH /api/me/password.
- * Empty name is a field error; password needs the current secret.
- * Success toasts only after the API returns, and never print the password.
+ * Profile dialog — PATCH /api/me (name), PATCH /api/me/password,
+ * POST /api/auth/logout-all. Regular sidebar logout is this cookie only.
  */
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -37,6 +46,14 @@ import {
 } from "@/lib/password-copy";
 import {
   DISPLAY_NAME_MAX,
+  LOGOUT_ALL_BUTTON,
+  LOGOUT_ALL_CONFIRM,
+  LOGOUT_ALL_CONFIRM_TITLE,
+  LOGOUT_ALL_DONE,
+  LOGOUT_ALL_FAILED,
+  LOGOUT_ALL_HINT,
+  LOGOUT_ALL_SECTION_TITLE,
+  LOGOUT_ALL_SUBMITTING,
   PROFILE_DIALOG_HINT,
   PROFILE_DIALOG_TITLE,
   PROFILE_NAME_LABEL,
@@ -52,7 +69,7 @@ export function ProfileDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { user, applyUser } = useAuth();
+  const { user, applyUser, logoutAll } = useAuth();
   const [name, setName] = useState(user?.name ?? "");
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [savingName, setSavingName] = useState(false);
@@ -65,8 +82,10 @@ export function ProfileDialog({
   );
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
+  const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
+  const [loggingOutAll, setLoggingOutAll] = useState(false);
 
-  const busy = savingName || savingPassword;
+  const busy = savingName || savingPassword || loggingOutAll;
 
   useEffect(() => {
     if (open) {
@@ -77,6 +96,7 @@ export function ProfileDialog({
       setConfirmPassword("");
       setPasswordFields({});
       setPasswordError(null);
+      setConfirmLogoutAll(false);
     }
   }, [open, user?.name]);
 
@@ -143,7 +163,24 @@ export function ProfileDialog({
     }
   }
 
+  async function confirmLogoutEverywhere() {
+    setLoggingOutAll(true);
+    try {
+      await logoutAll();
+      setConfirmLogoutAll(false);
+      onOpenChange(false);
+      toast.success(LOGOUT_ALL_DONE);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.message : LOGOUT_ALL_FAILED;
+      toast.error(message);
+    } finally {
+      setLoggingOutAll(false);
+    }
+  }
+
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
@@ -256,8 +293,53 @@ export function ProfileDialog({
             </Button>
           </DialogFooter>
         </form>
+
+        <Separator />
+
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">{LOGOUT_ALL_SECTION_TITLE}</p>
+            <p className="text-xs text-muted-foreground">{LOGOUT_ALL_HINT}</p>
+          </div>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={busy}
+            aria-busy={loggingOutAll}
+            onClick={() => setConfirmLogoutAll(true)}
+          >
+            {loggingOutAll ? LOGOUT_ALL_SUBMITTING : LOGOUT_ALL_BUTTON}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
+    <AlertDialog
+      open={confirmLogoutAll}
+      onOpenChange={(next) => {
+        if (!loggingOutAll) setConfirmLogoutAll(next);
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{LOGOUT_ALL_CONFIRM_TITLE}</AlertDialogTitle>
+          <AlertDialogDescription>{LOGOUT_ALL_CONFIRM}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={loggingOutAll}>Отмена</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              void confirmLogoutEverywhere();
+            }}
+            disabled={loggingOutAll}
+            className="bg-destructive text-white hover:bg-destructive/90"
+          >
+            {loggingOutAll ? LOGOUT_ALL_SUBMITTING : LOGOUT_ALL_BUTTON}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
