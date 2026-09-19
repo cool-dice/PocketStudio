@@ -3,6 +3,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
+  TAG_COLOR_INVALID,
   TAG_NAME_EMPTY,
   TAG_NAME_TAKEN,
   TAG_NOT_FOUND,
@@ -281,5 +282,92 @@ describe.skipIf(SKIP_PG)("tags API: own CRUD, empty vs error, IDOR", () => {
       otherJson.notes.find((n) => n.id === secret.id)?.tags?.some((t) => t.name === "канон"),
     ).toBe(true);
     expect(JSON.stringify(otherJson)).not.toContain(mine.id);
+  });
+
+  test("POST and PATCH persist allowlisted color; junk is 400", async () => {
+    const { token } = await seedUser("style");
+    const created = await createTag(
+      jsonRequest(
+        "http://localhost/api/tags",
+        "POST",
+        { name: "маяк", color: "violet" },
+        token,
+      ),
+    );
+    expect(created.status).toBe(201);
+    const createdJson = (await created.json()) as {
+      tag: { id: string; name: string; color: string; icon?: unknown };
+    };
+    expect(createdJson.tag.color).toBe("violet");
+    expect(createdJson.tag.icon).toBeUndefined();
+
+    const params = { params: Promise.resolve({ id: createdJson.tag.id }) };
+    const patched = await patchTag(
+      jsonRequest(
+        `http://localhost/api/tags/${createdJson.tag.id}`,
+        "PATCH",
+        { color: "cyan" },
+        token,
+      ),
+      params,
+    );
+    expect(patched.status).toBe(200);
+    const patchedJson = (await patched.json()) as {
+      tag: { color: string; name: string };
+    };
+    expect(patchedJson.tag.name).toBe("маяк");
+    expect(patchedJson.tag.color).toBe("cyan");
+
+    const listed = await listTags(
+      jsonRequest("http://localhost/api/tags", "GET", undefined, token),
+    );
+    const listedJson = (await listed.json()) as {
+      tags: { id: string; color: string }[];
+    };
+    const row = listedJson.tags.find((t) => t.id === createdJson.tag.id);
+    expect(row?.color).toBe("cyan");
+
+    const badColor = await createTag(
+      jsonRequest(
+        "http://localhost/api/tags",
+        "POST",
+        { name: "мусор", color: "chartreuse" },
+        token,
+      ),
+    );
+    expect(badColor.status).toBe(400);
+    const badColorJson = (await badColor.json()) as {
+      error: string;
+      fields?: { color?: string };
+      tag?: unknown;
+    };
+    expect(badColorJson.tag).toBeUndefined();
+    expect(badColorJson.fields?.color).toBe(TAG_COLOR_INVALID);
+
+    const badPatch = await patchTag(
+      jsonRequest(
+        `http://localhost/api/tags/${createdJson.tag.id}`,
+        "PATCH",
+        { color: "chartreuse" },
+        token,
+      ),
+      params,
+    );
+    expect(badPatch.status).toBe(400);
+    const badPatchJson = (await badPatch.json()) as {
+      fields?: { color?: string };
+      tag?: unknown;
+    };
+    expect(badPatchJson.tag).toBeUndefined();
+    expect(badPatchJson.fields?.color).toBe(TAG_COLOR_INVALID);
+
+    const afterBad = await listTags(
+      jsonRequest("http://localhost/api/tags", "GET", undefined, token),
+    );
+    const afterBadJson = (await afterBad.json()) as {
+      tags: { id: string; color: string }[];
+    };
+    const still = afterBadJson.tags.find((t) => t.id === createdJson.tag.id);
+    expect(still?.color).toBe("cyan");
   });
 });

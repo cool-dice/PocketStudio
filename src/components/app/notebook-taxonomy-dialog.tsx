@@ -3,7 +3,8 @@
 /**
  * Manage own note categories and tags. Mutations toast only after the API;
  * empty lists are not load errors; a failed load is not «пока нет».
- * Category color/icon go through the same POST/PATCH as the name.
+ * Category color/icon and tag color go through the same POST/PATCH as the name.
+ * Tags have no icon in the API — color picker only.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -41,6 +42,7 @@ import {
   CATEGORY_DELETE_CONFIRM,
   CATEGORY_DELETE_CONFIRM_HINT,
   CATEGORY_ICON_KEYS,
+  TAG_DEFAULT_COLOR,
   TAG_DELETE_CONFIRM,
   TAG_DELETE_CONFIRM_HINT,
   TAXONOMY_CANCEL,
@@ -50,19 +52,20 @@ import {
   TAXONOMY_DIALOG_HINT,
   TAXONOMY_DIALOG_TITLE,
   TAXONOMY_ICON,
-  TAXONOMY_RENAME,
   TAXONOMY_RETRY,
   TAXONOMY_SAVE,
   categoryStylePayload,
   parseCategoryColor,
   parseCategoryIcon,
+  parseTagColor,
+  tagColorPayload,
   taxonomyAfterCreate,
   taxonomyAfterDelete,
   taxonomyCategoryPatched,
   taxonomyEmptyCopy,
   taxonomyListView,
   taxonomyLoadErrorCopy,
-  taxonomyRenamed,
+  taxonomyTagPatched,
   taxonomyToast,
   validateCategoryName,
   validateTagName,
@@ -106,6 +109,43 @@ export function NotebookTaxonomyDialog({
   );
 }
 
+function TaxonomyColorPicker({
+  color,
+  disabled,
+  onColor,
+}: {
+  color: CategoryColor;
+  disabled?: boolean;
+  onColor: (color: CategoryColor) => void;
+}) {
+  return (
+    <div role="group" aria-label={TAXONOMY_COLOR}>
+      <p className="mb-1 text-xs text-muted-foreground">{TAXONOMY_COLOR}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {CATEGORY_COLOR_KEYS.map((key) => {
+          const selected = color === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              disabled={disabled}
+              aria-label={`${TAXONOMY_COLOR} ${key}`}
+              aria-pressed={selected}
+              className={cn(
+                "size-6 rounded-full border border-transparent",
+                categoryColorStyle(key).dot,
+                selected && "ring-2 ring-offset-1 ring-foreground",
+                disabled && "opacity-50",
+              )}
+              onClick={() => onColor(key)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CategoryStylePicker({
   color,
   icon,
@@ -121,30 +161,7 @@ function CategoryStylePicker({
 }) {
   return (
     <div className="space-y-2">
-      <div role="group" aria-label={TAXONOMY_COLOR}>
-        <p className="mb-1 text-xs text-muted-foreground">{TAXONOMY_COLOR}</p>
-        <div className="flex flex-wrap gap-1.5">
-          {CATEGORY_COLOR_KEYS.map((key) => {
-            const selected = color === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                disabled={disabled}
-                aria-label={`${TAXONOMY_COLOR} ${key}`}
-                aria-pressed={selected}
-                className={cn(
-                  "size-6 rounded-full border border-transparent",
-                  categoryColorStyle(key).dot,
-                  selected && "ring-2 ring-offset-1 ring-foreground",
-                  disabled && "opacity-50",
-                )}
-                onClick={() => onColor(key)}
-              />
-            );
-          })}
-        </div>
-      </div>
+      <TaxonomyColorPicker color={color} disabled={disabled} onColor={onColor} />
       <div role="group" aria-label={TAXONOMY_ICON}>
         <p className="mb-1 text-xs text-muted-foreground">{TAXONOMY_ICON}</p>
         <div className="flex flex-wrap gap-1">
@@ -232,11 +249,16 @@ function TaxonomySection({
     setBusy(true);
     setFieldError(null);
     try {
-      const style = categoryStylePayload(draftColor, draftIcon);
       const created =
         kind === "category"
-          ? await api.createCategory({ name: parsed.name, ...style })
-          : await api.createTag({ name: parsed.name });
+          ? await api.createCategory({
+              name: parsed.name,
+              ...categoryStylePayload(draftColor, draftIcon),
+            })
+          : await api.createTag({
+              name: parsed.name,
+              ...tagColorPayload(draftColor),
+            });
       setRows((prev) => taxonomyAfterCreate(prev, created, true));
       setDraft("");
       setDraftColor(CATEGORY_DEFAULT_COLOR);
@@ -254,7 +276,6 @@ function TaxonomySection({
   }
 
   async function saveRow(id: string) {
-    const previous = rows.find((r) => r.id === id);
     const parsed =
       kind === "category"
         ? validateCategoryName(editDraft)
@@ -267,10 +288,9 @@ function TaxonomySection({
     setFieldError(null);
     try {
       if (kind === "category") {
-        const style = categoryStylePayload(editColor, editIcon);
         const updated = await api.updateCategory(id, {
           name: parsed.name,
-          ...style,
+          ...categoryStylePayload(editColor, editIcon),
         });
         setRows((prev) =>
           prev.map((r) =>
@@ -287,24 +307,31 @@ function TaxonomySection({
               : r,
           ),
         );
-        toast.success(taxonomyToast(true, "category", "update").message);
       } else {
-        const updated = await api.updateTag(id, { name: parsed.name });
+        const updated = await api.updateTag(id, {
+          name: parsed.name,
+          ...tagColorPayload(editColor),
+        });
         setRows((prev) =>
           prev.map((r) =>
             r.id === id
-              ? { ...r, name: taxonomyRenamed(true, previous?.name ?? editDraft, updated.name) }
+              ? taxonomyTagPatched(
+                  true,
+                  { ...r, color: r.color ?? TAG_DEFAULT_COLOR },
+                  updated,
+                )
               : r,
           ),
         );
-        toast.success(taxonomyToast(true, "tag", "rename").message);
       }
+      toast.success(taxonomyToast(true, kind, "update").message);
       setEditingId(null);
       onChanged?.(kind);
     } catch (err) {
-      const op = kind === "category" ? "update" : "rename";
       const message =
-        err instanceof ApiError ? err.message : taxonomyToast(false, kind, op).message;
+        err instanceof ApiError
+          ? err.message
+          : taxonomyToast(false, kind, "update").message;
       setFieldError(message);
       toast.error(message);
     } finally {
@@ -365,7 +392,13 @@ function TaxonomySection({
             onColor={setDraftColor}
             onIcon={setDraftIcon}
           />
-        ) : null}
+        ) : (
+          <TaxonomyColorPicker
+            color={draftColor}
+            disabled={busy}
+            onColor={setDraftColor}
+          />
+        )}
       </form>
       {fieldError ? (
         <p className="text-xs text-destructive">{fieldError}</p>
@@ -396,19 +429,26 @@ function TaxonomySection({
           {rows.map((row) => (
             <li key={row.id} className="space-y-2 px-3 py-2">
               <div className="flex items-center gap-2">
-                {kind === "category" && editingId !== row.id ? (
+                {editingId !== row.id ? (
                   <>
                     <span
                       aria-hidden="true"
                       className={cn(
                         "size-2 shrink-0 rounded-full",
-                        categoryColorStyle(row.color ?? CATEGORY_DEFAULT_COLOR).dot,
+                        categoryColorStyle(
+                          row.color ??
+                            (kind === "category"
+                              ? CATEGORY_DEFAULT_COLOR
+                              : TAG_DEFAULT_COLOR),
+                        ).dot,
                       )}
                     />
-                    <CategoryGlyph
-                      icon={row.icon ?? CATEGORY_DEFAULT_ICON}
-                      className="size-3.5 shrink-0"
-                    />
+                    {kind === "category" ? (
+                      <CategoryGlyph
+                        icon={row.icon ?? CATEGORY_DEFAULT_ICON}
+                        className="size-3.5 shrink-0"
+                      />
+                    ) : null}
                   </>
                 ) : null}
                 {editingId === row.id ? (
@@ -424,7 +464,7 @@ function TaxonomySection({
                     }}
                     disabled={busy}
                     className="h-8"
-                    aria-label={kind === "category" ? TAXONOMY_SAVE : TAXONOMY_RENAME}
+                    aria-label={`${TAXONOMY_SAVE} «${row.name}»`}
                   />
                 ) : (
                   <span className="min-w-0 flex-1 truncate text-sm">
@@ -440,7 +480,7 @@ function TaxonomySection({
                     disabled={busy}
                     onClick={() => void saveRow(row.id)}
                   >
-                    {kind === "category" ? TAXONOMY_SAVE : TAXONOMY_RENAME}
+                    {TAXONOMY_SAVE}
                   </Button>
                 ) : (
                   <Button
@@ -449,11 +489,15 @@ function TaxonomySection({
                     variant="ghost"
                     className="size-8"
                     disabled={busy}
-                    aria-label={`${kind === "category" ? TAXONOMY_SAVE : TAXONOMY_RENAME} «${row.name}»`}
+                    aria-label={`${TAXONOMY_SAVE} «${row.name}»`}
                     onClick={() => {
                       setEditingId(row.id);
                       setEditDraft(row.name);
-                      setEditColor(parseCategoryColor(row.color));
+                      setEditColor(
+                        kind === "category"
+                          ? parseCategoryColor(row.color)
+                          : parseTagColor(row.color),
+                      );
                       setEditIcon(parseCategoryIcon(row.icon));
                       setFieldError(null);
                     }}
@@ -473,14 +517,22 @@ function TaxonomySection({
                   <Trash2 className="size-3.5" />
                 </Button>
               </div>
-              {kind === "category" && editingId === row.id ? (
-                <CategoryStylePicker
-                  color={editColor}
-                  icon={editIcon}
-                  disabled={busy}
-                  onColor={setEditColor}
-                  onIcon={setEditIcon}
-                />
+              {editingId === row.id ? (
+                kind === "category" ? (
+                  <CategoryStylePicker
+                    color={editColor}
+                    icon={editIcon}
+                    disabled={busy}
+                    onColor={setEditColor}
+                    onIcon={setEditIcon}
+                  />
+                ) : (
+                  <TaxonomyColorPicker
+                    color={editColor}
+                    disabled={busy}
+                    onColor={setEditColor}
+                  />
+                )
               ) : null}
             </li>
           ))}

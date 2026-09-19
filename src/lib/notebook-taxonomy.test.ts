@@ -24,8 +24,11 @@ import {
   TAGS_EMPTY,
   TAGS_LOAD_ERROR,
   TAGS_LOAD_ERROR_HINT,
+  TAG_COLOR_INVALID,
+  TAG_COLOR_KEYS,
   TAG_CREATED,
   TAG_CREATE_FAILED,
+  TAG_DEFAULT_COLOR,
   TAG_DELETED,
   TAG_DELETE_FAILED,
   TAG_NAME_EMPTY,
@@ -33,6 +36,8 @@ import {
   TAG_NAME_TOO_LONG,
   TAG_RENAMED,
   TAG_RENAME_FAILED,
+  TAG_UPDATED,
+  TAG_UPDATE_FAILED,
   TAXONOMY_RETRY,
   taxonomyAfterCreate,
   taxonomyAfterDelete,
@@ -41,7 +46,10 @@ import {
   taxonomyListView,
   taxonomyLoadErrorCopy,
   taxonomyRenamed,
+  taxonomyTagPatched,
   taxonomyToast,
+  tagColorPayload,
+  parseTagColor,
   validateCategoryName,
   validateTagName,
 } from "./notebook-taxonomy";
@@ -151,6 +159,8 @@ describe("taxonomy toast after API, list follows outcome", () => {
     expect(taxonomyToast(true, "tag", "create").message).toBe(TAG_CREATED);
     expect(taxonomyToast(false, "tag", "rename").message).toBe(TAG_RENAME_FAILED);
     expect(taxonomyToast(true, "tag", "rename").message).toBe(TAG_RENAMED);
+    expect(taxonomyToast(false, "tag", "update").message).toBe(TAG_UPDATE_FAILED);
+    expect(taxonomyToast(true, "tag", "update").message).toBe(TAG_UPDATED);
     expect(taxonomyToast(false, "tag", "delete").message).toBe(TAG_DELETE_FAILED);
     expect(taxonomyToast(true, "tag", "delete").message).toBe(TAG_DELETED);
     expect(CATEGORY_CREATE_FAILED).toMatch(/не удалось/i);
@@ -219,5 +229,49 @@ describe("category color/icon persist after API", () => {
     expect(taxonomyToast(false, "category", "update").kind).not.toBe("success");
     expect(CATEGORY_UPDATED).not.toMatch(/не удалось/i);
     expect(CATEGORY_UPDATE_FAILED).toMatch(/не удалось/i);
+  });
+});
+
+describe("tag color persist after API", () => {
+  test("allowlist stays; junk falls back to POST default; picker never sends icon", () => {
+    expect(parseTagColor("violet")).toBe("violet");
+    expect(parseTagColor("chartreuse")).toBe(TAG_DEFAULT_COLOR);
+    expect(parseTagColor(undefined)).toBe(TAG_DEFAULT_COLOR);
+    expect(tagColorPayload("cyan")).toEqual({ color: "cyan" });
+    expect(tagColorPayload("nope")).toEqual({ color: TAG_DEFAULT_COLOR });
+    expect(TAG_DEFAULT_COLOR).toBe("stone");
+    expect(TAG_COLOR_INVALID).toBe("Недопустимый цвет");
+    expect(TAG_COLOR_KEYS).toEqual([
+      "emerald",
+      "amber",
+      "rose",
+      "sky",
+      "violet",
+      "stone",
+      "teal",
+      "orange",
+      "pink",
+      "cyan",
+    ]);
+    expect(Object.keys(tagColorPayload("emerald"))).toEqual(["color"]);
+  });
+
+  test("patched color follows the server, never an optimistic guess", () => {
+    const previous = {
+      id: "t",
+      name: "канон",
+      color: "stone",
+      noteCount: 1,
+    };
+    const server = { name: "персонаж", color: "rose" };
+    expect(taxonomyTagPatched(false, previous, server)).toEqual(previous);
+    expect(taxonomyTagPatched(true, previous, server)).toEqual({
+      ...previous,
+      name: "персонаж",
+      color: "rose",
+    });
+    expect(taxonomyToast(false, "tag", "update").kind).not.toBe("success");
+    expect(TAG_UPDATED).not.toMatch(/не удалось/i);
+    expect(TAG_UPDATE_FAILED).toMatch(/не удалось/i);
   });
 });

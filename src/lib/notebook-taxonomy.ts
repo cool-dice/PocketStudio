@@ -2,7 +2,8 @@
  * Honest notebook categories and tags. Create/rename/delete only after
  * the API; a failed load is not «пока нет»; empty is not an error.
  * Success toasts are built from the outcome, never before the request.
- * Category color/icon follow the same allowlists as POST/PATCH.
+ * Category color/icon and tag color follow the same allowlists as POST/PATCH.
+ * Tags have no icon field in the API — color only.
  */
 
 import {
@@ -22,6 +23,8 @@ export const TAG_NAME_MAX = 32;
 /** Same defaults as POST /api/categories when color/icon are omitted. */
 export const CATEGORY_DEFAULT_COLOR: CategoryColor = "stone";
 export const CATEGORY_DEFAULT_ICON: CategoryIcon = "lightbulb";
+/** Same default as POST /api/tags when color is omitted. */
+export const TAG_DEFAULT_COLOR: CategoryColor = CATEGORY_DEFAULT_COLOR;
 
 export const CATEGORY_NAME_EMPTY = "Название категории не может быть пустым";
 export const CATEGORY_NAME_TOO_LONG =
@@ -30,6 +33,7 @@ export const CATEGORY_NAME_TAKEN = "Категория с таким назва�
 export const CATEGORY_NOT_FOUND = "Категория не найдена";
 export const CATEGORY_COLOR_INVALID = "Недопустимый цвет";
 export const CATEGORY_ICON_INVALID = "Недопустимая иконка";
+export const TAG_COLOR_INVALID = CATEGORY_COLOR_INVALID;
 
 export const TAG_NAME_EMPTY = "Название тега не может быть пустым";
 export const TAG_NAME_TOO_LONG =
@@ -127,6 +131,13 @@ export function parseCategoryColor(raw: unknown): CategoryColor {
     : CATEGORY_DEFAULT_COLOR;
 }
 
+/** Same allowlist as categories — junk or missing → POST default. */
+export function parseTagColor(raw: unknown): CategoryColor {
+  return typeof raw === "string" && isCategoryColor(raw)
+    ? raw
+    : TAG_DEFAULT_COLOR;
+}
+
 /** Junk or missing → API default, never an unlisted key in POST/PATCH. */
 export function parseCategoryIcon(raw: unknown): CategoryIcon {
   return typeof raw === "string" && isCategoryIcon(raw)
@@ -145,7 +156,13 @@ export function categoryStylePayload(
   };
 }
 
+/** Body fragment for tag POST/PATCH — color only, same allowlist. */
+export function tagColorPayload(color: unknown): { color: CategoryColor } {
+  return { color: parseTagColor(color) };
+}
+
 export const CATEGORY_COLOR_KEYS: readonly CategoryColor[] = COLORS;
+export const TAG_COLOR_KEYS: readonly CategoryColor[] = COLORS;
 export const CATEGORY_ICON_KEYS: readonly CategoryIcon[] = ICONS;
 
 export function taxonomyListView(
@@ -269,5 +286,22 @@ export function taxonomyCategoryPatched<
     name: server.name,
     color: server.color,
     icon: server.icon,
+  };
+}
+
+/**
+ * Name/color follow the PATCH body, never an optimistic guess.
+ * Tags have no icon. Call only after the API returns.
+ */
+export function taxonomyTagPatched<T extends { name: string; color: string }>(
+  ok: boolean,
+  previous: T,
+  server: { name: string; color: string },
+): T {
+  if (!ok) return previous;
+  return {
+    ...previous,
+    name: server.name,
+    color: server.color,
   };
 }

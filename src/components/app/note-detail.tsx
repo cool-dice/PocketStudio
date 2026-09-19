@@ -539,7 +539,10 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
           {(note.tags ?? []).map((tag) => (
             <span
               key={tag.id}
-              className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                categoryColorStyle(tag.color).chip,
+              )}
             >
               #{tag.name}
             </span>

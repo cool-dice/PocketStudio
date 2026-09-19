@@ -371,12 +371,17 @@ function TagFilterChip({
   active: boolean;
   onClick: () => void;
 }) {
+  const style = categoryColorStyle(tag.color);
   return (
     <FilterChip
       active={active}
       onClick={onClick}
       aria-label={`Тег «${tag.name}»`}
     >
+      <span
+        aria-hidden="true"
+        className={cn("size-2 shrink-0 rounded-full", style.dot)}
+      />
       <span className="whitespace-nowrap">#{tag.name}</span>
       <span className="text-muted-foreground/70">{tag.noteCount}</span>
     </FilterChip>
@@ -519,7 +524,10 @@ function NoteCard({
           {(note.tags ?? []).slice(0, 3).map((tag) => (
             <span
               key={tag.id}
-              className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                categoryColorStyle(tag.color).chip,
+              )}
             >
               #{tag.name}
             </span>

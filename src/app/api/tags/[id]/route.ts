@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getUserFromRequest } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
-  CATEGORY_COLOR_INVALID,
+  TAG_COLOR_INVALID,
   TAG_NAME_TAKEN,
   TAG_NOT_FOUND,
   validateTagName,
@@ -15,7 +15,7 @@ import { COLORS } from "@/lib/note-utils";
 export const dynamic = "force-dynamic";
 
 const patchTagColorSchema = z.object({
-  color: z.enum(COLORS, CATEGORY_COLOR_INVALID).optional(),
+  color: z.enum(COLORS, TAG_COLOR_INVALID).optional(),
 });
 
 type RouteContext = { params: Promise<{ id: string }> };
