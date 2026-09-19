@@ -19,6 +19,7 @@ import { TileArt } from "./tile-art";
 export function GalleryGrid({
   tiles,
   loading,
+  emptyLabel,
   onOpen,
   onVariations,
   onToggleFavorite,
@@ -26,6 +27,7 @@ export function GalleryGrid({
 }: {
   tiles: GalleryTile[];
   loading?: boolean;
+  emptyLabel?: string;
   onOpen: (id: string) => void;
   onVariations: (tile: GalleryTile) => void;
   onToggleFavorite: (id: string) => void;
@@ -55,7 +57,8 @@ export function GalleryGrid({
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center">
         <Images className="size-8 text-muted-foreground/50" aria-hidden="true" />
         <p className="text-sm text-muted-foreground">
-          Ничего не найдено — попробуйте изменить запрос или фильтры
+          {emptyLabel ??
+            "Ничего не найдено — попробуйте изменить запрос или фильтры"}
         </p>
       </div>
     );

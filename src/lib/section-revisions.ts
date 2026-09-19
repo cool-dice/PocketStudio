@@ -15,6 +15,7 @@ export async function snapshotSection(
   sectionId: string,
   content: string,
   source: "manual" | "ai",
+  opts?: { force?: boolean },
 ): Promise<void> {
   const latest = await db.documentSectionRevision.findFirst({
     where: { sectionId },
@@ -25,8 +26,12 @@ export async function snapshotSection(
   if (latest) {
     // Идентичный текст — снапшот не нужен.
     if (latest.content === content) return;
+    // ИИ-правка и force всегда пишут версию, чтобы можно было откатить.
+    const skipGap = opts?.force || source === "ai";
     // Сессия правки ещё активна — не плодим микроверсии.
-    if (Date.now() - latest.createdAt.getTime() < SNAPSHOT_GAP_MS) return;
+    if (!skipGap && Date.now() - latest.createdAt.getTime() < SNAPSHOT_GAP_MS) {
+      return;
+    }
   }
 
   await db.$transaction(async (tx) => {

@@ -21,6 +21,7 @@ import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
 import type { WorkspaceDto } from "@/lib/workspace-types";
 import { AudioLibraryTab } from "./audio-library-tab";
 import { DawStudio } from "./daw-studio";
@@ -63,6 +64,8 @@ export function AudioScreen({
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
   const [pickedWorkspaceId, setPickedWorkspaceId] = useState<string | null>(null);
   const [libraryKey, setLibraryKey] = useState(0);
+  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
+  const libraryRefresh = libraryKey + workspaceVersion;
 
   const embeddedWorkspaceId = workspaceId ?? null;
   const activeWorkspaceId = embeddedWorkspaceId ?? pickedWorkspaceId;
@@ -157,7 +160,7 @@ export function AudioScreen({
             {activeWorkspaceId ? (
               <>
                 <NarrationPanel workspaceId={activeWorkspaceId} onCreated={bumpLibrary} />
-                <NarrationLibrary workspaceId={activeWorkspaceId} refreshKey={libraryKey} />
+                <NarrationLibrary workspaceId={activeWorkspaceId} refreshKey={libraryRefresh} />
               </>
             ) : (
               <WorkspacePlaceholder
@@ -192,7 +195,7 @@ export function AudioScreen({
             className="mt-0 flex min-h-0 flex-1 flex-col overflow-y-auto vf-scroll pr-0.5"
           >
             {activeWorkspaceId ? (
-              <AudioLibraryTab projectId={activeWorkspaceId} refreshKey={libraryKey} />
+              <AudioLibraryTab projectId={activeWorkspaceId} refreshKey={libraryRefresh} />
             ) : (
               <WorkspacePlaceholder
                 title="Выберите воркспейс"

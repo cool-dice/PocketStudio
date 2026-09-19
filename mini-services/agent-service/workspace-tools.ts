@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 
 import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
-import { generateImage as gatewayGenerateImage, synthesizeSpeech } from "../../src/lib/ai/connector";
+import { generateImage as gatewayGenerateImage, synthesizeSpeech, chatCompletion } from "../../src/lib/ai/connector";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
 import type { ToolContext, ToolDef } from "./tools";
 
@@ -498,6 +498,7 @@ const generateImage: ToolDef = {
 // ─────────────────────────── tool: tts_narration ───────────────────────────
 
 const TTS_VOICES = [
+  "alloy", "nova", "shimmer", "echo", "onyx", "fable", "sage",
   "tongtong", "chuichui", "xiaochen", "jam", "kazi", "douji", "luodo",
 ] as const;
 
@@ -511,7 +512,7 @@ const ttsNarration: ToolDef = {
     workspaceName: "название воркспейса, если id нет",
     text: "текст озвучки (обязательно, 3–4000 символов)",
     title: "название озвучки (необязательно)",
-    voice: "голос: tongtong|chuichui|xiaochen|jam|kazi|douji|luodo (по умолчанию tongtong)",
+    voice: "голос OpenAI: alloy|nova|shimmer|echo|onyx|fable|sage (по умолчанию alloy)",
   },
   async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
@@ -526,7 +527,7 @@ const ttsNarration: ToolDef = {
     const voiceRaw = optString(args.voice, 20);
     const voice = (TTS_VOICES as readonly string[]).includes(voiceRaw ?? "")
       ? voiceRaw!
-      : "tongtong";
+      : "alloy";
 
     const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
@@ -684,6 +685,118 @@ const appendSection: ToolDef = {
   },
 };
 
+const rewriteSection: ToolDef = {
+  name: "rewrite_section",
+  description:
+    "Переписать или продолжить главу документа. Старый текст сохраняется в истории версий.",
+  argsSchema: {
+    documentId: "id документа (необязательно, если чат в воркспейсе)",
+    documentTitle: "название документа, если id неизвестен",
+    sectionTitle: "заголовок главы, если не первая",
+    action: "rewrite|continue (по умолчанию rewrite)",
+    instruction: "своя инструкция правки (необязательно)",
+    workspaceId: "id воркспейса, если чат не привязан",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    const actionRaw = optString(args.action, 20) ?? "rewrite";
+    const action = actionRaw === "continue" ? "continue" : "rewrite";
+    const instruction = optString(args.instruction, 2_000);
+
+    let documentId = pickString(args, ["documentId"]);
+    if (!documentId) {
+      const ws = await resolveWorkspace(userId, args, ctx);
+      if ("error" in ws) return { error: ws.error };
+      const want = pickString(args, ["documentTitle"]);
+      const docs = await db.document.findMany({
+        where: { projectId: ws.id },
+        select: { id: true, title: true },
+        orderBy: { updatedAt: "desc" },
+      });
+      const found = want
+        ? docs.find((d) => d.title.toLowerCase().includes(want.toLowerCase()))
+        : docs[0];
+      if (!found) return { error: "В воркспейсе нет документа — сначала create_document" };
+      documentId = found.id;
+    }
+
+    const document = await db.document.findFirst({
+      where: { id: documentId },
+      include: {
+        project: { select: { userId: true } },
+        sections: { orderBy: { order: "asc" } },
+      },
+    });
+    if (!document || document.project.userId !== userId) {
+      return { error: "Документ не найден" };
+    }
+    const wantSection = pickString(args, ["sectionTitle", "title"]);
+    const section = wantSection
+      ? document.sections.find((s) =>
+          s.title.toLowerCase().includes(wantSection.toLowerCase()),
+        )
+      : document.sections[0];
+    if (!section) return { error: "В документе нет глав" };
+
+    const system =
+      action === "continue"
+        ? "Ты соавтор. Напиши следующие 2–4 абзаца на русском, без заголовка и без пояснений."
+        : instruction
+          ? "Ты редактор. Выполни инструкцию автора и верни полный новый текст главы на русском, без заголовка и пояснений."
+          : "Ты редактор. Перепиши главу целиком на русском: живее и конкретнее, без заголовка и пояснений.";
+    const user = [
+      `Глава: ${section.title}`,
+      "",
+      section.content.trim() || "(пусто — напиши с нуля)",
+      instruction ? `\nИнструкция: ${instruction}` : "",
+    ].join("\n");
+
+    try {
+      const route = await resolveToolRoute(db, userId, "agent");
+      const result = await chatCompletion(route, [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ]);
+      const generated = result.text.trim();
+      if (!generated) return { error: "Модель вернула пустой текст" };
+      const nextContent =
+        action === "continue"
+          ? [section.content.trim(), generated].filter(Boolean).join("\n\n")
+          : generated;
+      if (nextContent !== section.content) {
+        await db.documentSectionRevision
+          .create({
+            data: {
+              sectionId: section.id,
+              content: section.content,
+              source: "ai",
+              size: section.content.length,
+            },
+          })
+          .catch(() => {});
+      }
+      await db.documentSection.update({
+        where: { id: section.id },
+        data: { content: nextContent },
+      });
+      await db.document.update({
+        where: { id: document.id },
+        data: { updatedAt: new Date() },
+      });
+      return {
+        message: action === "continue" ? `Глава продолжена: ${section.title}` : `Глава переписана: ${section.title}`,
+        workspaceId: document.projectId,
+        section: { id: section.id, title: section.title, documentId: document.id },
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Не удалось переписать главу";
+      return { error: msg };
+    }
+  },
+};
+
 // ─────────────────────────── registry export ───────────────────────────
 
 /** Инструменты контента воркспейсов (Фаза A) — добавляются в TOOLS tools.ts. */
@@ -694,4 +807,5 @@ export const WORKSPACE_TOOLS: ToolDef[] = [
   ttsNarration,
   createDocument,
   appendSection,
+  rewriteSection,
 ];

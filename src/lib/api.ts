@@ -1129,6 +1129,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ entityId }),
     });
+  }
+
+  /** ИИ: переписать / продолжить / править главу по инструкции. */
+  aiRewriteSection(body: {
+    sectionId: string;
+    action: "rewrite" | "continue" | "custom";
+    instruction?: string;
+  }): Promise<DocumentSectionDto> {
+    return request<{ section: DocumentSectionDto }>("/api/ai/section", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.section);
   },
 
   /** Сгенерировать персистентный портрет сущности (PS-6): image в БД + артефакт. */

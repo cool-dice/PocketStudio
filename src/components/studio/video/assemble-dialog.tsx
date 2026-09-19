@@ -161,6 +161,11 @@ export function AssembleDialog({
 
   const startCompile = useCallback(async () => {
     if (busy || scenes.length === 0) return;
+    if (withFrame === 0) {
+      setError("Сначала сгенерируйте кадр хотя бы для одной сцены — без картинок сборка не запускается.");
+      setStep("error");
+      return;
+    }
     const controller = new AbortController();
     abortRef.current = controller;
     setFilmUrl(null);
@@ -226,7 +231,7 @@ export function AssembleDialog({
     } finally {
       abortRef.current = null;
     }
-  }, [busy, scenes, resolution, showTitles, projectId, scriptTitle, onAssembled, setFilmUrl]);
+  }, [busy, scenes, withFrame, resolution, showTitles, projectId, scriptTitle, onAssembled, setFilmUrl]);
 
   const progressValue =
     step === "upload"
@@ -311,6 +316,12 @@ export function AssembleDialog({
                 {error}
               </p>
             ) : null}
+            {withFrame === 0 ? (
+              <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                Нет кадров — сгенерируйте изображение сцены, иначе фильм не соберём.
+              </p>
+            ) : null}
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="film-resolution">Разрешение</Label>
               <Select
@@ -390,7 +401,7 @@ export function AssembleDialog({
           ) : (
             <Button
               onClick={() => void startCompile()}
-              disabled={!supported || scenes.length === 0}
+              disabled={!supported || scenes.length === 0 || withFrame === 0}
               className={cn(
                 "gap-1.5",
                 supported &&

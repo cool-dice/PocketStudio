@@ -47,6 +47,7 @@ export interface ManuscriptTabProps {
   saveSection: (id: string, patch: SectionPatch) => Promise<DocumentSectionDto | null>;
   createSection: (title: string) => Promise<DocumentSectionDto>;
   deleteSection: (id: string) => Promise<void>;
+  applySection: (section: DocumentSectionDto) => void;
   onDocPatched: (docId: string, patch: Partial<DocumentDto>) => void;
 }
 
@@ -65,6 +66,7 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
     saveSection,
     createSection,
     deleteSection,
+    applySection,
     onDocPatched,
   } = props;
 
@@ -92,7 +94,8 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
     [saveSection, doc, onDocPatched],
   );
 
-  const { draft, onChange, saveState, savedLabel } = useSectionAutosave(activeSection, handleSaveSection);
+  const { draft, onChange, saveState, savedLabel, flush, replaceDraft } =
+    useSectionAutosave(activeSection, handleSaveSection);
 
   async function handleCreateSection(title: string) {
     const section = await createSection(title);
@@ -238,7 +241,18 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
             )}
           </TabsContent>
           <TabsContent value="ai" className="flex min-h-0 flex-1 flex-col">
-            <AiAssistantPanel />
+            <AiAssistantPanel
+              section={activeSection}
+              draft={draft}
+              onBeforeGenerate={() => flush()}
+              onApplied={(updated) => {
+                applySection(updated);
+                replaceDraft(updated.content);
+                if (doc) {
+                  onDocPatched(doc.id, { updatedAt: new Date().toISOString() });
+                }
+              }}
+            />
           </TabsContent>
         </Tabs>
       </aside>

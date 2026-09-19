@@ -80,6 +80,7 @@ export function DocumentsScreen({
     saveSection,
     createSection,
     deleteSection,
+    applySection,
     rename,
   } = useDocument(activeDocId);
 
@@ -267,6 +268,7 @@ export function DocumentsScreen({
             saveSection={saveSection}
             createSection={createSection}
             deleteSection={deleteSection}
+            applySection={applySection}
             onDocPatched={(docId, patch) => {
               if (isEmbedded) embedded.patchLocal(docId, patch);
               else globalShelves.patchDocument(docId, patch);

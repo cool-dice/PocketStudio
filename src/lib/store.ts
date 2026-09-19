@@ -116,6 +116,10 @@ interface AppUiState {
   searchOpen: boolean;
   setSearchOpen: (open: boolean) => void;
 
+  /** Incremented when chat tools mutate workspace content (notes/docs/media). */
+  workspaceVersion: number;
+  bumpWorkspace: () => void;
+
   /* ── PS-3: воркспейсы — единый творческий контекст ── */
 
   /** Открытый воркспейс (mainArea === "workspace"): id из мок-данных. */
@@ -212,6 +216,10 @@ export const useAppUi = create<AppUiState>((set, get) => ({
 
   searchOpen: false,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
+
+  workspaceVersion: 0,
+  bumpWorkspace: () =>
+    set((state) => ({ workspaceVersion: state.workspaceVersion + 1 })),
 
   activeWorkspaceId: null,
   activeWorkspaceOverride: null,

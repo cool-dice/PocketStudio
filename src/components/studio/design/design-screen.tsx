@@ -61,6 +61,7 @@ export function DesignScreen({
   const [paletteBusy, setPaletteBusy] = useState(false);
 
   const setMainArea = useAppUi((s) => s.setMainArea);
+  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
 
   /* Чипы воркспейсов — только на глобальном экране. */
   useEffect(() => {
@@ -103,7 +104,7 @@ export function DesignScreen({
 
   useEffect(() => {
     void loadArtifacts();
-  }, [loadArtifacts]);
+  }, [loadArtifacts, workspaceVersion]);
 
   /* Производные данные: плитки мудборда + палитра стиля. */
   const boardTiles = useMemo(

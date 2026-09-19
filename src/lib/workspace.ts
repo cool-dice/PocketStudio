@@ -605,6 +605,26 @@ export async function createFromTemplate(dest: string): Promise<void> {
 }
 
 /**
+ * Ensure a workspace (type=app) has files on disk so the code tab can open it.
+ * Existing non-empty dirs are left alone.
+ */
+export async function ensureCodeWorkspace(projectId: string): Promise<string> {
+  const root = projectRoot(projectId);
+  try {
+    const st = await fsp.stat(root);
+    if (st.isDirectory()) {
+      const entries = await fsp.readdir(root);
+      if (entries.some((name) => name !== ".git")) return root;
+    }
+  } catch {
+    // missing dir — provision below
+  }
+  await createFromTemplate(root);
+  await initProjectGit(root);
+  return root;
+}
+
+/**
  * Clone a GitHub repo (https, github.com only, --depth 1) into dest.
  * SSRF guard: scheme https, host github.com, no userinfo, no port.
  */

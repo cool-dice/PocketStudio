@@ -62,6 +62,7 @@ export function ImagesScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const setMainArea = useAppUi((s) => s.setMainArea);
+  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
 
   /* Загрузка списка воркспейсов для глобального экрана. */
   useEffect(() => {
@@ -109,7 +110,7 @@ export function ImagesScreen({
 
   useEffect(() => {
     void loadGallery();
-  }, [loadGallery]);
+  }, [loadGallery, workspaceVersion]);
 
   /* РЕАЛЬНАЯ генерация → api.aiGenerateImage. */
   const runGenerate = useCallback(
@@ -223,6 +224,11 @@ export function ImagesScreen({
     return sorted;
   }, [tiles, generating, filter, query, sort]);
 
+  const galleryEmpty =
+    tiles.length === 0 && !query.trim() && filter === "all"
+      ? "Пока нет картинок — опишите кадр в панели генерации или попросите оркестратора в чате."
+      : "Ничего не найдено — попробуйте изменить запрос или фильтры";
+
   const counts = useMemo(
     () => ({
       all: tiles.length,
@@ -322,6 +328,7 @@ export function ImagesScreen({
               <GalleryGrid
                 tiles={visibleTiles}
                 loading={loading}
+                emptyLabel={galleryEmpty}
                 onOpen={openTile}
                 onVariations={makeVariations}
                 onToggleFavorite={(id) => void toggleFavorite(id)}
@@ -395,6 +402,7 @@ export function ImagesScreen({
           <GalleryGrid
             tiles={visibleTiles}
             loading={loading}
+            emptyLabel={galleryEmpty}
             onOpen={openTile}
             onVariations={makeVariations}
             onToggleFavorite={(id) => void toggleFavorite(id)}

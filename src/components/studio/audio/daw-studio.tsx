@@ -265,8 +265,16 @@ export function DawStudio({
         stage: "Сведение",
         meta: { kind: "daw-mix", bpm: state.bpm, bars: state.bars },
       });
-      toast.success("Микс в библиотеке", {
-        description: `«${artifact.title}» — слушайте во вкладке «Библиотека».`,
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = `mix-${Date.now()}.wav`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+      toast.success("Микс скачан и в библиотеке", {
+        description: `«${artifact.title}» — WAV ушёл в загрузки, копия лежит во вкладке «Библиотека».`,
       });
       onMixed?.();
     } catch (err) {

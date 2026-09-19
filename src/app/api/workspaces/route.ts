@@ -6,6 +6,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { workspaceCounts, workspaceDto } from "@/lib/workspace-shapes";
 import { WORKSPACE_STAGES } from "@/lib/workspace-data";
 import type { WorkspaceKind } from "@/lib/workspace-types";
+import { ensureCodeWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,21 @@ export async function POST(req: Request) {
       progress: 0,
     },
   });
+
+  if (type === "app") {
+    try {
+      const root = await ensureCodeWorkspace(project.id);
+      await db.project.update({
+        where: { id: project.id },
+        data: { rootPath: root },
+      });
+    } catch (err) {
+      console.error(
+        "[workspaces] code scaffold failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 
   return NextResponse.json(
     { workspace: workspaceDto(project, await workspaceCounts(project.id)) },

@@ -3,7 +3,7 @@
 /**
  * NarrationPanel — живая панель озвучки (Фаза A).
  *
- * Текст → выбор голоса студии (7 голосов) → скорость 0.5–2.0 →
+ * Текст → выбор голоса шлюза (OpenAI-совместимые alloy…sage) → скорость 0.5–2.0 →
  * api.aiTts({projectId, text, title, voice, speed}) — реальный TTS
  * (~3 секунды), готовый WAV-файл прилетает артефактом и появляется
  * в библиотеке озвучек ниже (onCreated дёргает refresh библиотеки).
@@ -37,7 +37,7 @@ export function NarrationPanel({
 }) {
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
-  const [voice, setVoice] = useState<NarrationVoiceId>("tongtong");
+  const [voice, setVoice] = useState<NarrationVoiceId>("alloy");
   const [speed, setSpeed] = useState(1);
   const [busy, setBusy] = useState(false);
 
@@ -122,7 +122,7 @@ export function NarrationPanel({
 
       {/* Голоса студии */}
       <div className="mt-4">
-        <p className="text-xs font-medium text-muted-foreground">Голос студии</p>
+        <p className="text-xs font-medium text-muted-foreground">Голос (OpenAI TTS)</p>
         <div className="mt-2 grid grid-cols-2 gap-2 xl:grid-cols-4">
           {NARRATION_VOICES.map((v) => {
             const selected = voice === v.id;

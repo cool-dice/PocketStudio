@@ -277,6 +277,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const ui = useAppUi.getState();
       if (reason === "workspace") {
         ui.bumpNotes();
+        ui.bumpWorkspace();
         invalidateWorkspaces();
         return;
       }

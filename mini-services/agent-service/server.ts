@@ -664,6 +664,7 @@ async function executeToolCall(opts: {
         "create_entity",
         "create_document",
         "append_section",
+        "rewrite_section",
         "generate_image",
         "tts_narration",
         "check_document",

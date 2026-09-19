@@ -31,6 +31,8 @@ export function useSectionAutosave(
   onChange: (value: string) => void;
   saveState: SaveState;
   savedLabel: string;
+  flush: () => Promise<DocumentSectionDto | null>;
+  replaceDraft: (value: string) => void;
 } {
   const [draft, setDraftState] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -128,7 +130,29 @@ export function useSectionAutosave(
     ? `Сохранено · ${savedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`
     : "Сохранено";
 
-  return { draft, onChange, saveState, savedLabel };
+  const flush = useCallback(async () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const pending = dirtyRef.current;
+    if (!pending) return null;
+    dirtyRef.current = null;
+    return saveRef.current(pending.id, { content: pending.content });
+  }, []);
+
+  const replaceDraft = useCallback((value: string) => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    dirtyRef.current = null;
+    setDraftState(value);
+    setSaveState("saved");
+    setSavedAt(new Date());
+  }, []);
+
+  return { draft, onChange, saveState, savedLabel, flush, replaceDraft };
 }
 
 /* ───────────────────── Заголовок документа ───────────────────── */

@@ -144,7 +144,7 @@ export function MonetizeScreen({
       <ModuleHeader
         icon={Coins}
         title="Монетизация"
-        description="LLM-план монетизации воркспейса и активы к публикации"
+        description="План ИИ и список активов. Выплат и биллинга нет — это не кабинет автора."
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       >
