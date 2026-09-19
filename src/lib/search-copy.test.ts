@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  SEARCH_DESCRIPTION,
   SEARCH_ERROR,
   SEARCH_ERROR_HINT,
+  SEARCH_HINT_GLOBAL,
   SEARCH_HINT_WORKSPACE,
   SEARCH_MIN_HINT,
   searchEmptyMessage,
@@ -24,5 +26,12 @@ describe("search empty vs error copy", () => {
     expect(SEARCH_HINT_WORKSPACE).toMatch(/воркспейс/i);
     expect(SEARCH_MIN_HINT).toMatch(/2 символ/i);
     expect(SEARCH_HINT_WORKSPACE).not.toBe(SEARCH_MIN_HINT);
+  });
+
+  test("global hint lists documents, entities, and artifacts", () => {
+    expect(SEARCH_HINT_GLOBAL).toMatch(/документ/i);
+    expect(SEARCH_HINT_GLOBAL).toMatch(/сущност/i);
+    expect(SEARCH_HINT_GLOBAL).toMatch(/артефакт/i);
+    expect(SEARCH_DESCRIPTION).toMatch(/документ/i);
   });
 });

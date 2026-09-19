@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import {
   emptySearchResults,
+  mapArtifactHits,
+  mapDocumentHits,
+  mapEntityHits,
   SEARCH_MIN_QUERY,
   SEARCH_PER_GROUP,
   searchExcerpt,
@@ -17,6 +20,11 @@ import type {
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+const ownedProject = (userId: string) => ({
+  userId,
+  archived: false,
+});
 
 /* ── GET /api/search?q=…&workspaceId=… — current user only; optional workspace ── */
 
@@ -44,8 +52,10 @@ export async function GET(req: Request) {
     return NextResponse.json(emptySearchResults());
   }
   const needle = q.toLowerCase();
+  const projectFilter = ownedProject(session.sub);
+  const inWorkspace = workspaceId ? { projectId: workspaceId } : {};
 
-  const [threads, notes, projects] = await Promise.all([
+  const [threads, notes, projects, documents, entities, artifacts] = await Promise.all([
     db.thread.findMany({
       where: {
         userId: session.sub,
@@ -88,8 +98,7 @@ export async function GET(req: Request) {
     }),
     db.project.findMany({
       where: {
-        userId: session.sub,
-        archived: false,
+        ...projectFilter,
         ...(workspaceId ? { id: workspaceId } : {}),
       },
       orderBy: { updatedAt: "desc" },
@@ -100,6 +109,37 @@ export async function GET(req: Request) {
         description: true,
         origin: true,
         updatedAt: true,
+      },
+    }),
+    db.document.findMany({
+      where: { ...inWorkspace, project: projectFilter },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+      select: { id: true, title: true, kind: true, projectId: true },
+    }),
+    db.entity.findMany({
+      where: { ...inWorkspace, project: projectFilter },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        name: true,
+        kind: true,
+        short: true,
+        projectId: true,
+        project: { select: { type: true } },
+      },
+    }),
+    db.artifact.findMany({
+      where: { ...inWorkspace, project: projectFilter },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        projectId: true,
+        project: { select: { type: true } },
       },
     }),
   ]);
@@ -148,10 +188,29 @@ export async function GET(req: Request) {
       updatedAt: p.updatedAt.toISOString(),
     }));
 
+  const documentHits = mapDocumentHits(documents, needle);
+  const entityHits = mapEntityHits(
+    entities.map((row) => ({
+      ...row,
+      workspaceType: row.project.type,
+    })),
+    needle,
+  );
+  const artifactHits = mapArtifactHits(
+    artifacts.map((row) => ({
+      ...row,
+      workspaceType: row.project.type,
+    })),
+    needle,
+  );
+
   const results = {
     threads: threadHits,
     notes: noteHits,
     projects: projectHits,
+    documents: documentHits,
+    entities: entityHits,
+    artifacts: artifactHits,
     total: 0,
   };
   results.total = searchTotal(results);

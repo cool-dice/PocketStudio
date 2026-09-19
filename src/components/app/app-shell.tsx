@@ -52,7 +52,8 @@ export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Global ⌘K / Ctrl+K → quick capture (works in inputs; dialogs allowed).
-  // Global ⌘P / Ctrl+P → global search across threads / notes / projects.
+  // Global ⌘P / Ctrl+P → global search across threads, notes, workspaces,
+  // documents, entities, and artifacts.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {

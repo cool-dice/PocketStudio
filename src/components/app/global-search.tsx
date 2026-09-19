@@ -3,16 +3,21 @@
 /**
  * GlobalSearch — Ctrl+P / ⌘P command palette: GET /api/search for the
  * current user (workspace-scoped when a workspace is open). Empty ≠ error.
- * Workspace hits open /w/[id]; notes open the notebook + note panel.
+ * Workspace hits open /w/[id]; notes open the notebook + note panel;
+ * documents open /w/{id}?tab=documents&doc=; entities open the documents
+ * module (or the workspace + query); artifacts open images or library.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  FileText,
   FolderGit2,
   Hash,
+  ImageIcon,
   Loader2,
   MessageSquare,
   Search,
+  Shapes,
   StickyNote,
 } from "lucide-react";
 
@@ -30,10 +35,15 @@ import { Button } from "@/components/ui/button";
 import { useAppUi } from "@/lib/store";
 import { useThreads } from "@/hooks/use-threads";
 import { cn } from "@/lib/utils";
+import type { WorkspaceTab } from "@/lib/workspace-data";
+import { TAB_SET } from "@/lib/app-url";
 import {
   SEARCH_DESCRIPTION,
   SEARCH_ERROR,
   SEARCH_ERROR_HINT,
+  SEARCH_GROUP_ARTIFACTS,
+  SEARCH_GROUP_DOCUMENTS,
+  SEARCH_GROUP_ENTITIES,
   SEARCH_GROUP_NOTES,
   SEARCH_GROUP_THREADS,
   SEARCH_GROUP_WORKSPACES,
@@ -138,6 +148,26 @@ export function GlobalSearch() {
       workspace: (id: string) => {
         close();
         openWorkspace(id);
+      },
+      href: (href: string, projectId: string, docId?: string) => {
+        close();
+        if (href.startsWith("/?area=library")) {
+          setMainArea("library");
+          return;
+        }
+        if (href.startsWith("/?area=images")) {
+          setMainArea("images");
+          return;
+        }
+        const params = new URL(href, "http://pocketstudio.local").searchParams;
+        const tabParam = params.get("tab");
+        const tab =
+          tabParam && TAB_SET.has(tabParam as WorkspaceTab)
+            ? (tabParam as WorkspaceTab)
+            : "chat";
+        openWorkspace(projectId, tab);
+        const doc = docId ?? params.get("doc");
+        if (doc) useAppUi.getState().setWorkspaceDocId(doc);
       },
     }),
     [close, openWorkspace, setMainArea, selectThread],
@@ -261,6 +291,75 @@ export function GlobalSearch() {
                   <span className="block truncate text-xs text-muted-foreground">
                     {n.category ? `${n.category.name} · ` : ""}
                     {new Date(n.createdAt).toLocaleDateString("ru-RU")}
+                  </span>
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {!showHint && !error && results && results.documents.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_DOCUMENTS}>
+            {results.documents.map((d) => (
+              <CommandItem
+                key={`d-${d.id}`}
+                value={`документ ${d.title} ${d.snippet}`}
+                onSelect={() => go.href(d.href, d.projectId, d.id)}
+                className="gap-3"
+              >
+                <FileText
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{d.title}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {d.snippet}
+                  </span>
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {!showHint && !error && results && results.entities.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_ENTITIES}>
+            {results.entities.map((e) => (
+              <CommandItem
+                key={`e-${e.id}`}
+                value={`сущность ${e.name} ${e.snippet}`}
+                onSelect={() => go.href(e.href, e.projectId)}
+                className="gap-3"
+              >
+                <Shapes
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{e.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {e.snippet}
+                  </span>
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {!showHint && !error && results && results.artifacts.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_ARTIFACTS}>
+            {results.artifacts.map((a) => (
+              <CommandItem
+                key={`a-${a.id}`}
+                value={`артефакт ${a.title} ${a.kind} ${a.snippet}`}
+                onSelect={() => go.href(a.href, a.projectId)}
+                className="gap-3"
+              >
+                <ImageIcon
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{a.title}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {a.snippet}
                   </span>
                 </span>
               </CommandItem>

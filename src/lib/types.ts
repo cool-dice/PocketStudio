@@ -441,10 +441,43 @@ export interface SearchProjectHit {
   updatedAt: string;
 }
 
+/** Document title hit — href opens `/w/{id}?tab=documents&doc=`. */
+export interface SearchDocumentHit {
+  id: string;
+  title: string;
+  snippet: string;
+  kind: string;
+  projectId: string;
+  href: string;
+}
+
+/** Entity name hit — documents tab when the workspace has it, else `/w/{id}?q=`. */
+export interface SearchEntityHit {
+  id: string;
+  name: string;
+  snippet: string;
+  kind: string;
+  projectId: string;
+  href: string;
+}
+
+/** Artifact title/kind hit — images tab or library, never a dump of prompt/url. */
+export interface SearchArtifactHit {
+  id: string;
+  title: string;
+  snippet: string;
+  kind: string;
+  projectId: string;
+  href: string;
+}
+
 export interface SearchResults {
   threads: SearchThreadHit[];
   notes: SearchNoteHit[];
   projects: SearchProjectHit[];
+  documents: SearchDocumentHit[];
+  entities: SearchEntityHit[];
+  artifacts: SearchArtifactHit[];
   total: number;
 }
 
