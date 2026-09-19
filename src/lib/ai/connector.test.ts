@@ -4,6 +4,7 @@ import {
   chatCompletion,
   createEmbeddings,
   generateImage,
+  mapTtsVoice,
   synthesizeSpeech,
   transcribeAudio,
 } from "./connector";
@@ -248,6 +249,40 @@ describe("OpenAI image", () => {
     }) as typeof fetch;
     const { buffer } = await generateImage(openaiRoute, { prompt: "cat" });
     expect(buffer.toString()).toBe("hello-image");
+  });
+});
+
+describe("OpenAI TTS", () => {
+  test("maps z-ai voice ids to OpenAI names", () => {
+    expect(mapTtsVoice("tongtong")).toBe("alloy");
+    expect(mapTtsVoice("Tongtong")).toBe("alloy");
+    expect(mapTtsVoice("nova")).toBe("nova");
+    expect(mapTtsVoice(undefined)).toBe("alloy");
+  });
+
+  test("POSTs mapped OpenAI voice and rejects an empty file", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("https://api.openai.com/v1/audio/speech");
+      const body = JSON.parse(String(init?.body));
+      expect(body.voice).toBe("alloy");
+      expect(body.input).toBe("маяк");
+      return new Response(Buffer.from("RIFF"), { status: 200 });
+    }) as typeof fetch;
+    const buf = await synthesizeSpeech(openaiRoute, {
+      text: "маяк",
+      voice: "tongtong",
+    });
+    expect(buf.toString()).toBe("RIFF");
+
+    globalThis.fetch = (async () =>
+      new Response(new Uint8Array(), { status: 200 })) as typeof fetch;
+    try {
+      await synthesizeSpeech(openaiRoute, { text: "маяк", voice: "nova" });
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(GatewayError);
+      expect((err as GatewayError).message).toMatch(/пустой файл/);
+    }
   });
 });
 

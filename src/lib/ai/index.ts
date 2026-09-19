@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import {
   chatCompletion,
   generateImage,
+  mapTtsVoice,
   synthesizeSpeech,
   transcribeAudio,
   type ChatMessage,
@@ -190,6 +191,7 @@ export async function aiGenerateImage(
   return { url };
 }
 
+/** Voices offered in the studio UI / REST enum — OpenAI names, not z-ai. */
 export const TTS_VOICES = [
   "alloy",
   "nova",
@@ -198,24 +200,17 @@ export const TTS_VOICES = [
   "onyx",
   "fable",
   "sage",
-  "tongtong",
-  "chuichui",
-  "xiaochen",
-  "jam",
-  "kazi",
-  "douji",
-  "luodo",
 ] as const;
 export type TtsVoice = (typeof TTS_VOICES)[number];
 
 export async function aiTts(
   userId: string,
   text: string,
-  voice: TtsVoice = "alloy",
+  voice: string = "alloy",
   speed = 1.0,
 ): Promise<Buffer> {
   const route = await resolveToolRoute(db, userId, "tts");
-  return synthesizeSpeech(route, { text, voice, speed });
+  return synthesizeSpeech(route, { text, voice: mapTtsVoice(voice), speed });
 }
 
 export async function aiTranscribe(

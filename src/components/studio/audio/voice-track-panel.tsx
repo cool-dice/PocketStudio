@@ -9,7 +9,13 @@ import { useEffect, useState } from "react";
 import { FileAudio, Mic } from "lucide-react";
 
 import type { ArtifactDto } from "@/lib/workspace-types";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import {
+  VOICE_TRACK_EMPTY,
+  VOICE_TRACK_LOAD_ERROR,
+  VOICE_TRACK_LOAD_ERROR_HINT,
+  playableAudioSrc,
+} from "@/lib/audio-copy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,20 +42,27 @@ export function VoiceTrackPanel({
   const [artifacts, setArtifacts] = useState<ArtifactDto[]>([]);
   /** Воркспейс, для которого список уже загружен (null — грузим). */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setLoadedFor(null);
+    setLoadError(null);
     api
       .listArtifacts(projectId, "audio")
       .then((list) => {
         if (!cancelled) {
-          setArtifacts(list.filter((a) => a.url));
+          setArtifacts(list.filter((a) => playableAudioSrc(a)));
+          setLoadError(null);
           setLoadedFor(projectId);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) {
           setArtifacts([]);
+          setLoadError(
+            err instanceof ApiError ? err.message : VOICE_TRACK_LOAD_ERROR,
+          );
           setLoadedFor(projectId);
         }
       });
@@ -83,7 +96,13 @@ export function VoiceTrackPanel({
           >
             <SelectTrigger className="w-full max-w-sm" aria-label="Аудио-артефакт">
               <SelectValue
-                placeholder={artifacts.length === 0 ? "Нет аудио в воркспейсе" : "Выберите озвучку…"}
+                placeholder={
+                  loadError
+                    ? VOICE_TRACK_LOAD_ERROR
+                    : artifacts.length === 0
+                      ? VOICE_TRACK_EMPTY
+                      : "Выберите озвучку…"
+                }
               />
             </SelectTrigger>
             <SelectContent>
@@ -95,6 +114,14 @@ export function VoiceTrackPanel({
             </SelectContent>
           </Select>
         )}
+        {loadError ? (
+          <p className="text-xs text-destructive" role="alert">
+            {loadError}
+            <span className="mt-0.5 block text-muted-foreground">
+              {VOICE_TRACK_LOAD_ERROR_HINT}
+            </span>
+          </p>
+        ) : null}
       </label>
 
       {clip ? (
@@ -106,7 +133,7 @@ export function VoiceTrackPanel({
           <audio
             controls
             preload="metadata"
-            src={clip.artifactUrl}
+            src={playableAudioSrc({ url: clip.artifactUrl }) ?? undefined}
             className="h-10 w-full"
             aria-label={`Превью: ${clip.artifactTitle}`}
           />

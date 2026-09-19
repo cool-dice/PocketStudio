@@ -23,7 +23,14 @@ import { fileURLToPath } from "node:url";
 import { db } from "./db-client";
 import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
 import { generateLLMResponse } from "./agent";
-import { generateImage as gatewayGenerateImage, synthesizeSpeech, chatCompletion } from "../../src/lib/ai/connector";
+import {
+  generateImage as gatewayGenerateImage,
+  mapTtsVoice,
+  synthesizeSpeech,
+  chatCompletion,
+} from "../../src/lib/ai/connector";
+import { GatewayError } from "../../src/lib/ai/errors";
+import { UNCONFIGURED_TOOL_MESSAGE } from "../../src/lib/ai/tools";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
 import {
   composeImagePrompt,
@@ -503,11 +510,6 @@ const generateImage: ToolDef = {
 
 // ─────────────────────────── tool: tts_narration ───────────────────────────
 
-const TTS_VOICES = [
-  "alloy", "nova", "shimmer", "echo", "onyx", "fable", "sage",
-  "tongtong", "chuichui", "xiaochen", "jam", "kazi", "douji", "luodo",
-] as const;
-
 const ttsNarration: ToolDef = {
   name: "tts_narration",
   description:
@@ -530,10 +532,7 @@ const ttsNarration: ToolDef = {
       return { error: "Аргумент text обязателен (текст озвучки, 3–4000 символов)" };
     }
     const title = optString(args.title, 160);
-    const voiceRaw = optString(args.voice, 20);
-    const voice = (TTS_VOICES as readonly string[]).includes(voiceRaw ?? "")
-      ? voiceRaw!
-      : "alloy";
+    const voice = mapTtsVoice(optString(args.voice, 20) ?? undefined);
 
     const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
@@ -572,6 +571,9 @@ const ttsNarration: ToolDef = {
       };
     } catch (err) {
       if (isAbortFlag(err)) return abortedToolResult();
+      if (err instanceof GatewayError && err.message === UNCONFIGURED_TOOL_MESSAGE) {
+        return { error: UNCONFIGURED_TOOL_MESSAGE };
+      }
       return {
         error:
           "Не удалось озвучить текст: " +

@@ -324,7 +324,7 @@ export async function generateImage(
   return { buffer: decodeImagePayload(payload) };
 }
 
-const OPENAI_TTS_VOICES = [
+export const OPENAI_TTS_VOICES = [
   "alloy",
   "ash",
   "coral",

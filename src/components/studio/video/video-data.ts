@@ -8,6 +8,7 @@
  */
 
 import type { ArtifactDto, DocumentSectionDto } from "@/lib/workspace-types";
+import { playableAudioSrc } from "@/lib/audio-copy";
 
 /** Сцена раскадровки: секция сценария + готовые кадр/озвучка (если есть). */
 export interface VideoScene {
@@ -75,7 +76,7 @@ export function buildScenes(
       imageArtifact: image,
       imageUrl: image?.url ?? null,
       voiceArtifact: voice,
-      voiceUrl: voice?.url ?? null,
+      voiceUrl: playableAudioSrc(voice),
     };
   });
 }

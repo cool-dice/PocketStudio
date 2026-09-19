@@ -18,6 +18,13 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { formatNarrationDate, voiceLabel } from "./narration-data";
+import {
+  NARRATION_LIBRARY_EMPTY,
+  NARRATION_LIBRARY_EMPTY_HINT,
+  NARRATION_LIBRARY_LOAD_ERROR,
+  NARRATION_LIBRARY_LOAD_ERROR_HINT,
+  playableAudioSrc,
+} from "@/lib/audio-copy";
 
 /** «45 симв.» для счётчика из meta.chars. */
 function charsLabel(meta: ArtifactDto["meta"]): string | null {
@@ -49,7 +56,7 @@ export function NarrationLibrary({
       ]);
       const byId = new Map<string, ArtifactDto>();
       for (const a of [...audio, ...track]) {
-        if (a.url) byId.set(a.id, a);
+        if (playableAudioSrc(a)) byId.set(a.id, a);
       }
       const merged = [...byId.values()].sort(
         (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
@@ -57,7 +64,7 @@ export function NarrationLibrary({
       setTracks(merged);
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Не удалось загрузить библиотеку озвучек",
+        err instanceof ApiError ? err.message : NARRATION_LIBRARY_LOAD_ERROR,
       );
     } finally {
       setLoading(false);
@@ -117,6 +124,7 @@ export function NarrationLibrary({
       ) : error ? (
         <div className="mt-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
           <p className="text-sm text-destructive">{error}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{NARRATION_LIBRARY_LOAD_ERROR_HINT}</p>
           <Button variant="outline" size="sm" className="mt-2" onClick={() => void load()}>
             Попробовать снова
           </Button>
@@ -124,9 +132,9 @@ export function NarrationLibrary({
       ) : tracks.length === 0 ? (
         <div className="mt-2 rounded-xl border border-dashed p-6 text-center">
           <AudioWaveform className="mx-auto size-6 text-muted-foreground" aria-hidden="true" />
-          <p className="mt-2 text-sm font-medium">Озвучек пока нет</p>
+          <p className="mt-2 text-sm font-medium">{NARRATION_LIBRARY_EMPTY}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Напишите текст выше и нажмите «Озвучить» — трек появится здесь.
+            {NARRATION_LIBRARY_EMPTY_HINT}
           </p>
         </div>
       ) : (
@@ -186,7 +194,7 @@ export function NarrationLibrary({
                 <audio
                   controls
                   preload="metadata"
-                  src={track.url ?? undefined}
+                  src={playableAudioSrc(track) ?? undefined}
                   className="mt-3 h-10 w-full"
                   aria-label={`Плеер: ${track.title}`}
                 />

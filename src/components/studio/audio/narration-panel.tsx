@@ -15,6 +15,13 @@ import { toast } from "sonner";
 
 import type { ArtifactDto } from "@/lib/workspace-types";
 import { api, ApiError } from "@/lib/api";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import {
+  AUDIO_TTS_FAILED,
+  AUDIO_TTS_FAILED_HINT,
+  AUDIO_TTS_UNCONFIGURED_HINT,
+  playableAudioSrc,
+} from "@/lib/audio-copy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -40,6 +47,7 @@ export function NarrationPanel({
   const [voice, setVoice] = useState<NarrationVoiceId>("alloy");
   const [speed, setSpeed] = useState(1);
   const [busy, setBusy] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
   const trimmed = text.trim();
   const canGenerate = !busy && trimmed.length >= 3 && trimmed.length <= NARRATION_MAX_CHARS;
@@ -47,6 +55,7 @@ export function NarrationPanel({
   async function generate() {
     if (!canGenerate) return;
     setBusy(true);
+    setPreviewSrc(null);
     try {
       const artifact = await api.aiTts({
         projectId: workspaceId,
@@ -55,14 +64,24 @@ export function NarrationPanel({
         voice,
         speed,
       });
+      const src = playableAudioSrc(artifact);
+      if (!src) {
+        setPreviewSrc(null);
+        toast.error(AUDIO_TTS_FAILED, { description: AUDIO_TTS_FAILED_HINT });
+        return;
+      }
+      setPreviewSrc(src);
       toast.success("Озвучка готова", {
         description: `«${artifact.title}» — трек появился в библиотеке ниже.`,
       });
       onCreated(artifact);
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message : "Студия не смогла озвучить текст — попробуйте ещё раз";
-      toast.error("Озвучка не удалась", { description: message });
+      setPreviewSrc(null);
+      const unconfigured =
+        err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+      toast.error(err instanceof ApiError ? err.message : AUDIO_TTS_FAILED, {
+        description: unconfigured ? AUDIO_TTS_UNCONFIGURED_HINT : AUDIO_TTS_FAILED_HINT,
+      });
     } finally {
       setBusy(false);
     }
@@ -195,6 +214,15 @@ export function NarrationPanel({
           )}
         </Button>
       </div>
+      {previewSrc ? (
+        <audio
+          controls
+          preload="metadata"
+          src={previewSrc}
+          className="mt-3 h-10 w-full"
+          aria-label="Превью готовой озвучки"
+        />
+      ) : null}
     </section>
   );
 }

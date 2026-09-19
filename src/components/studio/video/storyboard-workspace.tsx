@@ -16,6 +16,13 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import {
+  AUDIO_TTS_FAILED,
+  AUDIO_TTS_FAILED_HINT,
+  AUDIO_TTS_UNCONFIGURED_HINT,
+  playableAudioSrc,
+} from "@/lib/audio-copy";
 import type {
   ArtifactDto,
   DocumentDto,
@@ -287,17 +294,32 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
           title: `Озвучка: ${scene?.section.title ?? "Сцена"}`,
           voice,
         });
+        if (!playableAudioSrc(created)) {
+          toast.error(AUDIO_TTS_FAILED, { description: AUDIO_TTS_FAILED_HINT });
+          return;
+        }
         const artifact = await api.updateArtifact(created.id, {
           stage: voiceStage(sectionId),
         });
+        if (!playableAudioSrc(artifact)) {
+          toast.error(AUDIO_TTS_FAILED, { description: AUDIO_TTS_FAILED_HINT });
+          return;
+        }
         setArtifacts((prev) => [...prev, artifact]);
         toast.success("Озвучка готова", {
           description: scene?.section.title ?? undefined,
         });
       } catch (err) {
-        toast.error("Озвучка не удалась", {
-          description: err instanceof ApiError ? err.message : "Попробуйте ещё раз.",
-        });
+        const unconfigured =
+          err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+        toast.error(
+          err instanceof ApiError ? err.message : AUDIO_TTS_FAILED,
+          {
+            description: unconfigured
+              ? AUDIO_TTS_UNCONFIGURED_HINT
+              : AUDIO_TTS_FAILED_HINT,
+          },
+        );
       } finally {
         setVoiceBusy((prev) => {
           const next = { ...prev };

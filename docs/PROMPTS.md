@@ -23,7 +23,7 @@ Inventory of every LLM surface. Winners are implemented in
 | `palette` | `PALETTE_SYSTEM` | PocketStudio art-director JSON | Extra mood essays |
 | `monetize` | `MONETIZE_SYSTEM` | PocketStudio producer JSON | Stripe/legal fantasy |
 | `rewrite_section` | `SECTION_*_SYSTEM` + `sectionSystemFor` | PocketStudio rewrite/continue/custom **plus write-for-empty** | Routing empty chapters through rewrite (weaker drafts) |
-| `image` / `tts` / `asr` | capabilities, not chat roles | `composeImagePrompt` studio prefix; OpenAI voice ids in UI | z-ai voice names in user copy (API still maps tongtong→alloy) |
+| `image` / `tts` / `asr` | capabilities, not chat roles | `composeImagePrompt` studio prefix; OpenAI voice ids in UI and stored `meta.voice` | z-ai voice names in user copy (gateway still maps tongtong→alloy) |
 
 ## Agent tools added to the prompt
 
