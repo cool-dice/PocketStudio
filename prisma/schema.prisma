@@ -504,6 +504,9 @@ model Notification {
   title     String
   body      String?
   entityId  String?
+  /// Reminder poll idempotency (`reminder:<noteId>`). Other types stay free
+  /// so checkpoints/analysis can fire more than once for the same entity.
+  dedupeKey String?  @unique
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 

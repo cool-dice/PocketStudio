@@ -92,9 +92,12 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
         .getNote(n.entityId)
         .then((note) => {
           ui.openNote(note);
-          if (n.type === "reminder") ui.setMainArea("notebook");
+          ui.setMainArea("notebook");
         })
-        .catch(() => toast.error("Заметка не найдена — возможно, удалена"));
+        .catch(() => {
+          toast.error("Заметка не найдена — возможно, удалена");
+          ui.setMainArea("notebook");
+        });
     } else if ((n.type === "project_created" || n.type === "checkpoint") && n.entityId) {
       ui.openProject(n.entityId);
     }

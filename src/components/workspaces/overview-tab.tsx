@@ -443,6 +443,9 @@ function ImageArtifactCard({
         alt={artifact.title}
         loading="lazy"
         className="size-9 shrink-0 rounded-lg border object-cover"
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+        }}
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">

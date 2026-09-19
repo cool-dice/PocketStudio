@@ -112,6 +112,9 @@ export function LibraryArtifactDialog({
               alt={artifact.title}
               loading="lazy"
               className="size-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
             />
           ) : (
             <KindIcon className="size-12 text-white/90 drop-shadow" />

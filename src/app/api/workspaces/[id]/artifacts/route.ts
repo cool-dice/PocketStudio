@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { artifactDto } from "@/lib/workspace-shapes";
+import { publicGenUrlIfExists } from "@/lib/gen-files";
 import { scheduleIndexArtifact } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,12 @@ export async function GET(req: Request, { params }: Params) {
     take: 200,
   });
 
-  return NextResponse.json({ artifacts: artifacts.map(artifactDto) });
+  return NextResponse.json({
+    artifacts: artifacts.map((a) => {
+      const dto = artifactDto(a);
+      return { ...dto, url: publicGenUrlIfExists(dto.url) };
+    }),
+  });
 }
 
 /* ── POST /api/workspaces/[id]/artifacts — зарегистрировать артефакт ── */

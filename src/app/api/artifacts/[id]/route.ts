@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { scheduleIndexArtifact, scheduleRemove } from "@/lib/rag";
+import { unlinkGeneratedFile } from "@/lib/gen-files";
 import { ensureOwned } from "@/lib/workspace-api";
 import { artifactDto } from "@/lib/workspace-shapes";
 
@@ -54,6 +55,7 @@ export async function DELETE(req: Request, { params }: Params) {
   const artifact = check.row;
 
   await db.artifact.delete({ where: { id } });
+  unlinkGeneratedFile(artifact.url);
   scheduleRemove(db, check.userId, "artifact", id);
   return NextResponse.json({ ok: true });
 }

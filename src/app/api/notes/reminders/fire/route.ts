@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { reminderDedupeKey } from "@/lib/notification-merge";
 
 export const dynamic = "force-dynamic";
 
@@ -54,28 +55,33 @@ export async function POST(req: Request) {
   }[] = [];
   for (const note of fresh) {
     const preview = (note.rawText ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-    const row = await db.notification.create({
-      data: {
-        userId: session.sub,
-        type: "reminder",
-        title: "Напоминание из блокнота",
-        body: preview || "Пора вернуться к мысли",
-        entityId: note.id,
-      },
-    });
-    created.push({
-      id: note.id,
-      preview: preview || "Мысль",
-      notification: {
-        id: row.id,
-        type: row.type,
-        title: row.title,
-        body: row.body,
-        entityId: row.entityId,
-        read: row.read,
-        createdAt: row.createdAt.toISOString(),
-      },
-    });
+    try {
+      const row = await db.notification.create({
+        data: {
+          userId: session.sub,
+          type: "reminder",
+          title: "Напоминание из блокнота",
+          body: preview || "Пора вернуться к мысли",
+          entityId: note.id,
+          dedupeKey: reminderDedupeKey(note.id),
+        },
+      });
+      created.push({
+        id: note.id,
+        preview: preview || "Мысль",
+        notification: {
+          id: row.id,
+          type: row.type,
+          title: row.title,
+          body: row.body,
+          entityId: row.entityId,
+          read: row.read,
+          createdAt: row.createdAt.toISOString(),
+        },
+      });
+    } catch {
+      // Race with another poll — skip duplicate.
+    }
   }
 
   return NextResponse.json({ fired: created.length, notes: created });

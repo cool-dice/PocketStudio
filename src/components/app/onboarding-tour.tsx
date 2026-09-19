@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -46,14 +46,17 @@ function writeLocalOnboardingDone() {
 }
 
 export function OnboardingTour() {
-  const { user } = useAuth();
+  const { user, markOnboardingDone } = useAuth();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
+  const finishing = useRef(false);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
 
   useEffect(() => {
-    if (!user || user.onboardingDone || readLocalOnboardingDone()) return;
+    if (!user || user.onboardingDone || readLocalOnboardingDone() || finishing.current) {
+      return;
+    }
     let cancelled = false;
     api
       .getOnboarding()
@@ -61,7 +64,7 @@ export function OnboardingTour() {
         if (!cancelled && !r.onboardingDone && !readLocalOnboardingDone()) setOpen(true);
       })
       .catch(() => {
-        if (!cancelled && !readLocalOnboardingDone()) setOpen(true);
+        if (!cancelled && !readLocalOnboardingDone() && !user.onboardingDone) setOpen(true);
       });
     return () => {
       cancelled = true;
@@ -73,8 +76,10 @@ export function OnboardingTour() {
   const last = step === STEPS.length - 1;
 
   async function finish(andQuest: boolean) {
+    finishing.current = true;
     setOpen(false);
     writeLocalOnboardingDone();
+    markOnboardingDone();
     try {
       await api.setOnboardingDone(true);
     } catch {

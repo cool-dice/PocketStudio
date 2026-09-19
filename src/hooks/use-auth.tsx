@@ -28,6 +28,7 @@ interface AuthContextValue {
     invite?: string,
   ) => Promise<User>;
   logout: () => Promise<void>;
+  markOnboardingDone: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -77,8 +78,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const markOnboardingDone = useCallback(() => {
+    setUser((u) => (u ? { ...u, onboardingDone: true } : u));
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, register, logout, markOnboardingDone }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -18,7 +18,7 @@
 
 import { create } from "zustand";
 
-import { api } from "@/lib/api";
+import { mergeNotification } from "@/lib/notification-merge";
 import type { Notification } from "@/lib/types";
 
 interface NotificationsState {
@@ -57,16 +57,15 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
   },
 
   prepend: (notification) => {
-    set((s) => ({
-      // Dedupe by id (socket echo + optimistic refresh race).
-      notifications: [
-        notification,
-        ...s.notifications.filter((n) => n.id !== notification.id),
-      ].slice(0, 50),
-      unread: notification.read ? s.unread : s.unread + 1,
-      loaded: true,
-      version: s.version + 1,
-    }));
+    set((s) => {
+      const next = mergeNotification(s.notifications, s.unread, notification);
+      return {
+        notifications: next.notifications,
+        unread: next.unread,
+        loaded: true,
+        version: s.version + 1,
+      };
+    });
   },
 
   markRead: (id) => {

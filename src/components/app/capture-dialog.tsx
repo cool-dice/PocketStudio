@@ -49,6 +49,13 @@ export function CaptureDialog() {
       onOpenChange={(next) => {
         // Allow closing mid-save too: the request completes in the background
         // and its toast still fires.
+        if (!next) {
+          try {
+            sessionStorage.removeItem("pocketstudio-quest");
+          } catch {
+            /* ignore */
+          }
+        }
         setCaptureOpen(next);
       }}
     >

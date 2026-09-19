@@ -13,7 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "db:pgvector": "bun scripts/ensure-pgvector.ts",
-    "test": "bun test --preload ./scripts/test-postgres-env.ts src/lib/ai src/lib/rag src/lib/apply-patch.test.ts src/lib/retrieve.test.ts src/lib/preview-inspect.test.ts src/lib/auth-cookie.test.ts src/lib/mcp-runtime.test.ts src/lib/safe-next.test.ts src/lib/app-url.test.ts src/lib/design-model.test.ts src/lib/workspace-tab.test.ts src/lib/workspace.test.ts src/lib/rate-limit.test.ts src/lib/url-sync-guard.test.ts src/app/api/mvp.smoke.test.ts src/app/api/rag src/app/api/idor.api.test.ts src/app/api/auth/auth.security.test.ts src/app/api/projects/[id]/file/file.api.test.ts mini-services/agent-service/prompts.test.ts mini-services/agent-service/agent.test.ts"
+    "test": "bun test --preload ./scripts/test-postgres-env.ts src/lib/ai src/lib/rag src/lib/apply-patch.test.ts src/lib/retrieve.test.ts src/lib/preview-inspect.test.ts src/lib/auth-cookie.test.ts src/lib/mcp-runtime.test.ts src/lib/safe-next.test.ts src/lib/app-url.test.ts src/lib/design-model.test.ts src/lib/workspace-tab.test.ts src/lib/workspace.test.ts src/lib/rate-limit.test.ts src/lib/url-sync-guard.test.ts src/lib/rel-path.test.ts src/lib/notification-merge.test.ts src/lib/gen-files.test.ts src/app/api/mvp.smoke.test.ts src/app/api/rag src/app/api/idor.api.test.ts src/app/api/auth/auth.security.test.ts src/app/api/projects/[id]/file/file.api.test.ts mini-services/agent-service/prompts.test.ts mini-services/agent-service/agent.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

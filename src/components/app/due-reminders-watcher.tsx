@@ -39,10 +39,14 @@ export function DueRemindersWatcher() {
         }
         for (const note of res.notes.slice(0, 3)) {
           toast("Напоминание", {
+            id: `reminder-${note.id}`,
             description: note.preview,
             action: {
               label: "Открыть",
               onClick: () => {
+                if (note.notification) {
+                  useNotifications.getState().markRead(note.notification.id);
+                }
                 void api
                   .getNote(note.id)
                   .then((full) => {

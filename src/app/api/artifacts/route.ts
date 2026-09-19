@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { publicGenUrlIfExists } from "@/lib/gen-files";
 import { artifactDto } from "@/lib/workspace-shapes";
 
 export const dynamic = "force-dynamic";
@@ -37,5 +38,10 @@ export async function GET(req: Request) {
     take: 300,
   });
 
-  return NextResponse.json({ artifacts: artifacts.map(artifactDto) });
+  return NextResponse.json({
+    artifacts: artifacts.map((a) => {
+      const dto = artifactDto(a);
+      return { ...dto, url: publicGenUrlIfExists(dto.url) };
+    }),
+  });
 }
