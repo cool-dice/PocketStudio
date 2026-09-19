@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
+import { isWorkspaceDocId } from "@/lib/app-url";
 import { documentDto } from "@/lib/workspace-shapes";
 import { removeSource } from "@/lib/rag";
 
@@ -10,10 +11,15 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
+function notFound() {
+  return NextResponse.json({ error: "Документ не найден" }, { status: 404 });
+}
+
 /* ── GET /api/documents/[id] — документ с секциями ── */
 
 export async function GET(req: Request, { params }: Params) {
   const { id } = await params;
+  if (!isWorkspaceDocId(id)) return notFound();
   const documentRow = await db.document.findUnique({
     where: { id },
     include: { sections: { orderBy: { order: "asc" } } },

@@ -119,11 +119,11 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
     });
   }
 
-  // Восстановление из истории: обновить локальное состояние и драфт поля
-  // (PATCH-ноуп в БД не создаёт дубль-снапшот — текст уже идентичен).
+  // Восстановление из истории: текст уже в БД, только синхронизируем
+  // редактор — без повторного PATCH, который гоняется с автосейвом.
   function handleRestored(section: DocumentSectionDto) {
-    void handleSaveSection(section.id, { content: section.content });
-    onChange(section.content);
+    applySection(section);
+    replaceDraft(section.content);
   }
 
   const draftWords = useMemo(() => countWords(draft), [draft]);

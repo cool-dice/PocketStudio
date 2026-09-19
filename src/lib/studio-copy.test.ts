@@ -6,6 +6,8 @@ import {
   DESIGN_LANDING_BLURB,
   DESIGN_MODULE_DESCRIPTION,
   NLE_SCOPE_HINT,
+  PREVIEW_HTML_HINT,
+  PREVIEW_LISTING_HINT,
   VIDEO_LANDING_BLURB,
   VIDEO_MODULE_DESCRIPTION,
 } from "./studio-copy";
@@ -27,5 +29,14 @@ describe("studio honesty copy", () => {
     expect(DESIGN_MODULE_DESCRIPTION).toMatch(/не Photoshop/i);
     expect(AUDIO_MODULE_DESCRIPTION).toMatch(/не FL Studio/i);
     expect(VIDEO_MODULE_DESCRIPTION).toMatch(/не Premiere/i);
+  });
+
+  test("iframe preview does not claim a Next server is running", () => {
+    expect(PREVIEW_HTML_HINT).toMatch(/статический html/i);
+    expect(PREVIEW_HTML_HINT).toMatch(/не запущенный/i);
+    expect(PREVIEW_LISTING_HINT).toMatch(/не запущенное приложение/i);
+    expect(`${PREVIEW_HTML_HINT}\n${PREVIEW_LISTING_HINT}`).not.toMatch(
+      /приложение запущено|dev-сервер работает|next server is running/i,
+    );
   });
 });

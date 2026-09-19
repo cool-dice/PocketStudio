@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
 import { sectionDto } from "@/lib/workspace-shapes";
-import { scheduleIndexSection } from "@/lib/rag";
+import { indexSectionById } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -103,7 +103,14 @@ export async function POST(req: Request, { params }: Params) {
     }),
   ]);
 
-  scheduleIndexSection(db, updated.id);
+  try {
+    await indexSectionById(db, updated.id);
+  } catch (err) {
+    console.error(
+      "[sections/restore] reindex failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
 
   return NextResponse.json({ section: sectionDto(updated) });
 }

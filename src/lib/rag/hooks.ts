@@ -60,6 +60,17 @@ async function pump(): Promise<void> {
   pumping = false;
 }
 
+/** Tests: wait until the in-process index queue is idle. */
+export async function flushRagQueue(timeoutMs = 8_000): Promise<void> {
+  const start = Date.now();
+  while (pumping || pending.length > 0) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("RAG queue did not drain");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 export function scheduleIndex(
   db: PrismaClient,
   doc: {

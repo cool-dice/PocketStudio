@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 
 import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { indexFileContent } from "@/lib/rag/hooks";
+import { flushRagQueue, indexFileContent } from "@/lib/rag/hooks";
 import { retrieve } from "@/lib/rag/retrieve";
 import { ragScopeFromThread } from "@/lib/rag/scope";
 import { removeProjectDir } from "@/lib/workspace";
@@ -82,6 +82,14 @@ describe.skipIf(SKIP_PG)("DELETE /api/projects/[id]/file purges RAG", () => {
       { params: Promise.resolve({ id: project.id }) },
     );
     expect(put.status).toBe(200);
+
+    await flushRagQueue();
+    const indexedBySave = await retrieve(db, {
+      scope: ragScopeFromThread(owner.id, project.id),
+      query: marker,
+      limit: 8,
+    });
+    expect(indexedBySave.hits.some((h) => h.path === rel)).toBe(true);
 
     await indexFileContent(db, {
       userId: owner.id,

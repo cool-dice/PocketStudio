@@ -25,6 +25,8 @@ export {
   scheduleIndexFile,
   scheduleRemove,
   indexFileContent,
+  indexSectionById,
+  flushRagQueue,
 } from "./hooks";
 export { reindexUserData, reindexAllUsers, purgeStaleChunks } from "./reindex";
 export { shouldSkipPath } from "./skip";

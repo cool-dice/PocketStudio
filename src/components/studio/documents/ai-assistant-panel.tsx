@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
+import { sectionAiAction } from "@/lib/ai/prompts";
 import type { DocumentSectionDto } from "@/lib/workspace-types";
 
 export function AiAssistantPanel({
@@ -27,11 +28,11 @@ export function AiAssistantPanel({
   onApplied: (section: DocumentSectionDto) => void;
 }) {
   const [instruction, setInstruction] = useState("");
-  const [busy, setBusy] = useState<"rewrite" | "continue" | "custom" | null>(
+  const [busy, setBusy] = useState<"write" | "rewrite" | "continue" | "custom" | null>(
     null,
   );
 
-  async function run(action: "rewrite" | "continue" | "custom") {
+  async function run(action: "write" | "rewrite" | "continue" | "custom") {
     if (!section || busy) return;
     if (action === "custom" && instruction.trim().length < 3) {
       toast.error("Напишите, что изменить в главе");
@@ -52,7 +53,9 @@ export function AiAssistantPanel({
           ? "Глава продолжена"
           : action === "custom"
             ? "Глава переписана по инструкции"
-            : "Глава переписана",
+            : action === "write"
+              ? "Глава написана"
+              : "Глава переписана",
         { description: "Старый текст сохранён в истории версий." },
       );
     } catch (err) {
@@ -100,9 +103,9 @@ export function AiAssistantPanel({
             type="button"
             size="sm"
             disabled={disabled}
-            onClick={() => void run("rewrite")}
+            onClick={() => void run(sectionAiAction(draft))}
           >
-            {busy === "rewrite" ? (
+            {busy === "rewrite" || busy === "write" ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             ) : (
               <Wand2 className="size-4" aria-hidden="true" />

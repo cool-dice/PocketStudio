@@ -31,6 +31,7 @@ import {
   Pencil,
   Save,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -70,6 +71,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
+import { PREVIEW_HTML_HINT, PREVIEW_LISTING_HINT } from "@/lib/studio-copy";
 import { pluralFiles, relativeTime } from "@/lib/format";
 import { languageFromPath, OriginBadge, fileDotStyle } from "@/lib/project-style";
 import { isDeletableRelPath } from "@/lib/rel-path";
@@ -245,9 +247,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
       setPreviewSrc(preview.src);
       setPreviewHint(
         preview.hint ??
-          (preview.kind === "html"
-            ? "Статический HTML из файлов проекта, не запущенный dev-сервер."
-            : "Нет index.html — показан список файлов."),
+          (preview.kind === "html" ? PREVIEW_HTML_HINT : PREVIEW_LISTING_HINT),
       );
       setPreviewOpen(true);
       if (!preview.src) {
@@ -883,7 +883,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
           <DialogHeader>
             <DialogTitle>Превью проекта</DialogTitle>
             <DialogDescription>
-              {previewHint ?? "Статический iframe по файлам на диске."} Кликните
+              {previewHint ?? PREVIEW_HTML_HINT} Кликните
               элемент, чтобы инспектировать.
             </DialogDescription>
           </DialogHeader>
@@ -903,8 +903,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Нет index.html для iframe. Это не запущенное приложение — только
-              файлы на диске.
+              {PREVIEW_LISTING_HINT}
             </p>
           )}
         </DialogContent>
@@ -925,6 +924,9 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
         open={commitsOpen}
         onOpenChange={setCommitsOpen}
         projectId={projectId}
+        onRestored={() => {
+          useAppUi.getState().bumpProjectFiles();
+        }}
       />
 
       {/* ── Rename dialog ── */}
@@ -1319,14 +1321,18 @@ function CommitsSheet({
   open,
   onOpenChange,
   projectId,
+  onRestored,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
+  onRestored?: () => void;
 }) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [diffCommit, setDiffCommit] = useState<CommitInfo | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<CommitInfo | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   const loadCommits = useCallback(async () => {
     setLoading(true);
@@ -1346,6 +1352,31 @@ function CommitsSheet({
     if (!open) return;
     void loadCommits();
   }, [open, loadCommits]);
+
+  const confirmRestore = useCallback(async () => {
+    if (!restoreTarget || restoring) return;
+    setRestoring(true);
+    try {
+      const restored = await api.restoreProjectCheckpoint(
+        projectId,
+        restoreTarget.hash,
+      );
+      toast.success("Чекпоинт восстановлен", {
+        description: restored.discardedUncommitted
+          ? `${restored.commit.short} · несохранённые файлы сброшены`
+          : restored.commit.short,
+      });
+      setRestoreTarget(null);
+      onRestored?.();
+      await loadCommits();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось восстановить чекпоинт",
+      );
+    } finally {
+      setRestoring(false);
+    }
+  }, [restoreTarget, restoring, projectId, onRestored, loadCommits]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1396,6 +1427,16 @@ function CommitsSheet({
                       <FileDiff className="size-3.5" aria-hidden="true" />
                       Diff
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 shrink-0 gap-1.5 rounded-lg px-2 text-xs text-muted-foreground opacity-100 transition-colors duration-150 hover:bg-primary/10 hover:text-primary md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                      onClick={() => setRestoreTarget(commit)}
+                      aria-label={`Восстановить чекпоинт ${commit.short}`}
+                    >
+                      <RotateCcw className="size-3.5" aria-hidden="true" />
+                      Откат
+                    </Button>
                   </div>
                   <p className="mt-1.5 text-[11px] text-muted-foreground">
                     {commit.author} · {relativeTime(commit.date)}
@@ -1416,6 +1457,36 @@ function CommitsSheet({
         projectId={projectId}
         commit={diffCommit}
       />
+
+      <AlertDialog
+        open={restoreTarget !== null}
+        onOpenChange={(next) => {
+          if (!next && !restoring) setRestoreTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Восстановить чекпоинт?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Рабочая копия этого проекта станет как в {restoreTarget?.short}.
+              Несохранённые файлы будут сброшены. Чекпоинт другого проекта
+              сюда не подставить.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restoring}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={restoring}
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmRestore();
+              }}
+            >
+              {restoring ? "Восстанавливаем…" : "Восстановить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }

@@ -555,6 +555,22 @@ export const api = {
     ).then((r) => r.checkpoint);
   },
 
+  /** Reset this project's working tree to a commit that belongs to it. */
+  restoreProjectCheckpoint(
+    id: string,
+    commit: string,
+  ): Promise<{
+    commit: CommitInfo;
+    discardedUncommitted: boolean;
+  }> {
+    return request<{
+      restored: { commit: CommitInfo; discardedUncommitted: boolean };
+    }>(`/api/projects/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+      body: JSON.stringify({ commit }),
+    }).then((r) => r.restored);
+  },
+
   /** Diff of one checkpoint (Stage 4). */
   getProjectDiff(id: string, commit: string): Promise<CommitDiff> {
     const qs = new URLSearchParams({ commit });
@@ -1520,6 +1536,7 @@ export const api = {
 
   projectPreview(projectId: string): Promise<{
     kind: string;
+    running?: boolean;
     file: string | null;
     src: string | null;
     files?: string[];

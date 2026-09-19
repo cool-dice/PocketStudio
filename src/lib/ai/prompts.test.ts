@@ -10,6 +10,7 @@ import {
   composeImagePrompt,
   IMAGE_PROMPT_PREFIX,
   sectionSystemFor,
+  sectionAiAction,
   wrapSkillDocs,
 } from "./prompts";
 
@@ -43,6 +44,9 @@ describe("prompt library", () => {
     expect(sectionSystemFor("rewrite", true)).toContain("черновик");
     expect(sectionSystemFor("rewrite", false)).toContain("Перепиши");
     expect(sectionSystemFor("write", false)).toContain("черновик");
+    expect(sectionAiAction("")).toBe("write");
+    expect(sectionAiAction("   ")).toBe("write");
+    expect(sectionAiAction("уже есть текст")).toBe("rewrite");
   });
 
   test("skill wrapper does not duplicate identity", () => {

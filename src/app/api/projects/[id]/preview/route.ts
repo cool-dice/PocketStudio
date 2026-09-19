@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { listWorkspaceTree, projectRoot, readWorkspaceFile } from "@/lib/workspace";
 import { injectPreviewInspect } from "@/lib/preview-inspect";
+import { PREVIEW_HTML_HINT, PREVIEW_LISTING_HINT } from "@/lib/studio-copy";
 
 export const dynamic = "force-dynamic";
 
@@ -61,8 +62,10 @@ export async function GET(req: Request, { params }: Params) {
       const file = await readWorkspaceFile(root, index);
       return NextResponse.json({
         kind: "html",
+        running: false,
         file: index,
         src: `/api/projects/${id}/preview?file=${encodeURIComponent(index)}`,
+        hint: PREVIEW_HTML_HINT,
       });
     } catch {
       // fall through to listing
@@ -71,10 +74,11 @@ export async function GET(req: Request, { params }: Params) {
 
   return NextResponse.json({
     kind: "listing",
+    running: false,
     file: null,
     src: null,
     files: files.slice(0, 80),
-    hint: "Нет index.html — это список файлов, а не запущенное приложение.",
+    hint: PREVIEW_LISTING_HINT,
   });
 }
 

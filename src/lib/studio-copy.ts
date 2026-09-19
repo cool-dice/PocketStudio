@@ -22,3 +22,10 @@ export const VIDEO_LANDING_BLURB =
 
 export const NLE_SCOPE_HINT =
   "Базовый монтажный стол: V1–V2, бритва, LUT. Не Premiere и не двухчасовой пайплайн.";
+
+/** Iframe preview is always static files — never a running Next dev server. */
+export const PREVIEW_HTML_HINT =
+  "Статический HTML из файлов проекта, не запущенный Next/dev-сервер.";
+
+export const PREVIEW_LISTING_HINT =
+  "Нет index.html — это список файлов, а не запущенное приложение.";

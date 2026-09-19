@@ -99,6 +99,11 @@ export const SECTION_CONTINUE_SYSTEM = `Ты — соавтор PocketStudio. Н
 export const SECTION_CUSTOM_SYSTEM = `Ты — редактор PocketStudio. Выполни инструкцию автора и верни ПОЛНЫЙ новый текст главы.
 Без заголовка, без пояснений, без markdown-обёртки. Только текст главы.`;
 
+/** Empty chapter → write-from-scratch; otherwise rewrite in place. */
+export function sectionAiAction(content: string): "write" | "rewrite" {
+  return content.trim().length === 0 ? "write" : "rewrite";
+}
+
 export function sectionSystemFor(
   action: "write" | "rewrite" | "continue" | "custom",
   contentEmpty: boolean,

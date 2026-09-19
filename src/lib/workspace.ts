@@ -596,6 +596,32 @@ async function lastCommitAt(root: string, hash: string): Promise<CommitInfo | nu
   }
 }
 
+export interface RestoreCheckpointResult {
+  commit: CommitInfo;
+  discardedUncommitted: boolean;
+}
+
+/**
+ * Reset THIS repo to a commit that already exists in it.
+ * Hashes from another project do not resolve here → 404.
+ * Uncommitted files are discarded (caller should confirm in the UI).
+ */
+export async function restoreProjectCheckpoint(
+  root: string,
+  hash: string,
+): Promise<RestoreCheckpointResult> {
+  if (!/^[0-9a-f]{6,40}$/i.test(hash)) {
+    throw new WorkspaceError("Некорректный хеш коммита", 400);
+  }
+  const commit = await lastCommitAt(root, hash);
+  if (!commit) {
+    throw new WorkspaceError("Чекпоинт не найден в этом проекте", 404);
+  }
+  const discardedUncommitted = await hasUncommittedChanges(root);
+  await git(root, ["reset", "--hard", commit.hash]);
+  return { commit, discardedUncommitted };
+}
+
 // ─────────────────────────── zip export (Stage 4) ───────────────────────────
 
 const PY_ZIP = `

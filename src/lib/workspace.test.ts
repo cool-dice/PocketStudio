@@ -6,8 +6,12 @@ import path from "node:path";
 import {
   WorkspaceError,
   assertInsideRoot,
+  checkpointProject,
   deleteWorkspacePath,
+  initProjectGit,
+  listProjectCommits,
   readWorkspaceFile,
+  restoreProjectCheckpoint,
   safeJoin,
   writeWorkspaceFile,
 } from "./workspace";
@@ -87,5 +91,50 @@ describe("assertInsideRoot / file ops vs symlink", () => {
     await expect(deleteWorkspacePath(root, "./")).rejects.toThrow(WorkspaceError);
     const still = await readWorkspaceFile(root, "README.md");
     expect(still.content).toBe("# x\n");
+  });
+});
+
+describe("git checkpoints stay inside one project root", () => {
+  let rootA = "";
+  let rootB = "";
+
+  afterEach(async () => {
+    if (rootA) await rm(rootA, { recursive: true, force: true });
+    if (rootB) await rm(rootB, { recursive: true, force: true });
+    rootA = "";
+    rootB = "";
+  });
+
+  test("restore rolls files back; foreign hash is 404", async () => {
+    rootA = await mkdtemp(path.join(os.tmpdir(), "ps-cp-a-"));
+    rootB = await mkdtemp(path.join(os.tmpdir(), "ps-cp-b-"));
+
+    await writeWorkspaceFile(rootA, "src/beacon.ts", 'export const v = "alpha";\n');
+    await initProjectGit(rootA, "A0");
+    const firstA = (await listProjectCommits(rootA, 1))[0];
+    expect(firstA).toBeTruthy();
+
+    await writeWorkspaceFile(rootA, "src/beacon.ts", 'export const v = "beta";\n');
+    const second = await checkpointProject(rootA, "A1 beta");
+    expect(second.noop).toBe(false);
+
+    await writeWorkspaceFile(rootB, "src/other.ts", 'export const v = "foreign";\n');
+    await initProjectGit(rootB, "B unique checkpoint");
+    const firstB = (await listProjectCommits(rootB, 1))[0];
+    expect(firstB).toBeTruthy();
+
+    const aList = await listProjectCommits(rootA, 20);
+    expect(aList.some((c) => c.message === "A1 beta")).toBe(true);
+    expect(aList.some((c) => c.message.includes("B unique"))).toBe(false);
+
+    await expect(restoreProjectCheckpoint(rootA, firstB!.hash)).rejects.toThrow(
+      WorkspaceError,
+    );
+
+    const restored = await restoreProjectCheckpoint(rootA, firstA!.hash);
+    expect(restored.commit.hash).toBe(firstA!.hash);
+    const file = await readWorkspaceFile(rootA, "src/beacon.ts");
+    expect(file.content).toContain("alpha");
+    expect(file.content).not.toContain("beta");
   });
 });
