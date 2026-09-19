@@ -59,7 +59,7 @@ export function ChatFeatureSection() {
           <SectionHeader
             overline="Пульт управления"
             title="Диалог — главный пульт"
-            description="Не переключайтесь между редакторами, генераторами и хостингом: оркестратор слушает, а модули студии исполняют."
+            description="Не переключайтесь между редакторами и генераторами: оркестратор слушает, модули исполняют. Хостинг — Dockerfile и локальный preview, не чужой прод."
           />
           <ul className="space-y-6">
             {BULLETS.map((bullet, i) => (

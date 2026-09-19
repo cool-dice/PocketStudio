@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { signSession, verifyPassword, sessionCookieOptions } from "@/lib/auth";
-import { SESSION_COOKIE } from "@/lib/auth-shared";
+import { attachSessionCookie, signSession, verifyPassword } from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +77,6 @@ export async function POST(req: Request) {
     // the Authorization header with this token.
     token,
   });
-  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  attachSessionCookie(res, token);
   return res;
 }

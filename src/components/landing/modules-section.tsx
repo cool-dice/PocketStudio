@@ -54,12 +54,14 @@ const MODULES: {
   {
     icon: Rocket,
     title: "Деплой",
-    description: "Docker-образ собирается и уезжает на ваш хост.",
+    description:
+      "Dockerfile и zip готовы. Сборка образа — если docker есть на машине, иначе честный статус «нет демона».",
   },
   {
     icon: Blocks,
     title: "Интеграции",
-    description: "MCP-серверы: GitHub, Playwright, базы данных.",
+    description:
+      "Fetch, файлы и браузер работают в чате. GitHub и другие stdio — сохранённый конфиг, не живой процесс.",
   },
   {
     icon: Wand2,
@@ -69,7 +71,8 @@ const MODULES: {
   {
     icon: Coins,
     title: "Монетизация",
-    description: "Публикации, тарифы и доход в одном окне.",
+    description:
+      "Офферы и кабинет выплат. Живая карта — когда ключ эквайера подключён (сейчас симуляция).",
   },
 ];
 

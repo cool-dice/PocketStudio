@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { hashPassword, signSession, sessionCookieOptions } from "@/lib/auth";
-import { SESSION_COOKIE } from "@/lib/auth-shared";
+import { attachSessionCookie, hashPassword, signSession } from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
 
 export const dynamic = "force-dynamic";
@@ -127,6 +126,6 @@ export async function POST(req: Request) {
     },
     { status: 201 }
   );
-  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  attachSessionCookie(res, token);
   return res;
 }

@@ -52,8 +52,8 @@ export function HeroSection({ onRegister }: { onRegister: () => void }) {
           </h1>
           <p className="max-w-xl text-pretty text-muted-foreground sm:text-lg">
             PocketStudio превращает диалог с ИИ в творческий конвейер: книги и
-            статьи, изображения, аудио и видео, готовые приложения — от первой
-            мысли до первой продажи.
+            статьи, изображения, аудио и видео, код приложения — от первой мысли
+            до оффера. Выплаты в студии симулируются, пока не подключён эквайер.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button size="lg" onClick={onRegister}>
@@ -73,7 +73,8 @@ export function HeroSection({ onRegister }: { onRegister: () => void }) {
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            Без карты. Первый аккаунт получает права администратора.
+            Без карты. Первый аккаунт — администратор. Публикация на внешний
+            хост и живые выплаты — отдельные шаги, не обещание «одной кнопки».
           </p>
         </motion.div>
 

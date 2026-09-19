@@ -1,7 +1,12 @@
 // Server-only auth helpers: password hashing + JWT sessions (jose HS256).
 import * as bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-import { AUTH_SECRET, SESSION_COOKIE, type SessionPayload } from "./auth-shared";
+import {
+  AUTH_SECRET,
+  LEGACY_SESSION_COOKIE,
+  SESSION_COOKIE,
+  type SessionPayload,
+} from "./auth-shared";
 
 const secretKey = new TextEncoder().encode(AUTH_SECRET);
 
@@ -86,7 +91,8 @@ function parseCookies(header: string | null): Record<string, string> {
 /**
  * Resolve the current user from a request:
  * 1) `Authorization: Bearer <token>` header
- * 2) `vf_session` cookie
+ * 2) `ps_session` cookie (PocketStudio)
+ * 3) `vf_session` cookie (legacy VibeFlow — dual-read until sessions expire)
  * Returns null when unauthenticated.
  */
 export async function getUserFromRequest(req: Request): Promise<SessionPayload | null> {
@@ -100,11 +106,25 @@ export async function getUserFromRequest(req: Request): Promise<SessionPayload |
   }
 
   const cookies = parseCookies(req.headers.get("cookie"));
-  const cookieToken = cookies[SESSION_COOKIE];
-  if (cookieToken) {
-    return verifyToken(cookieToken, "session");
+  for (const name of [SESSION_COOKIE, LEGACY_SESSION_COOKIE]) {
+    const cookieToken = cookies[name];
+    if (cookieToken) {
+      const payload = await verifyToken(cookieToken, "session");
+      if (payload) return payload;
+    }
   }
   return null;
+}
+
+/** Write the PocketStudio session cookie and expire the legacy VibeFlow one. */
+export function attachSessionCookie(res: { cookies: { set: (name: string, value: string, opts: ReturnType<typeof sessionCookieOptions>) => void } }, token: string) {
+  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  res.cookies.set(LEGACY_SESSION_COOKIE, "", clearSessionCookieOptions());
+}
+
+export function clearSessionCookies(res: { cookies: { set: (name: string, value: string, opts: ReturnType<typeof clearSessionCookieOptions>) => void } }) {
+  res.cookies.set(SESSION_COOKIE, "", clearSessionCookieOptions());
+  res.cookies.set(LEGACY_SESSION_COOKIE, "", clearSessionCookieOptions());
 }
 
 export function sessionCookieOptions() {
