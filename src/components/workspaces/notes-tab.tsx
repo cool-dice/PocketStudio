@@ -2,12 +2,14 @@
 
 /**
  * NotesTab — заметки воркспейса через Note + NoteLink (не мок).
+ * Typed create here (and agent create_note) never POSTs transcription.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowUpRight, NotebookPen, Plus, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
+import { NoteTranscriptionBlock } from "@/components/app/note-transcription";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,8 +23,10 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { invalidateWorkspaces } from "@/hooks/use-workspaces";
 import { api, ApiError } from "@/lib/api";
+import { notesListViewState } from "@/lib/notes-list-state";
 import { useAppUi } from "@/lib/store";
 import type { Note } from "@/lib/types";
+import { shouldShowTranscription } from "@/lib/voice-copy";
 import { WORKSPACE_STAGES, type WorkspaceSummary } from "@/lib/workspace-data";
 import { currentStageIndex, pluralNotes } from "@/components/workspaces/overview-data";
 import { timeAgo } from "@/components/workspaces/home-data";
@@ -33,34 +37,54 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
   const notesVersion = useAppUi((s) => s.notesVersion);
 
   const [notes, setNotes] = useState<Note[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [notesWorkspaceId, setNotesWorkspaceId] = useState<string | null>(null);
+  const [errorWorkspaceId, setErrorWorkspaceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [openNote, setOpenNote] = useState<Note | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const currentStage =
     WORKSPACE_STAGES[workspace.type][currentStageIndex(workspace)] ??
     WORKSPACE_STAGES[workspace.type][0];
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await api.listNotes({ projectId: workspace.id, limit: 50 });
-      setNotes(res.notes);
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Не удалось загрузить заметки",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [workspace.id]);
+  const view = notesListViewState(
+    workspace.id,
+    notesWorkspaceId,
+    errorWorkspaceId,
+  );
+  const visibleNotes = view === "ready" ? notes : [];
 
   useEffect(() => {
-    setLoading(true);
-    void load();
-  }, [load, notesVersion]);
+    let cancelled = false;
+    const id = workspace.id;
+    void (async () => {
+      try {
+        const res = await api.listNotes({ projectId: id, limit: 50 });
+        if (cancelled) return;
+        setNotes(res.notes);
+        setNotesWorkspaceId(id);
+        setErrorWorkspaceId(null);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setNotes([]);
+        setNotesWorkspaceId(id);
+        setErrorWorkspaceId(id);
+        setError(
+          err instanceof ApiError ? err.message : "Не удалось загрузить заметки",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace.id, notesVersion, reloadTick]);
+
+  useEffect(() => {
+    setOpenNote(null);
+  }, [workspace.id]);
 
   async function addNote() {
     const text = draft.trim();
@@ -69,6 +93,9 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
     try {
       const note = await api.createNote({ text, projectId: workspace.id });
       setNotes((prev) => [note, ...prev]);
+      setNotesWorkspaceId(workspace.id);
+      setErrorWorkspaceId(null);
+      setError(null);
       setDraft("");
       bumpNotes();
       invalidateWorkspaces();
@@ -84,15 +111,20 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
     }
   }
 
+  const subtitle =
+    view === "loading"
+      ? "Загрузка…"
+      : view === "error"
+        ? "Не удалось загрузить"
+        : `${pluralNotes(visibleNotes.length)} · те же записи, что в Блокноте`;
+
   return (
     <div className="vf-scroll h-full min-h-0 overflow-y-auto">
       <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:px-6 sm:py-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">Заметки воркспейса</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {loading ? "Загрузка…" : `${pluralNotes(notes.length)} · те же записи, что в Блокноте`}
-            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
           </div>
           <button
             type="button"
@@ -132,22 +164,41 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
         </form>
 
         <div className="mt-4 space-y-2">
-          {loading ? (
+          {view === "loading" ? (
             <div className="space-y-2" role="status" aria-label="Загрузка заметок">
               <Skeleton className="h-16 w-full rounded-xl" />
               <Skeleton className="h-16 w-full rounded-xl" />
             </div>
-          ) : error ? (
-            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-center">
-              <p className="text-sm text-muted-foreground">{error}</p>
-              <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+          ) : view === "error" ? (
+            <div
+              role="alert"
+              className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-center"
+            >
+              <p className="text-sm text-muted-foreground">
+                {error ?? "Не удалось загрузить заметки"}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setError(null);
+                  setErrorWorkspaceId(null);
+                  setNotesWorkspaceId(null);
+                  setReloadTick((t) => t + 1);
+                }}
+              >
                 <RotateCcw className="size-3.5" aria-hidden="true" />
                 Повторить
               </Button>
             </div>
-          ) : notes.length > 0 ? (
-            notes.map((note) => {
+          ) : visibleNotes.length > 0 ? (
+            visibleNotes.map((note) => {
               const preview = (note.rawText ?? "").replace(/\s+/g, " ").trim();
+              const hasTranscript = shouldShowTranscription(
+                note.rawText,
+                note.transcription,
+              );
               return (
                 <button
                   key={note.id}
@@ -161,6 +212,7 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
                   <span className="mt-1 text-[11px] text-muted-foreground">
                     {timeAgo(note.createdAt)}
                     {note.category ? ` · ${note.category.name}` : ""}
+                    {hasTranscript ? " · есть расшифровка" : ""}
                   </span>
                 </button>
               );
@@ -196,8 +248,16 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
               {openNote ? timeAgo(openNote.createdAt) : ""}
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed">
-            {openNote?.rawText || "Пусто"}
+          <div>
+            <div className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed">
+              {openNote?.rawText || "Пусто"}
+            </div>
+            {openNote ? (
+              <NoteTranscriptionBlock
+                rawText={openNote.rawText}
+                transcription={openNote.transcription}
+              />
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpenNote(null)}>

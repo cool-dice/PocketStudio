@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { NoteTranscriptionBlock } from "@/components/app/note-transcription";
 import { useThreads } from "@/hooks/use-threads";
 import { formatNoteDate, textPreview } from "@/lib/format";
 import { useAppUi } from "@/lib/store";
@@ -498,10 +499,6 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
     !!note.final ||
     (note.recommendations?.length ?? 0) > 0;
 
-  const asrText = (note.transcription ?? "").trim();
-  const editedText = (note.rawText ?? "").trim();
-  const showTranscript = Boolean(asrText) && asrText !== editedText;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* ── Body ── */}
@@ -534,19 +531,10 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
           {note.rawText || ""}
         </p>
 
-        {showTranscript && (
-          <section
-            aria-label="Расшифровка"
-            className="mt-3 rounded-xl border border-dashed bg-muted/30 p-3"
-          >
-            <h4 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Расшифровка
-            </h4>
-            <p className="mt-1.5 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
-              {note.transcription}
-            </p>
-          </section>
-        )}
+        <NoteTranscriptionBlock
+          rawText={note.rawText}
+          transcription={note.transcription}
+        />
 
         {/* ── Analysis pipeline states (live via WS) ── */}
         <AnimatePresence initial={false} mode="wait">

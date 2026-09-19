@@ -65,6 +65,19 @@ export function isTranscriptAlreadySaved(
 }
 
 /**
+ * Show the «Расшифровка» block only when a real ASR string exists and
+ * the user (or later edit) changed rawText away from it.
+ */
+export function shouldShowTranscription(
+  rawText: string | null | undefined,
+  transcription: string | null | undefined,
+): boolean {
+  const asr = (transcription ?? "").trim();
+  if (!isUsableTranscript(asr)) return false;
+  return asr !== (rawText ?? "").trim();
+}
+
+/**
  * Original ASR text to store beside rawText. Empty / stub «успешно записано»
  * → null so typed notes stay without a transcription.
  */

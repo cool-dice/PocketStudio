@@ -237,6 +237,7 @@ const createNote: ToolDef = {
       }
     }
 
+    // Typed agent thought — not ASR. Do not copy text into transcription.
     const note = await db.note.create({
       data: {
         userId,

@@ -11,6 +11,7 @@ import {
   isTranscriptAlreadySaved,
   isUsableTranscript,
   persistableTranscription,
+  shouldShowTranscription,
   voiceResultCopy,
   voiceReviewCopy,
 } from "./voice-copy";
@@ -79,5 +80,17 @@ describe("voice capture honesty", () => {
     expect(persistableTranscription(null)).toBeNull();
     expect(persistableTranscription(undefined)).toBeNull();
     expect(persistableTranscription("успешно записано")).toBeNull();
+  });
+
+  test("shouldShowTranscription only when ASR differs from edited rawText", () => {
+    expect(shouldShowTranscription("маяк", "маяк")).toBe(false);
+    expect(shouldShowTranscription("  маяк  ", "маяк")).toBe(false);
+    expect(shouldShowTranscription("маяк в тумане, проверить свет", "маяк в тумане")).toBe(
+      true,
+    );
+    expect(shouldShowTranscription("маяк", null)).toBe(false);
+    expect(shouldShowTranscription("маяк", "")).toBe(false);
+    expect(shouldShowTranscription("маяк", "успешно записано")).toBe(false);
+    expect(shouldShowTranscription(null, "маяк в тумане")).toBe(true);
   });
 });
