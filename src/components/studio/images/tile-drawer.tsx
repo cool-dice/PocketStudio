@@ -108,11 +108,11 @@ export function TileDrawer({
                   variant="outline"
                   onClick={() => {
                     onOpenChange(false);
-                    useAppUi.getState().setMainArea("design");
+                    useAppUi.getState().openDesignEditor({ imageUrl: tile.url });
                   }}
                 >
                   <PenTool className="size-4" aria-hidden="true" />
-                  Открыть в Дизайне
+                  Редактировать
                 </Button>
                 {tile.url ? (
                   <Button variant="outline" asChild>

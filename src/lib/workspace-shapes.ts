@@ -32,6 +32,8 @@ type ProjectRow = {
   stage: string | null;
   stageIndex: number | null;
   progress: number;
+  favorite?: boolean;
+  archived?: boolean;
   createdAt: Date;
   updatedAt: Date;
   _count?: {
@@ -62,6 +64,8 @@ export function workspaceDto(
     stage: p.stage,
     stageIndex: p.stageIndex,
     progress: p.progress,
+    favorite: Boolean(p.favorite),
+    archived: Boolean(p.archived),
     counts,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),

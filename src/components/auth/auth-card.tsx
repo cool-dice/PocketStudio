@@ -21,9 +21,14 @@ type AuthTab = "login" | "register";
 interface AuthCardProps {
   defaultTab?: AuthTab;
   className?: string;
+  inviteToken?: string;
 }
 
-export function AuthCard({ defaultTab = "login", className }: AuthCardProps) {
+export function AuthCard({
+  defaultTab = "login",
+  className,
+  inviteToken,
+}: AuthCardProps) {
   const { login, register } = useAuth();
 
   const [tab, setTab] = useState<AuthTab>(defaultTab);
@@ -70,7 +75,7 @@ export function AuthCard({ defaultTab = "login", className }: AuthCardProps) {
       if (tab === "login") {
         await login(trimmedEmail, password);
       } else {
-        await register(trimmedName, trimmedEmail, password);
+        await register(trimmedName, trimmedEmail, password, inviteToken);
       }
       // On success the AuthProvider user is set and the view switches —
       // no manual close needed.

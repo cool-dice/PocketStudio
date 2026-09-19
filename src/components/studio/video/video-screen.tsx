@@ -11,7 +11,8 @@
  */
 
 import { useEffect, useState } from "react";
-import { Clapperboard, Film, Images } from "lucide-react";
+import { Clapperboard, Film, Images, Scissors } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   ModuleHeader,
@@ -25,9 +26,11 @@ import { cn } from "@/lib/utils";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import type { WorkspaceDto } from "@/lib/workspace-types";
 import { StoryboardWorkspace } from "./storyboard-workspace";
+import { NleTimeline } from "./nle-timeline";
+import type { ArtifactDto } from "@/lib/workspace-types";
 
 const VIDEO_DESCRIPTION =
-  "Раскадровка, озвучка и сборка фильма";
+  "Раскадровка, озвучка, монтажный стол и сборка фильма";
 
 export function VideoScreen({
   onOpenMobileNav,
@@ -69,8 +72,7 @@ export function VideoScreen({
       />
 
       {workspaceId ? (
-        /* Вкладка воркспейса — сразу студия раскадровки. */
-        <StoryboardWorkspace projectId={workspaceId} />
+        <VideoStudio projectId={workspaceId} />
       ) : (
         /* Глобальный экран — выбор воркспейса чипами. */
         <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
@@ -130,10 +132,7 @@ export function VideoScreen({
           </section>
 
           {effectiveId ? (
-            <StoryboardWorkspace
-              key={effectiveId}
-              projectId={effectiveId}
-            />
+            <VideoStudio key={effectiveId} projectId={effectiveId} />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center">
               <Film
@@ -148,5 +147,50 @@ export function VideoScreen({
         </main>
       )}
     </section>
+  );
+}
+
+function VideoStudio({ projectId }: { projectId: string }) {
+  const [tab, setTab] = useState("storyboard");
+  const [artifacts, setArtifacts] = useState<ArtifactDto[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listArtifacts(projectId)
+      .then((list) => {
+        if (!cancelled) setArtifacts(list);
+      })
+      .catch(() => {
+        if (!cancelled) setArtifacts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  return (
+    <Tabs
+      value={tab}
+      onValueChange={setTab}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div className="shrink-0 border-b px-4 py-2">
+        <TabsList>
+          <TabsTrigger value="storyboard">
+            <Film className="size-3.5" /> Раскадровка
+          </TabsTrigger>
+          <TabsTrigger value="nle">
+            <Scissors className="size-3.5" /> Монтаж
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent value="storyboard" className="mt-0 min-h-0 flex-1">
+        <StoryboardWorkspace projectId={projectId} />
+      </TabsContent>
+      <TabsContent value="nle" className="mt-0 min-h-0 flex-1 overflow-hidden p-4">
+        <NleTimeline workspaceId={projectId} artifacts={artifacts} />
+      </TabsContent>
+    </Tabs>
   );
 }

@@ -22,6 +22,7 @@ export async function GET(req: Request) {
       name: user.name,
       role: user.role,
       createdAt: user.createdAt,
+      onboardingDone: user.onboardingDone,
     },
   });
 }

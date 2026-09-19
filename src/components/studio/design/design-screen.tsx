@@ -33,13 +33,15 @@ import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import { SelectableChip } from "../images/chip";
 import { MoodboardTab, type GeneratingInfo } from "./moodboard-tab";
 import { StyleTab, type LoadedPalette } from "./style-tab";
+import { RasterEditor } from "./raster-editor";
+import { LayoutEditor } from "./layout-editor";
 import {
   boardPresetById,
   boardTileFromArtifact,
   type FrameRequest,
 } from "./palette-data";
 
-type DesignTab = "moodboard" | "style";
+type DesignTab = "moodboard" | "style" | "raster" | "layout";
 
 export function DesignScreen({
   onOpenMobileNav,
@@ -55,13 +57,20 @@ export function DesignScreen({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const setMainArea = useAppUi((s) => s.setMainArea);
+  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
+  const designSourceUrl = useAppUi((s) => s.designSourceUrl);
+
   /* Вкладки + генерация кадра (30–45 сек) и палитры (~10–20 сек). */
-  const [tab, setTab] = useState<DesignTab>("moodboard");
+  const [tab, setTab] = useState<DesignTab>(
+    designSourceUrl ? "raster" : "moodboard",
+  );
   const [generating, setGenerating] = useState<GeneratingInfo | null>(null);
   const [paletteBusy, setPaletteBusy] = useState(false);
 
-  const setMainArea = useAppUi((s) => s.setMainArea);
-  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
+  useEffect(() => {
+    if (designSourceUrl) setTab("raster");
+  }, [designSourceUrl]);
 
   /* Чипы воркспейсов — только на глобальном экране. */
   useEffect(() => {
@@ -252,6 +261,14 @@ export function DesignScreen({
           <PaletteIcon className="size-4" aria-hidden="true" />
           Стиль
         </TabsTrigger>
+        <TabsTrigger value="raster">
+          <PenTool className="size-4" aria-hidden="true" />
+          Растр
+        </TabsTrigger>
+        <TabsTrigger value="layout">
+          <PenTool className="size-4" aria-hidden="true" />
+          Макет
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="moodboard" className="flex min-h-0 flex-1 flex-col">
         <MoodboardTab
@@ -270,6 +287,14 @@ export function DesignScreen({
           busy={paletteBusy}
           onGenerate={(brief) => void generatePalette(brief)}
         />
+      </TabsContent>
+      <TabsContent value="raster" className="flex min-h-0 flex-1 flex-col">
+        {effectiveId ? (
+          <RasterEditor workspaceId={effectiveId} imageUrl={designSourceUrl} />
+        ) : null}
+      </TabsContent>
+      <TabsContent value="layout" className="flex min-h-0 flex-1 flex-col">
+        {effectiveId ? <LayoutEditor workspaceId={effectiveId} /> : null}
       </TabsContent>
     </Tabs>
   );
@@ -307,7 +332,7 @@ export function DesignScreen({
       <ModuleHeader
         icon={PenTool}
         title="Дизайн"
-        description="Мудборд референсов и палитра стиля"
+        description="Мудборд, растр (Photoshop-lite) и макет (Figma-lite)"
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />

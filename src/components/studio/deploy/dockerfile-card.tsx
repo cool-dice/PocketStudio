@@ -5,8 +5,8 @@
  *
  * Кнопка «Сгенерировать» → POST /api/workspaces/[id]/dockerfile
  * (анализ package.json/файлов → Dockerfile + .dockerignore на диск).
- * Превью сгенерированного файла + честная пометка: сборка образа
- * в песочнице недоступна, файл готов к docker build в полной версии.
+ * «Собрать образ» вызывает docker build; если демона нет — честный
+ * статус unavailable и команда для локальной машины.
  */
 
 import { useCallback, useState } from "react";
@@ -28,6 +28,9 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
   const [kind, setKind] = useState<string | null>(null);
   const [dockerfile, setDockerfile] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [building, setBuilding] = useState(false);
+  const [buildLog, setBuildLog] = useState<string | null>(null);
+  const [buildStatus, setBuildStatus] = useState<string | null>(null);
 
   const generate = useCallback(
     async (overwrite = false) => {
@@ -69,6 +72,27 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
     },
     [workspace.id],
   );
+
+  async function buildImage() {
+    setBuilding(true);
+    setBuildLog(null);
+    try {
+      const res = await api.dockerBuild(workspace.id);
+      setBuildStatus(res.status);
+      setBuildLog(res.log);
+      if (res.status === "built") {
+        toast.success("Образ собран", { description: res.imageTag ?? undefined });
+      } else if (res.status === "unavailable") {
+        toast.message("Docker недоступен", { description: "Команда для локальной сборки в логе." });
+      } else {
+        toast.error("Сборка не удалась");
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось запустить docker build");
+    } finally {
+      setBuilding(false);
+    }
+  }
 
   return (
     <section
@@ -123,10 +147,26 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
             <code>{dockerfile}</code>
           </pre>
           <p className="mt-2.5 text-xs text-muted-foreground">
-            Сборка образа (docker build) — в полной версии студии: в песочнице
-            нет Docker-демона. Файл уже в проекте — вкладка «Код» покажет его
-            в дереве файлов.
+            Нажмите «Собрать образ»: если docker есть — выполним build, иначе
+            покажем точную команду для локальной машины.
           </p>
+          {dockerfile ? (
+            <Button
+              className="mt-3"
+              variant="outline"
+              size="sm"
+              disabled={building}
+              onClick={() => void buildImage()}
+            >
+              {building ? <Loader2 className="size-4 animate-spin" /> : null}
+              Собрать образ
+            </Button>
+          ) : null}
+          {buildLog ? (
+            <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-stone-950 p-3 font-mono text-[11px] text-stone-300">
+              {buildStatus}: {buildLog}
+            </pre>
+          ) : null}
         </div>
       ) : (
         <p className="mt-3 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">

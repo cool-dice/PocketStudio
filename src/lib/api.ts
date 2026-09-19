@@ -201,10 +201,20 @@ export const api = {
     });
   },
 
-  register(name: string, email: string, password: string): Promise<User> {
+  register(
+    name: string,
+    email: string,
+    password: string,
+    invite?: string,
+  ): Promise<User> {
     return request<{ user: User; token?: string }>("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({
+        name,
+        email,
+        password,
+        ...(invite ? { invite } : {}),
+      }),
     }).then((r) => {
       if (r.token) setAuthToken(r.token);
       return r.user;
@@ -725,8 +735,9 @@ export const api = {
 
   /* ── Workspaces / Documents / Entities / Artifacts / AI (Фаза A) ── */
 
-  listWorkspaces(): Promise<WorkspaceDto[]> {
-    return request<{ workspaces: WorkspaceDto[] }>("/api/workspaces").then(
+  listWorkspaces(opts?: { archived?: boolean }): Promise<WorkspaceDto[]> {
+    const qs = opts?.archived ? "?archived=1" : "";
+    return request<{ workspaces: WorkspaceDto[] }>(`/api/workspaces${qs}`).then(
       (r) => r.workspaces,
     );
   },
@@ -750,11 +761,23 @@ export const api = {
 
   updateWorkspace(
     id: string,
-    body: Partial<Pick<WorkspaceDto, "name" | "description" | "stage" | "stageIndex" | "progress">>,
+    body: Partial<
+      Pick<
+        WorkspaceDto,
+        "name" | "description" | "stage" | "stageIndex" | "progress" | "favorite" | "archived"
+      >
+    >,
   ): Promise<WorkspaceDto> {
     return request<{ workspace: WorkspaceDto }>(
       `/api/workspaces/${encodeURIComponent(id)}`,
       { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.workspace);
+  },
+
+  duplicateWorkspace(id: string): Promise<WorkspaceDto> {
+    return request<{ workspace: WorkspaceDto }>(
+      `/api/workspaces/${encodeURIComponent(id)}/duplicate`,
+      { method: "POST" },
     ).then((r) => r.workspace);
   },
 
@@ -1188,4 +1211,276 @@ export const api = {
       },
     );
   },
+
+  listSkills(): Promise<{
+    skills: import("@/lib/skill-shapes").SkillDto[];
+    store: import("@/lib/skill-shapes").StoreSkillDto[];
+  }> {
+    return request("/api/skills");
+  },
+
+  createSkill(body: {
+    name: string;
+    description?: string;
+    skillMd: string;
+    triggers?: string[];
+    icon?: string;
+  }): Promise<import("@/lib/skill-shapes").SkillDto> {
+    return request<{ skill: import("@/lib/skill-shapes").SkillDto }>(
+      "/api/skills",
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.skill);
+  },
+
+  updateSkill(
+    id: string,
+    body: { enabled?: boolean; name?: string; skillMd?: string; triggers?: string[] },
+  ): Promise<import("@/lib/skill-shapes").SkillDto> {
+    return request<{ skill: import("@/lib/skill-shapes").SkillDto }>(
+      `/api/skills/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.skill);
+  },
+
+  duplicateSkill(id: string): Promise<import("@/lib/skill-shapes").SkillDto> {
+    return request<{ skill: import("@/lib/skill-shapes").SkillDto }>(
+      `/api/skills/${encodeURIComponent(id)}`,
+      { method: "POST" },
+    ).then((r) => r.skill);
+  },
+
+  async deleteSkill(id: string): Promise<void> {
+    await request(`/api/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  importSkill(body: {
+    catalogKey?: string;
+    url?: string;
+    skillMd?: string;
+    name?: string;
+  }): Promise<import("@/lib/skill-shapes").SkillDto> {
+    return request<{ skill: import("@/lib/skill-shapes").SkillDto }>(
+      "/api/skills/import",
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.skill);
+  },
+
+  getDesign(
+    workspaceId: string,
+    mode: "raster" | "layout",
+  ): Promise<{
+    design: {
+      id: string;
+      mode: string;
+      payload: unknown;
+      previewUrl: string | null;
+      title: string;
+    };
+  }> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/design?mode=${mode}`,
+    );
+  },
+
+  saveDesign(
+    workspaceId: string,
+    body: {
+      mode: "raster" | "layout";
+      payload: unknown;
+      previewUrl?: string | null;
+      title?: string;
+    },
+  ): Promise<unknown> {
+    return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/design`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  getTimeline(workspaceId: string): Promise<{
+    timeline: import("@/lib/nle-model").NleTimeline;
+    fps: number;
+  }> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/timeline`,
+    );
+  },
+
+  saveTimeline(
+    workspaceId: string,
+    body: { timeline: import("@/lib/nle-model").NleTimeline; fps?: number },
+  ): Promise<unknown> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/timeline`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  listOffers(projectId?: string): Promise<
+    {
+      id: string;
+      projectId: string;
+      title: string;
+      description: string | null;
+      priceCents: number;
+      currency: string;
+      status: string;
+      paymentMode: string;
+      paidAt: string | null;
+      createdAt: string;
+    }[]
+  > {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    return request<{ offers: Array<{
+      id: string;
+      projectId: string;
+      title: string;
+      description: string | null;
+      priceCents: number;
+      currency: string;
+      status: string;
+      paymentMode: string;
+      paidAt: string | null;
+      createdAt: string;
+    }> }>(`/api/offers${qs}`).then((r) => r.offers);
+  },
+
+  createOffer(body: {
+    projectId: string;
+    title: string;
+    description?: string;
+    priceCents: number;
+    paymentMode?: "simulated" | "live";
+  }): Promise<{ id: string; status: string; title: string; priceCents: number; currency: string; paymentMode: string; paidAt: string | null }> {
+    return request<{ offer: { id: string; status: string; title: string; priceCents: number; currency: string; paymentMode: string; paidAt: string | null } }>(
+      "/api/offers",
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.offer);
+  },
+
+  checkoutOffer(id: string): Promise<unknown> {
+    return request(`/api/offers/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ checkout: true }),
+    });
+  },
+
+  listPayouts(): Promise<{
+    payouts: Array<{
+      id: string;
+      amountCents: number;
+      currency: string;
+      status: string;
+      note: string | null;
+      createdAt: string;
+    }>;
+    totalPendingCents: number;
+    totalPaidCents: number;
+  }> {
+    return request("/api/payouts");
+  },
+
+  dockerBuild(workspaceId: string): Promise<{
+    status: string;
+    log: string;
+    imageTag: string | null;
+  }> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/docker-build`,
+      { method: "POST" },
+    );
+  },
+
+  projectPreview(projectId: string): Promise<{
+    kind: string;
+    file: string | null;
+    src: string | null;
+    files?: string[];
+    hint?: string;
+  }> {
+    return request(`/api/projects/${encodeURIComponent(projectId)}/preview`);
+  },
+
+  getOnboarding(): Promise<{ onboardingDone: boolean }> {
+    return request("/api/me/onboarding");
+  },
+
+  setOnboardingDone(done: boolean): Promise<void> {
+    return request("/api/me/onboarding", {
+      method: "PATCH",
+      body: JSON.stringify({ onboardingDone: done }),
+    }).then(() => undefined);
+  },
+
+  registerWithInvite(
+    name: string,
+    email: string,
+    password: string,
+    invite?: string,
+  ): Promise<User> {
+    return this.register(name, email, password, invite);
+  },
+
+  listAdminOffers(): Promise<
+    Array<{
+      id: string;
+      title: string;
+      priceCents: number;
+      currency: string;
+      status: string;
+      userEmail: string;
+      userName: string;
+      workspaceName: string;
+    }>
+  > {
+    return request<{ offers: Array<{
+      id: string;
+      title: string;
+      priceCents: number;
+      currency: string;
+      status: string;
+      userEmail: string;
+      userName: string;
+      workspaceName: string;
+    }> }>("/api/admin/offers").then((r) => r.offers);
+  },
+
+  markOfferPaid(id: string): Promise<unknown> {
+    return request(`/api/admin/offers/${encodeURIComponent(id)}/paid`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  listInvites(): Promise<
+    Array<{
+      id: string;
+      email: string;
+      role: string;
+      token: string;
+      usedAt: string | null;
+      createdAt: string;
+    }>
+  > {
+    return request<{ invites: Array<{
+      id: string;
+      email: string;
+      role: string;
+      token: string;
+      usedAt: string | null;
+      createdAt: string;
+    }> }>("/api/admin/invites").then((r) => r.invites);
+  },
+
+  createInvite(email: string, role: "client" | "admin" = "client"): Promise<{
+    token: string;
+    email: string;
+    role: string;
+  }> {
+    return request<{ invite: { token: string; email: string; role: string } }>(
+      "/api/admin/invites",
+      { method: "POST", body: JSON.stringify({ email, role }) },
+    ).then((r) => r.invite);
+  },
 };
+

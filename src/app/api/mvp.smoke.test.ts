@@ -158,3 +158,147 @@ describe("MVP smoke: AI unconfigured", () => {
     }
   });
 });
+
+describe("full app smoke: skills, favorite, duplicate, offers", () => {
+  test("skills catalog seeds builtins and toggles persist", async () => {
+    expect(token).toBeTruthy();
+    const { GET: listSkills, POST: createSkill } = await import("./skills/route");
+    const { PATCH: patchSkill } = await import("./skills/[id]/route");
+    const list = await listSkills(
+      jsonRequest("http://localhost/api/skills", "GET", undefined, token!),
+    );
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      skills: Array<{ id: string; enabled: boolean; catalogKey: string | null }>;
+      store: Array<{ key: string }>;
+    };
+    expect(body.skills.length).toBeGreaterThan(0);
+    expect(body.store.length).toBeGreaterThan(0);
+    const first = body.skills[0]!;
+    const patched = await patchSkill(
+      jsonRequest(
+        `http://localhost/api/skills/${first.id}`,
+        "PATCH",
+        { enabled: !first.enabled },
+        token!,
+      ),
+      { params: Promise.resolve({ id: first.id }) },
+    );
+    expect(patched.status).toBe(200);
+
+    const created = await createSkill(
+      jsonRequest(
+        "http://localhost/api/skills",
+        "POST",
+        {
+          name: "Smoke skill",
+          skillMd: "---\nname: Smoke\n---\n\n## Когда использовать\nтест",
+          triggers: ["smoke"],
+        },
+        token!,
+      ),
+    );
+    expect(created.status).toBe(201);
+  });
+
+  test("workspace favorite, duplicate and offer checkout", async () => {
+    expect(token && workspaceId).toBeTruthy();
+    const { PATCH: patchWs } = await import("./workspaces/[id]/route");
+    const { POST: duplicate } = await import("./workspaces/[id]/duplicate/route");
+    const { POST: createOffer, GET: listOffers } = await import("./offers/route");
+    const { PATCH: checkout } = await import("./offers/[id]/route");
+
+    const fav = await patchWs(
+      jsonRequest(
+        `http://localhost/api/workspaces/${workspaceId}`,
+        "PATCH",
+        { favorite: true },
+        token!,
+      ),
+      { params: Promise.resolve({ id: workspaceId! }) },
+    );
+    expect(fav.status).toBe(200);
+    const favJson = (await fav.json()) as { workspace: { favorite: boolean } };
+    expect(favJson.workspace.favorite).toBe(true);
+
+    const dup = await duplicate(
+      jsonRequest(
+        `http://localhost/api/workspaces/${workspaceId}/duplicate`,
+        "POST",
+        {},
+        token!,
+      ),
+      { params: Promise.resolve({ id: workspaceId! }) },
+    );
+    expect(dup.status).toBe(201);
+
+    const offerRes = await createOffer(
+      jsonRequest(
+        "http://localhost/api/offers",
+        "POST",
+        {
+          projectId: workspaceId,
+          title: "Глава 1",
+          priceCents: 10000,
+          paymentMode: "simulated",
+        },
+        token!,
+      ),
+    );
+    expect(offerRes.status).toBe(201);
+    const offerJson = (await offerRes.json()) as { offer: { id: string } };
+    const paid = await checkout(
+      jsonRequest(
+        `http://localhost/api/offers/${offerJson.offer.id}`,
+        "PATCH",
+        { checkout: true },
+        token!,
+      ),
+      { params: Promise.resolve({ id: offerJson.offer.id }) },
+    );
+    expect(paid.status).toBe(200);
+    const listed = await listOffers(
+      jsonRequest(
+        `http://localhost/api/offers?projectId=${workspaceId}`,
+        "GET",
+        undefined,
+        token!,
+      ),
+    );
+    expect(listed.status).toBe(200);
+  });
+
+  test("design canvas persists and admin invite creates a token", async () => {
+    expect(token && workspaceId && userId).toBeTruthy();
+    const { GET: getDesign } = await import("./workspaces/[id]/design/route");
+    const canvas = await getDesign(
+      jsonRequest(
+        `http://localhost/api/workspaces/${workspaceId}/design?mode=raster`,
+        "GET",
+        undefined,
+        token!,
+      ),
+      { params: Promise.resolve({ id: workspaceId! }) },
+    );
+    expect(canvas.status).toBe(200);
+    const canvasJson = (await canvas.json()) as {
+      design: { mode: string; payload: { kind: string } };
+    };
+    expect(canvasJson.design.mode).toBe("raster");
+    expect(canvasJson.design.payload.kind).toBe("raster");
+
+    await db.user.update({ where: { id: userId! }, data: { role: "admin" } });
+    const { POST: createInvite } = await import("./admin/invites/route");
+    const inv = await createInvite(
+      jsonRequest(
+        "http://localhost/api/admin/invites",
+        "POST",
+        { email: `invite-${stamp}@example.test`, role: "client" },
+        token!,
+      ),
+    );
+    expect(inv.status).toBe(201);
+    const invJson = (await inv.json()) as { invite: { token: string } };
+    expect(invJson.invite.token.length).toBeGreaterThan(8);
+  });
+});

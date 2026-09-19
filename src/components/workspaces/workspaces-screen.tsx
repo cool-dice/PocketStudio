@@ -24,8 +24,10 @@ import {
   type WorkspacesSort,
   type WorkspacesTypeFilter,
 } from "@/components/workspaces/workspaces-data";
-import { useWorkspaces } from "@/hooks/use-workspaces";
+import { useWorkspaces, invalidateWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
+import { api, ApiError } from "@/lib/api";
+import { toast } from "sonner";
 
 export function WorkspacesScreen({
   onOpenMobileNav,
@@ -159,6 +161,18 @@ export function WorkspacesScreen({
                 key={ws.id}
                 workspace={ws}
                 onOpen={(id) => openWorkspace(id)}
+                onToggleFavorite={(id, next) => {
+                  void api.updateWorkspace(id, { favorite: next }).then(
+                    () => {
+                      invalidateWorkspaces();
+                    },
+                    (err) => {
+                      toast.error(
+                        err instanceof ApiError ? err.message : "Не удалось обновить избранное",
+                      );
+                    },
+                  );
+                }}
               />
             ))}
           </div>

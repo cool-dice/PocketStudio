@@ -1,19 +1,12 @@
 "use client";
 
-/**
- * VibeFlow SPA root — single "/" route.
- * loading → skeleton · !user → LandingScreen · user → AppShell (chat-first).
- * SocketProvider / ThreadsProvider mount only for authenticated users, so
- * logout naturally tears the socket and thread state down.
- */
+import { Suspense } from "react";
 
-import { AppShell } from "@/components/app/app-shell";
+import { AuthenticatedApp } from "@/components/app/authenticated-app";
 import { LandingScreen } from "@/components/landing/landing-screen";
 import { LogoMark } from "@/components/logo";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AuthProvider, useAuth } from "@/hooks/use-auth";
-import { SocketProvider } from "@/hooks/use-socket";
-import { ThreadsProvider } from "@/hooks/use-threads";
+import { useAuth } from "@/hooks/use-auth";
 
 function RootScreen() {
   const { user, loading } = useAuth();
@@ -27,15 +20,12 @@ function RootScreen() {
   }
 
   return (
-    <SocketProvider key={user.id}>
-      <ThreadsProvider>
-        <AppShell />
-      </ThreadsProvider>
-    </SocketProvider>
+    <Suspense fallback={<BootSkeleton />}>
+      <AuthenticatedApp />
+    </Suspense>
   );
 }
 
-/** Full-screen skeleton while /api/auth/me resolves (first paint). */
 function BootSkeleton() {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-background p-4">
@@ -52,9 +42,5 @@ function BootSkeleton() {
 }
 
 export default function Home() {
-  return (
-    <AuthProvider>
-      <RootScreen />
-    </AuthProvider>
-  );
+  return <RootScreen />;
 }

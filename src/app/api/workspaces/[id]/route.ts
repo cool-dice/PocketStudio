@@ -40,6 +40,8 @@ const patchSchema = z.object({
   stage: z.string().trim().max(40).optional(),
   stageIndex: z.number().int().min(1).max(12).optional(),
   progress: z.number().int().min(0).max(100).optional(),
+  favorite: z.boolean().optional(),
+  archived: z.boolean().optional(),
 });
 
 export async function PATCH(req: Request, { params }: Params) {
@@ -88,6 +90,12 @@ export async function PATCH(req: Request, { params }: Params) {
       ...(stageIndex !== undefined ? { stageIndex } : {}),
       ...(parsed.data.progress !== undefined
         ? { progress: parsed.data.progress }
+        : {}),
+      ...(parsed.data.favorite !== undefined
+        ? { favorite: parsed.data.favorite }
+        : {}),
+      ...(parsed.data.archived !== undefined
+        ? { archived: parsed.data.archived }
         : {}),
     },
   });

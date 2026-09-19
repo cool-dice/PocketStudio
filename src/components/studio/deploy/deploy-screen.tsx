@@ -179,7 +179,7 @@ export function DeployScreen({
       <ModuleHeader
         icon={Rocket}
         title="Экспорт и публикация"
-        description="Честный экспорт воркспейса: ZIP со всеми реальными артефактами"
+        description="Dockerfile, docker build если демон есть, ZIP и локальный preview — без фейкового «опубликовано»."
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />
@@ -300,7 +300,7 @@ export function DeployScreen({
             />
 
             {/* Dockerfile для воркспейсов с кодом (Фаза D). */}
-            {workspace && workspace.origin !== "workspace" ? (
+            {workspace && (workspace.origin !== "workspace" || workspace.type === "app") ? (
               <DockerfileCard workspace={workspace} />
             ) : null}
 

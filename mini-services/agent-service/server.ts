@@ -148,12 +148,29 @@ async function buildTurnSystemPrompt(
     const tasks = await threadTasks(thread.id);
     const planTasks = tasks.map((t) => ({ text: t.text, done: t.done }));
 
+    const skillRows = await db.skill.findMany({
+      where: { userId, enabled: true },
+      select: { name: true, triggers: true, skillMd: true },
+      take: 12,
+    });
+    const skillDocs = skillRows.map((s) => {
+      let triggers = s.triggers;
+      try {
+        const parsed = JSON.parse(s.triggers) as unknown;
+        if (Array.isArray(parsed)) triggers = parsed.join(", ");
+      } catch {
+        // keep raw
+      }
+      return `### ${s.name}\nТриггеры: ${triggers}\n\n${s.skillMd}`;
+    });
+
     if (!thread.projectId) {
       return buildAgentSystemPrompt({
         mode: thread.mode,
         planTasks,
         mcpToolDocs: mcp.docs,
         filesystemOff: mcp.filesystemOff,
+        skillDocs,
       });
     }
     const project = await db.project.findFirst({
@@ -165,6 +182,7 @@ async function buildTurnSystemPrompt(
         mode: thread.mode,
         mcpToolDocs: mcp.docs,
         filesystemOff: mcp.filesystemOff,
+        skillDocs,
       });
     }
     const root = projectRoot(project.id);
@@ -184,6 +202,7 @@ async function buildTurnSystemPrompt(
       planTasks,
       mcpToolDocs: mcp.docs,
       filesystemOff: mcp.filesystemOff,
+      skillDocs,
     });
   } catch (err) {
     console.warn(
@@ -668,6 +687,8 @@ async function executeToolCall(opts: {
         "generate_image",
         "tts_narration",
         "check_document",
+        "open_in_design",
+        "apply_filter",
       ].includes(call.tool)
     ) {
       const wsId =

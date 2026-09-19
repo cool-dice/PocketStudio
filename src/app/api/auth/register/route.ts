@@ -21,6 +21,7 @@ const registerSchema = z.object({
   password: z
     .string({ message: "Укажите пароль" })
     .min(8, "Пароль должен содержать минимум 8 символов"),
+  invite: z.string().trim().min(8).max(80).optional(),
 });
 
 export async function POST(req: Request) {
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ошибка валидации", fields }, { status: 400 });
   }
 
-  const { name, email, password } = parsed.data;
+  const { name, email, password, invite: inviteToken } = parsed.data;
 
   // Seed env admin first so it takes priority over "first user becomes admin".
   await ensureAdminSeed();
@@ -54,15 +55,40 @@ export async function POST(req: Request) {
     );
   }
 
+  let inviteRole: string | null = null;
+  if (inviteToken) {
+    const invite = await db.invite.findUnique({ where: { token: inviteToken } });
+    if (!invite || invite.usedAt) {
+      return NextResponse.json({ error: "Инвайт недействителен" }, { status: 400 });
+    }
+    if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) {
+      return NextResponse.json({ error: "Срок инвайта истёк" }, { status: 400 });
+    }
+    if (invite.email && invite.email !== email) {
+      return NextResponse.json(
+        { error: "Этот инвайт выписан на другой email" },
+        { status: 400 },
+      );
+    }
+    inviteRole = invite.role;
+  }
+
   const userCount = await db.user.count();
   const user = await db.user.create({
     data: {
       name,
       email,
       passwordHash: await hashPassword(password),
-      role: userCount === 0 ? "admin" : "client",
+      role: inviteRole ?? (userCount === 0 ? "admin" : "client"),
     },
   });
+
+  if (inviteToken) {
+    await db.invite.updateMany({
+      where: { token: inviteToken, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+  }
 
   // Best-effort audit log.
   try {

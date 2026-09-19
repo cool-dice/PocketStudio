@@ -37,6 +37,7 @@ import { ForecastChart } from "./forecast-chart";
 import { isPlanDocument, planFromDocument } from "./plan-data";
 import { PlanCard } from "./plan-card";
 import { SectionHeading } from "./section-heading";
+import { OfferCabinet } from "./offer-cabinet";
 
 export function MonetizeScreen({
   onOpenMobileNav,
@@ -144,7 +145,7 @@ export function MonetizeScreen({
       <ModuleHeader
         icon={Coins}
         title="Монетизация"
-        description="План ИИ и список активов. Выплат и биллинга нет — это не кабинет автора."
+        description="План ИИ, активы, офферы и кабинет выплат. Платежи — simulated, пока нет live-ключа."
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       >
@@ -251,6 +252,7 @@ export function MonetizeScreen({
             </section>
 
             <AssetsSection artifacts={artifacts} loading={loading} />
+            {effectiveId ? <OfferCabinet workspaceId={effectiveId} /> : null}
           </>
         )}
       </main>

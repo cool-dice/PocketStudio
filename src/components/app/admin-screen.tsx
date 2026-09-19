@@ -40,6 +40,8 @@ import {
 import { toast } from "sonner";
 
 import { AdminAiPanel } from "@/components/app/admin-ai-panel";
+import { AdminInvitesPanel } from "@/components/app/admin-invites-panel";
+import { AdminOffersPanel } from "@/components/app/admin-offers-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,7 +82,7 @@ interface AdminScreenProps {
 }
 
 type RoleFilter = "" | "admin" | "client";
-type AdminTab = "overview" | "ai";
+type AdminTab = "overview" | "ai" | "invites" | "payments";
 
 export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
   const { user } = useAuth();
@@ -268,6 +270,10 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
         <div className="mx-auto w-full max-w-5xl space-y-6 p-4 sm:p-6">
           {tab === "ai" ? (
             <AdminAiPanel />
+          ) : tab === "invites" ? (
+            <AdminInvitesPanel />
+          ) : tab === "payments" ? (
+            <AdminOffersPanel />
           ) : error ? (
             <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card p-10 text-center">
               <span className="flex size-12 items-center justify-center rounded-full bg-destructive/10">
@@ -660,13 +666,19 @@ function Header({
       </h1>
       {onTab && (
         <Tabs value={tab} onValueChange={(v) => onTab(v as AdminTab)}>
-          <TabsList className="h-8 rounded-xl">
+          <TabsList className="vf-scroll-x h-8 max-w-full overflow-x-auto rounded-xl">
             <TabsTrigger value="overview" className="h-6 rounded-lg text-xs">
               Обзор
             </TabsTrigger>
             <TabsTrigger value="ai" className="h-6 rounded-lg gap-1 text-xs">
               <Sparkles className="size-3" />
               Модели ИИ
+            </TabsTrigger>
+            <TabsTrigger value="invites" className="h-6 rounded-lg text-xs">
+              Инвайты
+            </TabsTrigger>
+            <TabsTrigger value="payments" className="h-6 rounded-lg text-xs">
+              Оплаты
             </TabsTrigger>
           </TabsList>
         </Tabs>

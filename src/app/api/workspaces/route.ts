@@ -18,8 +18,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
 
+  const url = new URL(req.url);
   const projects = await db.project.findMany({
-    where: { userId: session.sub, origin: "workspace" },
+    where: {
+      userId: session.sub,
+      origin: "workspace",
+      ...(url.searchParams.get("archived") === "1"
+        ? { archived: true }
+        : { archived: false }),
+    },
     orderBy: { updatedAt: "desc" },
   });
 

@@ -17,6 +17,7 @@ import {
   ArrowLeft,
   ChevronRight,
   Download,
+  Eye,
   File,
   FileCode2,
   FileDiff,
@@ -161,6 +162,9 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   const [deleting, setDeleting] = useState(false);
   const [discussing, setDiscussing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [previewHint, setPreviewHint] = useState<string | null>(null);
 
   // Version-bump bookkeeping: the first render does the initial load itself.
   const versionSeenRef = useRef(projectFilesVersion);
@@ -210,6 +214,27 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
       setExporting(false);
     }
   }, [projectId, exporting]);
+
+  const openPreview = useCallback(async () => {
+    try {
+      const preview = await api.projectPreview(projectId);
+      setPreviewSrc(preview.src);
+      setPreviewHint(
+        preview.hint ??
+          (preview.kind === "html"
+            ? "Статический HTML из файлов проекта, не запущенный dev-сервер."
+            : "Нет index.html — показан список файлов."),
+      );
+      setPreviewOpen(true);
+      if (!preview.src) {
+        toast.message("Превью без index.html", {
+          description: (preview.files ?? []).slice(0, 8).join(", ") || preview.hint,
+        });
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось открыть превью");
+    }
+  }, [projectId]);
 
 
   const loadProject = useCallback(async () => {
@@ -492,6 +517,17 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             variant="outline"
             size="sm"
             className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
+            onClick={() => void openPreview()}
+            aria-label="Превью проекта"
+            title="Статический iframe-превью"
+          >
+            <Eye className="size-4" aria-hidden="true" />
+            <span className="hidden md:inline">Превью</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
             onClick={() => void discuss()}
             disabled={!project || discussing}
             aria-label="Обсудить проект в чате"
@@ -756,6 +792,30 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
           </div>
         </div>
       </div>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Превью проекта</DialogTitle>
+            <DialogDescription>
+              {previewHint ?? "Статический iframe по файлам на диске."}
+            </DialogDescription>
+          </DialogHeader>
+          {previewSrc ? (
+            <iframe
+              title="Превью проекта"
+              src={previewSrc}
+              sandbox="allow-scripts allow-same-origin"
+              className="h-[60vh] w-full rounded-lg border bg-white"
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Нет index.html для iframe. Это не запущенное приложение — только
+              файлы на диске.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ── Checkpoint dialog ── */}
       <CheckpointDialog

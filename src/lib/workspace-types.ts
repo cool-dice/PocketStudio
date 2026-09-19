@@ -23,6 +23,8 @@ export interface WorkspaceDto {
   stage: string | null;
   stageIndex: number | null;
   progress: number;
+  favorite: boolean;
+  archived: boolean;
   counts: WorkspaceCounts;
   createdAt: string;
   updatedAt: string;

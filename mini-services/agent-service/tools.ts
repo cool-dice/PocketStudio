@@ -810,6 +810,7 @@ const completeTask: ToolDef = {
 // Инструменты MCP-адаптеров (Фаза D) — определены в mcp-tools.ts и гейтятся
 // включёнными серверами реестра интеграций (server.ts).
 import { WORKSPACE_TOOLS } from "./workspace-tools";
+import { DESIGN_TOOLS } from "./design-tools";
 import { MCP_TOOLS } from "./mcp-tools";
 
 export const TOOLS: ToolDef[] = [
@@ -826,6 +827,7 @@ export const TOOLS: ToolDef[] = [
   checkpointTool,
   completeTask,
   ...WORKSPACE_TOOLS,
+  ...DESIGN_TOOLS,
   ...MCP_TOOLS,
 ];
 

@@ -10,6 +10,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useRouter } from "next/navigation";
 
 import { AuthCard } from "@/components/auth/auth-card";
 import { ChatFeatureSection } from "@/components/landing/chat-feature-section";
@@ -33,6 +34,7 @@ export function LandingScreen() {
   const [authOpen, setAuthOpen] = useState(false);
   const [authTab, setAuthTab] = useState<AuthTab>("register");
   const [standaloneAuth, setStandaloneAuth] = useState(false);
+  const router = useRouter();
 
   const openAuth = (tab: AuthTab) => {
     setAuthTab(tab);
@@ -77,10 +79,7 @@ export function LandingScreen() {
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
-            onClick={() => {
-              setAuthTab("login");
-              setStandaloneAuth(true);
-            }}
+            onClick={() => router.push("/login")}
           >
             Войти
           </Button>

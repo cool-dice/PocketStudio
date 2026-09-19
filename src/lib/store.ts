@@ -136,6 +136,10 @@ interface AppUiState {
   closeWorkspace: () => void;
   /** Переключить вкладку открытого воркспейса. */
   setWorkspaceTab: (tab: WorkspaceTab) => void;
+
+  /** Картинка, с которой открыли растр («Редактировать» в галерее). */
+  designSourceUrl: string | null;
+  openDesignEditor: (opts?: { imageUrl?: string | null }) => void;
 }
 
 export const useAppUi = create<AppUiState>((set, get) => ({
@@ -248,4 +252,18 @@ export const useAppUi = create<AppUiState>((set, get) => ({
       workspaceTab: "chat",
     }),
   setWorkspaceTab: (workspaceTab) => set({ workspaceTab }),
+
+  designSourceUrl: null,
+  openDesignEditor: (opts) => {
+    const imageUrl = opts?.imageUrl ?? null;
+    const state = get();
+    if (state.activeWorkspaceId) {
+      set({
+        workspaceTab: "design",
+        designSourceUrl: imageUrl,
+      });
+      return;
+    }
+    set({ mainArea: "design", designSourceUrl: imageUrl });
+  },
 }));

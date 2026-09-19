@@ -13,6 +13,7 @@ import {
   FolderKanban,
   ImagePlus,
   NotebookPen,
+  Star,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -37,11 +38,13 @@ const COUNT_ITEMS = [
 interface WorkspaceCardProps {
   workspace: WorkspaceDto;
   onOpen: (id: string) => void;
+  onToggleFavorite?: (id: string, next: boolean) => void;
 }
 
 export function WorkspacesCard({
   workspace,
   onOpen,
+  onToggleFavorite,
 }: WorkspaceCardProps) {
   const meta = WORKSPACE_TYPE_META[workspace.type];
   const Icon = meta.icon;
@@ -80,6 +83,24 @@ export function WorkspacesCard({
         >
           {stage}
         </Badge>
+        {onToggleFavorite ? (
+          <button
+            type="button"
+            className="absolute right-3 top-3 rounded-full bg-background/80 p-1.5 text-white backdrop-blur-sm"
+            aria-label={workspace.favorite ? "Убрать из избранного" : "В избранное"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite(workspace.id, !workspace.favorite);
+            }}
+          >
+            <Star
+              className={cn(
+                "size-4 text-white",
+                workspace.favorite && "fill-amber-400 text-amber-400",
+              )}
+            />
+          </button>
+        ) : null}
       </button>
 
       {/* ── Тело карточки ── */}

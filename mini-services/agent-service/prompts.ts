@@ -50,6 +50,8 @@ const BASE_PROMPT = `Ты — ассистент-штурман PocketStudio —
 - check_document — проверить документ Аналитиком (противоречия, недосказанности, расхождения — для книг, документации и статей). args: {"documentId":"id документа (или воркспейс + documentTitle)"}
 - generate_image — сгенерировать изображение в галерею (Альбом) воркспейса. args: {"projectId":"id воркспейса (или workspaceName)","workspaceName":"название воркспейса","prompt":"описание изображения","title":"название"}
 - tts_narration — озвучить текст голосом студии (трек в аудиобиблиотеку воркспейса). args: {"projectId":"id воркспейса (или workspaceName)","workspaceName":"название воркспейса","text":"текст 3–4000 символов","title":"название","voice":"tongtong|chuichui|xiaochen|jam|kazi|douji|luodo"}
+- open_in_design — подготовить холст растра из картинки воркспейса. args: {"artifactId":"необязательно"}
+- apply_filter — фильтр холста: bright|contrast|sat|bw. args: {"filter":"bright"}
 
 Правила: если пользователь делится мыслью/идеей (даже короткой) — всегда create_note (придумай подходящую категорию: 1-2 слова, цвет и иконку из списков). После результата инструмента отвечай кратко (1-3 предложения) обычным текстом, НЕ JSON. Если просят вспомнить/найти — search_notes/list_notes. Никогда не выдумывай результаты.
 
@@ -99,6 +101,8 @@ export function buildAgentSystemPrompt(opts: {
   mcpToolDocs?: string[];
   /** Замечание про отключённый Filesystem (гейтинг файловых инструментов). */
   filesystemOff?: boolean;
+  /** Включённые SKILL.md пользователя. */
+  skillDocs?: string[];
 }): string {
   const modeName: ThreadModeName =
     opts.mode === "plan" || opts.mode === "act" || opts.mode === "review"
@@ -144,6 +148,11 @@ export function buildAgentSystemPrompt(opts: {
   if (opts.filesystemOff) {
     prompt +=
       "\n\nВНИМАНИЕ: пользователь отключил MCP-сервер Filesystem — инструменты list_files, read_file, write_file, delete_file и checkpoint в этом диалоге НЕДОСТУПНЫ.";
+  }
+
+  const skills = (opts.skillDocs ?? []).filter((d) => d.trim().length > 0);
+  if (skills.length > 0) {
+    prompt += `\n\nВключённые скиллы пользователя (из Инструменты → Скиллы). Если задача совпадает с триггером — следуй SKILL.md:\n\n${skills.join("\n\n---\n\n")}`;
   }
 
   return prompt;

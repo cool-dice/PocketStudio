@@ -11,6 +11,7 @@ export interface User {
   name: string;
   role: Role;
   createdAt: string;
+  onboardingDone?: boolean;
 }
 
 export type ThreadMode = "ask" | "plan" | "act" | "review";

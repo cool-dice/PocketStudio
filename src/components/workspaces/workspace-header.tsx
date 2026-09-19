@@ -11,12 +11,14 @@
 
 import { useEffect, useState } from "react";
 import {
+  Archive,
   ArrowLeft,
   AudioWaveform,
   BookOpenText,
   Check,
   ChevronRight,
   Clapperboard,
+  Copy,
   FolderKanban,
   ImagePlus,
   Menu,
@@ -24,6 +26,7 @@ import {
   NotebookPen,
   Pencil,
   Settings2,
+  Star,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -63,6 +66,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 import { invalidateWorkspaces } from "@/hooks/use-workspaces";
+import { useAppUi } from "@/lib/store";
 import {
   WORKSPACE_TAB_META,
   WORKSPACE_TYPE_META,
@@ -166,6 +170,45 @@ export function WorkspaceHeader({
       );
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function duplicateWorkspace() {
+    try {
+      const copy = await api.duplicateWorkspace(workspace.id);
+      toast.success("Создана копия воркспейса");
+      invalidateWorkspaces();
+      useAppUi.getState().openWorkspace(copy.id);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось дублировать",
+      );
+    }
+  }
+
+  async function toggleArchive() {
+    try {
+      await api.updateWorkspace(workspace.id, { archived: !workspace.archived });
+      toast.success(workspace.archived ? "Воркспейс возвращён" : "Воркспейс в архиве");
+      invalidateWorkspaces();
+      if (!workspace.archived) onDeleted?.();
+      else onUpdated?.();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось изменить архив",
+      );
+    }
+  }
+
+  async function toggleFavorite() {
+    try {
+      await api.updateWorkspace(workspace.id, { favorite: !workspace.favorite });
+      invalidateWorkspaces();
+      onUpdated?.();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось обновить избранное",
+      );
     }
   }
 
@@ -310,6 +353,22 @@ export function WorkspaceHeader({
               variant="ghost"
               size="icon"
               className="size-9"
+              onClick={() => void toggleFavorite()}
+              aria-label={workspace.favorite ? "Убрать из избранного" : "В избранное"}
+              title="Избранное"
+            >
+              <Star
+                className={cn(
+                  "size-4.5",
+                  workspace.favorite && "fill-amber-400 text-amber-400",
+                )}
+                aria-hidden="true"
+              />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9"
               onClick={onOpenSettings}
               aria-label="Настройки воркспейса"
               title="Настроить воркспейс"
@@ -332,6 +391,18 @@ export function WorkspaceHeader({
                 <DropdownMenuItem onClick={onOpenSettings}>
                   <Pencil aria-hidden="true" />
                   Переименовать
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => void duplicateWorkspace()}
+                >
+                  <Copy aria-hidden="true" />
+                  Дублировать
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => void toggleArchive()}
+                >
+                  <Archive aria-hidden="true" />
+                  {workspace.archived ? "Вернуть из архива" : "Архивировать"}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
