@@ -20,6 +20,12 @@ export async function POST(req: Request, { params }: Params) {
   if (!offer) {
     return NextResponse.json({ error: "Оффер не найден" }, { status: 404 });
   }
+  if (offer.status === "paid") {
+    return NextResponse.json(
+      { error: "Оффер уже отмечен оплаченным" },
+      { status: 409 },
+    );
+  }
   const charged = await chargeOffer({
     offerId: offer.id,
     amountCents: offer.priceCents,

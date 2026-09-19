@@ -8,9 +8,9 @@
  *     сохранённый как Document kind="spec" с секциями; рендер по секциям,
  *     регенерация через AlertDialog с брифом;
  *  2) «Прогноз» — CSS bar-chart из маркера ПРОГНОЗ_JSON секции плана;
- *  3) «Активы к публикации» — реальные артефакты воркспейса из БД.
+ *  3) «Активы к публикации» — реальные артефакты воркспейса из БД;
+ *  4) кабинет офферов и выплат (симуляция, без карточной сети).
  * Глобальный экран (без id): чипы воркспейсов → выбрал → тот же контент.
- * Выплаты и биллинг не показываем — за пределами песочницы.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -37,6 +37,7 @@ import { isPlanDocument, planFromDocument } from "./plan-data";
 import { PlanCard } from "./plan-card";
 import { SectionHeading } from "./section-heading";
 import { OfferCabinet } from "./offer-cabinet";
+import { monetizePaymentsHint } from "@/lib/payout-copy";
 
 export function MonetizeScreen({
   onOpenMobileNav,
@@ -125,7 +126,7 @@ export function MonetizeScreen({
       <ModuleHeader
         icon={Coins}
         title="Монетизация"
-        description="План ИИ, активы, офферы и кабинет выплат. Платежи — simulated, пока нет live-ключа."
+        description={monetizePaymentsHint()}
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       >

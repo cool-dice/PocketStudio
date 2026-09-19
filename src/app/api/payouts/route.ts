@@ -45,9 +45,19 @@ export async function PATCH(req: Request) {
   if (!body.id || (body.status !== "paid" && body.status !== "failed")) {
     return NextResponse.json({ error: "Нужны id и status paid|failed" }, { status: 400 });
   }
-  const row = await db.payout.update({
-    where: { id: body.id },
-    data: { status: body.status },
-  });
-  return NextResponse.json({ payout: row });
+  try {
+    const row = await db.payout.update({
+      where: { id: body.id },
+      data: { status: body.status },
+    });
+    return NextResponse.json({
+      payout: {
+        id: row.id,
+        status: row.status,
+        amountCents: row.amountCents,
+      },
+    });
+  } catch {
+    return NextResponse.json({ error: "Выплата не найдена" }, { status: 404 });
+  }
 }

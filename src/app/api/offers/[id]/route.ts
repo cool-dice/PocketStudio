@@ -36,6 +36,15 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   if (parsed.data.checkout) {
+    if (offer.status === "paid") {
+      return NextResponse.json({
+        offer: {
+          ...offer,
+          paidAt: offer.paidAt?.toISOString() ?? null,
+          createdAt: offer.createdAt.toISOString(),
+        },
+      });
+    }
     const charged = await chargeOffer({
       offerId: offer.id,
       amountCents: offer.priceCents,

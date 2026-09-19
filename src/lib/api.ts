@@ -1452,6 +1452,14 @@ export const api = {
     });
   },
 
+  peekInvite(token: string): Promise<{
+    status: "ok" | "used" | "expired" | "invalid";
+    role?: "admin" | "client";
+    email?: string;
+  }> {
+    return request(`/api/invites/${encodeURIComponent(token)}`);
+  },
+
   listPayouts(): Promise<{
     payouts: Array<{
       id: string;
@@ -1540,6 +1548,7 @@ export const api = {
       priceCents: number;
       currency: string;
       status: string;
+      paymentMode: string;
       userEmail: string;
       userName: string;
       workspaceName: string;
@@ -1551,6 +1560,7 @@ export const api = {
       priceCents: number;
       currency: string;
       status: string;
+      paymentMode: string;
       userEmail: string;
       userName: string;
       workspaceName: string;
@@ -1571,6 +1581,7 @@ export const api = {
       role: string;
       token: string;
       usedAt: string | null;
+      expiresAt: string | null;
       createdAt: string;
     }>
   > {
@@ -1580,6 +1591,7 @@ export const api = {
       role: string;
       token: string;
       usedAt: string | null;
+      expiresAt: string | null;
       createdAt: string;
     }> }>("/api/admin/invites").then((r) => r.invites);
   },

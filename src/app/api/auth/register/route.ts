@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { attachSessionCookie, hashPassword, signSession } from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
+import { inviteLifecycle, sanitizeInviteRole } from "@/lib/invite-status";
 
 export const dynamic = "force-dynamic";
 
@@ -58,16 +59,20 @@ export async function POST(req: Request) {
       let inviteRole: string | null = null;
       if (inviteToken) {
         const invite = await tx.invite.findUnique({ where: { token: inviteToken } });
-        if (!invite || invite.usedAt) {
+        const life = inviteLifecycle(invite);
+        if (life === "invalid") {
           throw Object.assign(new Error("invite-invalid"), { code: "INVITE_INVALID" });
         }
-        if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) {
+        if (life === "used") {
+          throw Object.assign(new Error("invite-used"), { code: "INVITE_USED" });
+        }
+        if (life === "expired") {
           throw Object.assign(new Error("invite-expired"), { code: "INVITE_EXPIRED" });
         }
-        if (invite.email && invite.email !== email) {
+        if (invite?.email && invite.email !== email) {
           throw Object.assign(new Error("invite-email"), { code: "INVITE_EMAIL" });
         }
-        inviteRole = invite.role;
+        inviteRole = sanitizeInviteRole(invite?.role);
       }
 
       const userCount = await tx.user.count();
@@ -100,7 +105,16 @@ export async function POST(req: Request) {
       );
     }
     if (code === "INVITE_EXPIRED") {
-      return NextResponse.json({ error: "Срок инвайта истёк" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Срок инвайта истёк — попросите новую ссылку." },
+        { status: 400 },
+      );
+    }
+    if (code === "INVITE_USED") {
+      return NextResponse.json(
+        { error: "Этот инвайт уже использован — зарегистрироваться по нему нельзя." },
+        { status: 400 },
+      );
     }
     if (code === "INVITE_EMAIL") {
       return NextResponse.json(

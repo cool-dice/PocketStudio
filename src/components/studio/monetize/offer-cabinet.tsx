@@ -1,12 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Banknote, Plus } from "lucide-react";
+import { Banknote, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import {
+  offerCheckoutSuccessCopy,
+  offerPaidLabel,
+  payoutStatusLabel,
+} from "@/lib/payout-copy";
 
 export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
   const [title, setTitle] = useState("");
@@ -23,24 +28,32 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      const [o, p, pay] = await Promise.all([
-        api.listOffers(workspaceId),
-        api.listPayouts(),
-        api.paymentsStatus().catch(() => null),
-      ]);
-      setOffers(o);
-      setPayouts(p);
-      if (pay) setAdapter(pay);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить кабинет");
-    }
+    const [o, p, pay] = await Promise.all([
+      api.listOffers(workspaceId),
+      api.listPayouts(),
+      api.paymentsStatus().catch(() => null),
+    ]);
+    setOffers(o);
+    setPayouts(p);
+    if (pay) setAdapter(pay);
+    setLoadError(null);
   }, [workspaceId]);
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    void load().catch((err) => {
+      if (cancelled) return;
+      const message =
+        err instanceof ApiError ? err.message : "Не удалось загрузить кабинет";
+      setLoadError(message);
+      toast.error(message);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   async function create() {
@@ -70,15 +83,36 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
   async function checkout(id: string, paymentMode: string) {
     try {
       await api.checkoutOffer(id);
-      toast.success(
-        paymentMode === "live"
-          ? "Сервер принял live-запрос. Карту мы всё равно не проводим."
-          : "Симулированная оплата прошла, выплата в кабинете",
-      );
+      toast.success(offerCheckoutSuccessCopy(paymentMode));
       await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Оплата не прошла");
     }
+  }
+
+  if (loadError) {
+    return (
+      <section className="space-y-3 rounded-xl border bg-card p-4 sm:p-6">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          <Banknote className="size-4 text-primary" />
+          Кабинет: офферы и выплаты
+        </h2>
+        <p className="text-sm text-muted-foreground">{loadError}</p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void load().catch((err) => {
+              setLoadError(
+                err instanceof ApiError ? err.message : "Не удалось загрузить кабинет",
+              );
+            })
+          }
+        >
+          <RefreshCw className="size-4" /> Повторить
+        </Button>
+      </section>
+    );
   }
 
   return (
@@ -90,7 +124,7 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
       <p className="text-xs text-muted-foreground">
         Адаптер: {mode === "simulated" ? "симуляция" : "live"}.
         {adapter?.liveKeyConfigured
-          ? " PAYMENTS_API_KEY задан."
+          ? " PAYMENTS_API_KEY задан, но карта всё равно не списывается."
           : " Живой ключ не задан — live откажет честно."}
       </p>
       <div className="flex flex-wrap gap-2">
@@ -125,7 +159,7 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
         {offers.length === 0 ? (
           <li className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
             Офферов пока нет — создайте черновик. «Оплачено» появляется только после
-            симуляции или пометки админа, не с клиента в live.
+            симуляции или пометки админа. Клиент не может сам отметить live-оплату.
           </li>
         ) : (
           offers.map((o) => (
@@ -147,21 +181,41 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
                 </Button>
               ) : (
                 <span className="text-xs text-emerald-600">
-                  {o.paymentMode === "live"
-                    ? "оплачено (не картой: симуляция или пометка админа)"
-                    : "оплачено (симуляция)"}
+                  {offerPaidLabel(o.paymentMode)}
                 </span>
               )}
             </li>
           ))
         )}
       </ul>
-      {payouts ? (
+      <div className="space-y-2">
         <p className="text-xs text-muted-foreground">
-          К выплате: {(payouts.totalPendingCents / 100).toFixed(0)} ₽ · выплачено:{" "}
-          {(payouts.totalPaidCents / 100).toFixed(0)} ₽
+          {payouts
+            ? `К выплате: ${(payouts.totalPendingCents / 100).toFixed(0)} ₽ · выплачено (симуляция): ${(payouts.totalPaidCents / 100).toFixed(0)} ₽`
+            : "Загружаем выплаты…"}
         </p>
-      ) : null}
+        <ul className="space-y-1">
+          {!payouts || payouts.payouts.length === 0 ? (
+            <li className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+              Выплат пока нет. Они появляются после симуляции или пометки админа —
+              не после живой карты.
+            </li>
+          ) : (
+            payouts.payouts.map((p) => (
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs"
+              >
+                <span>
+                  {(p.amountCents / 100).toFixed(0)} {p.currency}
+                  {p.note ? ` · ${p.note}` : ""}
+                </span>
+                <span className="text-muted-foreground">{payoutStatusLabel(p.status)}</span>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
     </section>
   );
 }

@@ -8,18 +8,24 @@
 import {
   cloneElement,
   isValidElement,
+  useEffect,
   useState,
   type ReactElement,
 } from "react";
 import { Loader2, LogIn, UserPlus } from "lucide-react";
 
-import { ApiError } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import {
+  inviteRegisterCopy,
+  inviteRoleLabel,
+  type InviteLifecycle,
+} from "@/lib/invite-status";
 
 type AuthTab = "login" | "register";
 
@@ -36,13 +42,43 @@ export function AuthCard({
 }: AuthCardProps) {
   const { login, register } = useAuth();
 
-  const [tab, setTab] = useState<AuthTab>(defaultTab);
+  const [tab, setTab] = useState<AuthTab>(
+    inviteToken ? "register" : defaultTab,
+  );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [inviteStatus, setInviteStatus] = useState<InviteLifecycle | null>(
+    inviteToken ? null : "invalid",
+  );
+  const [inviteRole, setInviteRole] = useState<"admin" | "client" | null>(null);
+
+  useEffect(() => {
+    if (!inviteToken) {
+      setInviteStatus("invalid");
+      return;
+    }
+    let cancelled = false;
+    void api
+      .peekInvite(inviteToken)
+      .then((peek) => {
+        if (cancelled) return;
+        setInviteStatus(peek.status);
+        if (peek.role) setInviteRole(peek.role);
+        if (peek.email && peek.status === "ok") {
+          setEmail((current) => current || peek.email || "");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setInviteStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteToken]);
 
   const resetErrors = () => {
     setError(null);
@@ -74,6 +110,15 @@ export function AuthCard({
       setFieldErrors({ password: "Пароль должен содержать минимум 8 символов" });
       return;
     }
+    if (
+      tab === "register" &&
+      inviteToken &&
+      inviteStatus &&
+      inviteStatus !== "ok"
+    ) {
+      setError(inviteRegisterCopy(inviteStatus));
+      return;
+    }
 
     setLoading(true);
     try {
@@ -82,8 +127,6 @@ export function AuthCard({
       } else {
         await register(trimmedName, trimmedEmail, password, inviteToken);
       }
-      // On success the AuthProvider user is set and the view switches —
-      // no manual close needed.
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -105,7 +148,13 @@ export function AuthCard({
         <p className="mt-1 text-sm text-muted-foreground">
           {tab === "login"
             ? "Войдите, чтобы продолжить работу"
-            : "Пара шагов — и мысли потекут"}
+            : inviteToken
+              ? inviteStatus && inviteStatus !== "ok"
+                ? inviteRegisterCopy(inviteStatus)
+                : inviteRole
+                  ? `Вас пригласили как ${inviteRoleLabel(inviteRole)}. Email должен совпадать с приглашением.`
+                  : inviteRegisterCopy("ok")
+              : "Пара шагов — и мысли потекут"}
         </p>
       </div>
 
@@ -231,7 +280,10 @@ export function AuthCard({
             <Button
               type="submit"
               className="w-full"
-              disabled={loading}
+              disabled={
+                loading ||
+                Boolean(inviteToken && inviteStatus && inviteStatus !== "ok")
+              }
               aria-busy={loading}
             >
               {loading ? (

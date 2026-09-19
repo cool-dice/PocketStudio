@@ -101,7 +101,7 @@ describe.skipIf(SKIP_PG)("auth security: rate limit, invite, admin", () => {
     );
     expect(second.status).toBe(400);
     const secondJson = (await second.json()) as { error: string };
-    expect(secondJson.error).toMatch(/инвайт/i);
+    expect(secondJson.error).toMatch(/использован/i);
   });
 
   test("client token cannot read admin stats", async () => {
