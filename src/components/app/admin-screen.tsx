@@ -93,6 +93,7 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usersError, setUsersError] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("");
@@ -135,10 +136,12 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
           role: role || undefined,
         });
         setUsers(list);
+        setUsersError(null);
       } catch (err) {
-        toast.error(
-          err instanceof Error ? err.message : "Не удалось загрузить пользователей",
-        );
+        const message =
+          err instanceof Error ? err.message : "Не удалось загрузить пользователей";
+        setUsersError(message);
+        toast.error(message);
       } finally {
         setUsersLoading(false);
       }
@@ -158,11 +161,16 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
       const [s, a] = await Promise.all([api.adminStats(), api.adminAudit(30)]);
       setStats(s);
       setAudit(a);
+      setError(null);
       await loadUsers(query, roleFilter);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось обновить данные");
+      const message =
+        err instanceof Error ? err.message : "Не удалось обновить данные";
+      setError(message);
+      toast.error(message);
     } finally {
       setRefreshing(false);
+      setLoading(false);
     }
   };
 
@@ -312,9 +320,13 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
                 />
                 <StatCard
                   icon={Rocket}
-                  label="Проекты"
-                  value={stats.projects}
-                  sub={`${stats.categories} ${pluralRu(stats.categories, "категория", "категории", "категорий")}`}
+                  label="Воркспейсы"
+                  value={stats.workspaces}
+                  sub={
+                    stats.projects === stats.workspaces
+                      ? `${stats.categories} ${pluralRu(stats.categories, "категория", "категории", "категорий")}`
+                      : `${stats.projects} ${pluralRu(stats.projects, "проект", "проекта", "проектов")} всего`
+                  }
                   delay={0.08}
                 />
                 <StatCard
@@ -454,9 +466,24 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
                         <Skeleton key={i} className="h-20 w-full rounded-xl" />
                       ))}
                     </div>
+                  ) : usersError && users.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3 py-8 text-center">
+                      <p className="text-sm text-muted-foreground">{usersError}</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-xl"
+                        onClick={() => void loadUsers(query, roleFilter)}
+                      >
+                        <RefreshCw className="size-4" aria-hidden="true" />
+                        Повторить
+                      </Button>
+                    </div>
                   ) : users.length === 0 ? (
                     <p className="py-8 text-center text-sm text-muted-foreground">
-                      Никого не найдено — попробуйте изменить фильтр
+                      {query.trim() || roleFilter
+                        ? "Никого не найдено — попробуйте изменить фильтр"
+                        : "Пока нет пользователей"}
                     </p>
                   ) : (
                     <ul className="space-y-2">

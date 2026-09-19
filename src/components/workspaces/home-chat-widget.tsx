@@ -45,6 +45,8 @@ export function HomeChatWidget() {
     busy,
     thinking,
     sendMessage,
+    ensureStudioThread,
+    threadsLoading,
   } = useThreads();
   const setMainArea = useAppUi((s) => s.setMainArea);
 
@@ -52,7 +54,13 @@ export function HomeChatWidget() {
   const listRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  const tail = messages.slice(-TAIL);
+  const studioScoped = activeThread?.projectId == null;
+  const tail = studioScoped ? messages.slice(-TAIL) : [];
+
+  useEffect(() => {
+    if (threadsLoading) return;
+    void ensureStudioThread();
+  }, [threadsLoading, ensureStudioThread, activeThread?.projectId]);
 
   // Прижмаем список к низу при новых сообщениях/стриминге.
   useEffect(() => {
@@ -66,6 +74,7 @@ export function HomeChatWidget() {
     if (!canSend) return;
     const text = value.trim();
     setValue("");
+    await ensureStudioThread();
     await sendMessage(text);
   };
 
@@ -91,7 +100,9 @@ export function HomeChatWidget() {
             Чат со студией
           </h2>
           <p className="truncate text-[11px] leading-tight text-muted-foreground">
-            {activeThread?.title ?? "Новый диалог"}
+            {activeThread?.projectId == null
+              ? (activeThread?.title ?? "Новый диалог")
+              : "Диалог студии"}
           </p>
         </div>
         {busy && (
@@ -117,7 +128,7 @@ export function HomeChatWidget() {
         ref={listRef}
         className="vf-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-4"
       >
-        {messagesLoading ? (
+        {messagesLoading || !studioScoped ? (
           <div className="space-y-3">
             <Skeleton className="h-8 w-2/3" />
             <Skeleton className="ml-auto h-8 w-1/2" />
@@ -125,7 +136,9 @@ export function HomeChatWidget() {
           </div>
         ) : tail.length === 0 ? (
           <EmptyThread
-            onStarter={(text) => void sendMessage(text)}
+            onStarter={(text) => {
+              void ensureStudioThread().then(() => sendMessage(text));
+            }}
             onExpand={expand}
           />
         ) : (

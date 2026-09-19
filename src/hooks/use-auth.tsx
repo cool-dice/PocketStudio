@@ -16,6 +16,7 @@ import {
 
 import { api } from "@/lib/api";
 import type { User } from "@/lib/types";
+import { resetWorkspacesCache } from "@/hooks/use-workspaces";
 
 interface AuthContextValue {
   user: User | null;
@@ -75,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await api.logout();
     } finally {
       setUser(null);
+      resetWorkspacesCache();
     }
   }, []);
 

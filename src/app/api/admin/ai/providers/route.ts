@@ -18,12 +18,20 @@ export async function GET(req: Request) {
   const guard = await requireAdmin(req);
   if (!guard.ok) return guard.response;
 
-  const providers = await db.aiProvider.findMany({
-    where: { userId: null },
-    include: { models: { orderBy: { createdAt: "asc" } } },
-    orderBy: { createdAt: "asc" },
-  });
-  return NextResponse.json({ providers: providers.map(providerDto) });
+  try {
+    const providers = await db.aiProvider.findMany({
+      where: { userId: null },
+      include: { models: { orderBy: { createdAt: "asc" } } },
+      orderBy: { createdAt: "asc" },
+    });
+    return NextResponse.json({ providers: providers.map(providerDto) });
+  } catch {
+    console.error("[admin/ai/providers] list failed");
+    return NextResponse.json(
+      { error: "Не удалось загрузить провайдеров" },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(req: Request) {

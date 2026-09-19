@@ -30,6 +30,26 @@ export async function GET(req: Request) {
     orderBy: { updatedAt: "desc" },
   });
 
+  const ids = projects.map((p) => p.id);
+  const threadMax =
+    ids.length === 0
+      ? []
+      : await db.thread.groupBy({
+          by: ["projectId"],
+          where: { projectId: { in: ids } },
+          _max: { updatedAt: true },
+        });
+  const threadRecency = new Map(
+    threadMax
+      .filter((row): row is typeof row & { projectId: string } => row.projectId != null)
+      .map((row) => [row.projectId, row._max.updatedAt?.getTime() ?? 0]),
+  );
+  projects.sort((a, b) => {
+    const aT = Math.max(a.updatedAt.getTime(), threadRecency.get(a.id) ?? 0);
+    const bT = Math.max(b.updatedAt.getTime(), threadRecency.get(b.id) ?? 0);
+    return bT - aT;
+  });
+
   const shaped = await Promise.all(
     projects.map(async (p) => workspaceDto(p, await workspaceCounts(p.id))),
   );

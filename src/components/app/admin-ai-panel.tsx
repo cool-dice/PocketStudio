@@ -44,6 +44,7 @@ export function AdminAiPanel() {
   const [providers, setProviders] = useState<AiProviderDto[]>([]);
   const [defaults, setDefaults] = useState<AiToolDefaultDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_PROVIDER);
   const [saving, setSaving] = useState(false);
 
@@ -54,6 +55,7 @@ export function AdminAiPanel() {
     ]);
     setProviders(p);
     setDefaults(d);
+    setLoadError(null);
   }, []);
 
   useEffect(() => {
@@ -62,7 +64,12 @@ export function AdminAiPanel() {
       try {
         await reload();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Не удалось загрузить модели");
+        if (!cancelled) {
+          const message =
+            err instanceof Error ? err.message : "Не удалось загрузить модели";
+          setLoadError(message);
+          toast.error(message);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -102,7 +109,33 @@ export function AdminAiPanel() {
   );
 
   if (loading) {
-    return <div className="h-40 animate-pulse rounded-2xl border bg-muted/40" />;
+    return (
+      <div
+        className="h-40 animate-pulse rounded-2xl border bg-muted/40"
+        role="status"
+        aria-label="Загрузка провайдеров ИИ"
+      />
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card p-10 text-center">
+        <p className="text-sm text-muted-foreground">{loadError}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-xl"
+          onClick={() => {
+            setLoading(true);
+            void reload().finally(() => setLoading(false));
+          }}
+        >
+          <RefreshCw className="size-4" aria-hidden="true" />
+          Повторить
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -119,7 +152,13 @@ export function AdminAiPanel() {
             variant="ghost"
             size="icon"
             className="size-9 rounded-xl"
-            onClick={() => void reload()}
+            onClick={() => {
+              void reload().catch((err) =>
+                toast.error(
+                  err instanceof Error ? err.message : "Не удалось обновить",
+                ),
+              );
+            }}
             aria-label="Обновить"
           >
             <RefreshCw className="size-4" />

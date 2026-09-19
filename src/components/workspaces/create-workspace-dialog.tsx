@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api, ApiError } from "@/lib/api";
-import { invalidateWorkspaces } from "@/hooks/use-workspaces";
+import { invalidateWorkspaces, upsertWorkspace } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
 import type { WorkspaceType } from "@/lib/workspace-data";
 import { cn } from "@/lib/utils";
@@ -88,6 +88,7 @@ export function CreateWorkspaceDialog({
         name: trimmedName,
         description: trimmedDescription || undefined,
       });
+      upsertWorkspace(created);
       invalidateWorkspaces();
       handleOpenChange(false);
       useAppUi.getState().openWorkspace(created.id, "overview");

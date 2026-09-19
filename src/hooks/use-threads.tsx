@@ -85,6 +85,11 @@ interface ThreadsContextValue {
    * active. Returns the thread or null on failure.
    */
   startProjectThread: (projectId: string, title: string) => Promise<boolean>;
+  /**
+   * Bind the active thread to studio scope (projectId === null) without
+   * deleting an empty workspace thread the user just opened.
+   */
+  ensureStudioThread: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   abortTurn: () => void;
   /** Short RAG hint after prefetch (not the chunks themselves). */
@@ -378,6 +383,34 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     },
     [emitLeave, maybeDeleteEmptyThread],
   );
+
+  /** Home/studio chat: never keep a workspace-bound thread as the active one. */
+  const ensureStudioThread = useCallback(async () => {
+    const current = threadsRef.current.find((t) => t.id === activeIdRef.current);
+    if (current && current.projectId == null) return;
+    const studio = threadsRef.current.find((t) => t.projectId == null);
+    if (studio) {
+      await selectThreadInternal(studio.id, { skipCleanup: true });
+      return;
+    }
+    try {
+      const thread = await api.createThread();
+      ++selectSeqRef.current;
+      setThreads((prev) => [{ ...thread, lastMessage: null }, ...prev]);
+      loadedRef.current = thread.id;
+      activeIdRef.current = thread.id;
+      setActiveThreadId(thread.id);
+      setMessages([]);
+      setTasks([]);
+      setPhase(null);
+      setCanonHint(null);
+      setMessagesLoading(false);
+      const s = socketRef.current;
+      if (s && s.connected) s.emit("thread:join", { threadId: thread.id });
+    } catch {
+      toast.error("Не удалось открыть диалог студии");
+    }
+  }, [selectThreadInternal]);
 
   /** Optimistic mode switch; reverts the chip when the PATCH fails. */
   const updateThreadMode = useCallback(
@@ -863,6 +896,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       renameThread,
       updateThreadMode,
       startProjectThread,
+      ensureStudioThread,
       sendMessage,
       abortTurn,
       canonHint,
@@ -885,6 +919,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       renameThread,
       updateThreadMode,
       startProjectThread,
+      ensureStudioThread,
       sendMessage,
       abortTurn,
       canonHint,

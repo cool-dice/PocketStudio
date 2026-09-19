@@ -318,6 +318,7 @@ export interface AdminStats {
   notesError: number;
   categories: number;
   projects: number;
+  workspaces: number;
   threads: number;
   messages: number;
   notifications: number;

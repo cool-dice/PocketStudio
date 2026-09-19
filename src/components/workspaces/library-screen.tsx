@@ -82,7 +82,6 @@ export function LibraryScreen({
       setArtifacts(all);
       setWorkspaces(ws);
     } catch (err) {
-      setArtifacts([]);
       setLoadError(
         err instanceof ApiError ? err.message : "Не удалось загрузить библиотеку",
       );
@@ -263,8 +262,8 @@ export function LibraryScreen({
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <p className="text-xs text-muted-foreground">
-            {loading ? (
-              "Загружаем библиотеку…"
+            {loading || artifacts === null ? (
+              loadError ? "Не удалось загрузить библиотеку" : "Загружаем библиотеку…"
             ) : (
               <>
                 Показано{" "}
@@ -317,7 +316,11 @@ export function LibraryScreen({
             </Button>
           </div>
         ) : visible.length === 0 ? (
-          <LibraryEmptyState onReset={resetFilters} total={total} />
+          <LibraryEmptyState
+            onReset={resetFilters}
+            total={total}
+            filtered={hasActiveFilters && total > 0}
+          />
         ) : (
           <div className="space-y-7">
             {sections.map((section) => (
@@ -376,7 +379,7 @@ function LibraryStatsRow({
             <stat.icon className="size-4" />
           </span>
           <div className="min-w-0">
-            {loading ? (
+            {loading || artifacts === null ? (
               <Skeleton className="h-5 w-10 rounded" />
             ) : (
               <p className="text-xl font-semibold leading-none tabular-nums">
@@ -442,10 +445,32 @@ function ViewToggle({
 function LibraryEmptyState({
   onReset,
   total,
+  filtered,
 }: {
   onReset: () => void;
   total: number;
+  filtered: boolean;
 }) {
+  if (!filtered) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
+        <span
+          className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground"
+          aria-hidden="true"
+        >
+          <LibraryIcon className="size-6" />
+        </span>
+        <div>
+          <p className="text-sm font-medium">Библиотека пуста</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Здесь появятся артефакты из ваших воркспейсов — изображения, треки,
+            сцены и документы.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
       <span

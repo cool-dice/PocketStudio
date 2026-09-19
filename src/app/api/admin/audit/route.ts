@@ -25,13 +25,22 @@ export async function GET(req: Request) {
     limit = n;
   }
 
-  const entries = await db.auditLog.findMany({
-    orderBy: { createdAt: "desc" },
-    take: limit,
-    include: {
-      user: { select: { name: true, email: true } },
-    },
-  });
+  let entries;
+  try {
+    entries = await db.auditLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: {
+        user: { select: { name: true, email: true } },
+      },
+    });
+  } catch {
+    console.error("[admin/audit] failed");
+    return NextResponse.json(
+      { error: "Не удалось загрузить журнал" },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json({
     entries: entries.map((e) => ({

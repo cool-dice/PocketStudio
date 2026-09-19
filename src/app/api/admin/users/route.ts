@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
+import { lastActivityOf } from "@/lib/admin-activity";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,12 @@ export async function GET(req: Request) {
     );
   }
 
-  const [users, noteAgg, threadAgg, projectAgg] = await Promise.all([
+  let users;
+  let noteAgg;
+  let threadAgg;
+  let projectAgg;
+  try {
+    [users, noteAgg, threadAgg, projectAgg] = await Promise.all([
     db.user.findMany({
       orderBy: { createdAt: "desc" },
       take: MAX_USERS,
@@ -57,6 +63,13 @@ export async function GET(req: Request) {
       _max: { updatedAt: true },
     }),
   ]);
+  } catch {
+    console.error("[admin/users] list failed");
+    return NextResponse.json(
+      { error: "Не удалось загрузить пользователей" },
+      { status: 500 },
+    );
+  }
 
   const noteBy = new Map(noteAgg.map((a) => [a.userId, a]));
   const threadBy = new Map(threadAgg.map((a) => [a.userId, a]));
@@ -68,15 +81,11 @@ export async function GET(req: Request) {
       q ? u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) : true,
     )
     .map((u) => {
-      const lastCandidates = [
-        u.updatedAt,
-        noteBy.get(u.id)?._max.updatedAt ?? null,
-        threadBy.get(u.id)?._max.updatedAt ?? null,
-        projectBy.get(u.id)?._max.updatedAt ?? null,
-      ].filter((d): d is Date => d !== null);
-      const lastActivity = lastCandidates.length
-        ? new Date(Math.max(...lastCandidates.map((d) => d.getTime())))
-        : null;
+      const lastActivity = lastActivityOf([
+        noteBy.get(u.id)?._max.updatedAt,
+        threadBy.get(u.id)?._max.updatedAt,
+        projectBy.get(u.id)?._max.updatedAt,
+      ]);
       return {
         id: u.id,
         email: u.email,

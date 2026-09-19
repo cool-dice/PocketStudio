@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   const projectId = url.searchParams.get("projectId");
 
   const projects = await db.project.findMany({
-    where: { userId: session.sub },
+    where: { userId: session.sub, origin: "workspace" },
     select: { id: true },
   });
   const ids = projects.map((p) => p.id);

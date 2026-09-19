@@ -26,6 +26,7 @@ interface WorkspacesCache {
   /** Успешно загружен хотя бы раз — до этого каждая перемонтировка ретраит. */
   loadedOnce: boolean;
   inFlight: Promise<void> | null;
+  pendingInvalidate: boolean;
   mounted: number;
   listeners: Set<() => void>;
 }
@@ -36,6 +37,7 @@ const cache: WorkspacesCache = {
   error: false,
   loadedOnce: false,
   inFlight: null,
+  pendingInvalidate: false,
   mounted: 0,
   listeners: new Set(),
 };
@@ -45,7 +47,10 @@ function notify() {
 }
 
 async function fetchWorkspaces(silent: boolean): Promise<void> {
-  if (cache.inFlight) return cache.inFlight;
+  if (cache.inFlight) {
+    if (silent) cache.pendingInvalidate = true;
+    return cache.inFlight;
+  }
   if (!silent) {
     cache.loading = true;
     cache.error = false;
@@ -62,6 +67,10 @@ async function fetchWorkspaces(silent: boolean): Promise<void> {
       cache.loading = false;
       cache.inFlight = null;
       notify();
+      if (cache.pendingInvalidate) {
+        cache.pendingInvalidate = false;
+        void fetchWorkspaces(true);
+      }
     }
   })();
   cache.inFlight = task;
@@ -71,6 +80,28 @@ async function fetchWorkspaces(silent: boolean): Promise<void> {
 /** Тихо обновить список после мутаций (создание/правка/удаление). */
 export function invalidateWorkspaces(): void {
   void fetchWorkspaces(true);
+}
+
+/** Мгновенно вставить созданный воркспейс, не дожидаясь refetch. */
+export function upsertWorkspace(workspace: WorkspaceDto): void {
+  cache.workspaces = [
+    workspace,
+    ...cache.workspaces.filter((ws) => ws.id !== workspace.id),
+  ];
+  cache.error = false;
+  cache.loadedOnce = true;
+  notify();
+}
+
+/** Сброс при выходе — иначе следующий пользователь видит чужой список. */
+export function resetWorkspacesCache(): void {
+  cache.workspaces = [];
+  cache.loading = true;
+  cache.error = false;
+  cache.loadedOnce = false;
+  cache.inFlight = null;
+  cache.pendingInvalidate = false;
+  notify();
 }
 
 export function useWorkspaces() {
@@ -83,6 +114,9 @@ export function useWorkspaces() {
     return () => {
       cache.listeners.delete(listener);
       cache.mounted -= 1;
+      if (cache.mounted <= 0) {
+        cache.loadedOnce = false;
+      }
     };
   }, []);
 

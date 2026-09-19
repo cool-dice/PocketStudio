@@ -12,36 +12,44 @@ export async function GET(req: Request) {
   const guard = await requireAdmin(req);
   if (!guard.ok) return guard.response;
 
-  const rows = await db.toolModelDefault.findMany({
-    include: {
-      model: {
-        include: { provider: { select: { id: true, name: true, userId: true } } },
+  try {
+    const rows = await db.toolModelDefault.findMany({
+      include: {
+        model: {
+          include: { provider: { select: { id: true, name: true, userId: true } } },
+        },
       },
-    },
-  });
-  const byTool = new Map(rows.map((r) => [r.toolId, r]));
+    });
+    const byTool = new Map(rows.map((r) => [r.toolId, r]));
 
-  const defaults = AI_TOOLS.map((tool) => {
-    const row = byTool.get(tool.id);
-    return {
-      toolId: tool.id,
-      label: tool.label,
-      description: tool.description,
-      capability: tool.capability,
-      modelId: row?.modelId ?? null,
-      model: row
-        ? {
-            id: row.model.id,
-            modelId: row.model.modelId,
-            displayName: row.model.displayName,
-            providerId: row.model.provider.id,
-            providerName: row.model.provider.name,
-          }
-        : null,
-    };
-  });
+    const defaults = AI_TOOLS.map((tool) => {
+      const row = byTool.get(tool.id);
+      return {
+        toolId: tool.id,
+        label: tool.label,
+        description: tool.description,
+        capability: tool.capability,
+        modelId: row?.modelId ?? null,
+        model: row
+          ? {
+              id: row.model.id,
+              modelId: row.model.modelId,
+              displayName: row.model.displayName,
+              providerId: row.model.provider.id,
+              providerName: row.model.provider.name,
+            }
+          : null,
+      };
+    });
 
-  return NextResponse.json({ defaults });
+    return NextResponse.json({ defaults });
+  } catch {
+    console.error("[admin/ai/defaults] list failed");
+    return NextResponse.json(
+      { error: "Не удалось загрузить назначения моделей" },
+      { status: 500 },
+    );
+  }
 }
 
 export async function PUT(req: Request) {

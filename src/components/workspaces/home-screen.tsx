@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppUi } from "@/lib/store";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { api } from "@/lib/api";
 import type { DashboardDto } from "@/lib/workspace-types";
 
@@ -40,12 +41,18 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
   const [dashError, setDashError] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
 
+  const { workspaces } = useWorkspaces();
+  const workspaceSig = workspaces.map((w) => w.id).join(",");
+
   useEffect(() => {
     let cancelled = false;
     api
       .getDashboard()
       .then((data) => {
-        if (!cancelled) setDashboard(data);
+        if (!cancelled) {
+          setDashboard(data);
+          setDashError(false);
+        }
       })
       .catch(() => {
         if (!cancelled) setDashError(true);
@@ -56,7 +63,7 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
     return () => {
       cancelled = true;
     };
-  }, [reloadTick]);
+  }, [reloadTick, workspaceSig]);
 
   function reloadDashboard() {
     setDashLoading(true);
