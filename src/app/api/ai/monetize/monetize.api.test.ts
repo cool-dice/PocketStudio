@@ -25,7 +25,7 @@ function jsonRequest(
   bearer?: string,
 ): Request {
   const headers = new Headers({ accept: "application/json" });
-  if (body !== undefined) headers.set("content-type": "application/json");
+  if (body !== undefined) headers.set("content-type", "application/json");
   if (bearer) headers.set("authorization", `Bearer ${bearer}`);
   return new Request(url, {
     method,
