@@ -6,6 +6,12 @@ import { getUserFromRequest } from "@/lib/auth";
 import { validateMcpConfig } from "@/lib/mcp-catalog";
 import type { McpTransport } from "@/lib/mcp-catalog";
 import { mcpDto } from "@/lib/mcp-shapes";
+import {
+  attachMcpRuntimeStatus,
+  probeMcpRuntime,
+  resolveCommandPresence,
+  stdioCommandFromConfig,
+} from "@/lib/mcp-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +72,17 @@ export async function PATCH(
     where: { id: row.id },
     data: update,
   });
-  return NextResponse.json({ server: mcpDto(updated) });
+  const runtime = await probeMcpRuntime();
+  const dto = mcpDto(updated);
+  const command =
+    dto.transport === "stdio" ? stdioCommandFromConfig(dto.config) : null;
+  const commandPresence = await resolveCommandPresence(command ? [command] : []);
+  return NextResponse.json({
+    server: attachMcpRuntimeStatus(dto, {
+      agentBrowser: runtime.agentBrowser,
+      commandPresence,
+    }),
+  });
 }
 
 /* ── DELETE /api/mcp/[id] — убрать свой сервер из реестра ── */

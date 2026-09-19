@@ -5,13 +5,17 @@ import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { catalogByKey } from "@/lib/skills-catalog";
 import { skillDto } from "@/lib/skill-shapes";
+import {
+  validateImportedSkillMd,
+  validateSkillImportUrl,
+} from "@/lib/skill-import";
 
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
   catalogKey: z.string().trim().min(1).max(80).optional(),
-  url: z.string().url().optional(),
-  skillMd: z.string().trim().min(8).max(20_000).optional(),
+  url: z.string().trim().max(2000).optional(),
+  skillMd: z.string().max(20_000).optional(),
   name: z.string().trim().min(1).max(80).optional(),
 });
 
@@ -92,8 +96,12 @@ export async function POST(req: Request) {
 
   let skillMd = parsed.data.skillMd ?? "";
   if (parsed.data.url) {
+    const urlCheck = validateSkillImportUrl(parsed.data.url);
+    if (!urlCheck.ok) {
+      return NextResponse.json({ error: urlCheck.error }, { status: 400 });
+    }
     try {
-      const res = await fetch(parsed.data.url, {
+      const res = await fetch(urlCheck.url, {
         headers: { accept: "text/plain, text/markdown, */*" },
         signal: AbortSignal.timeout(8_000),
       });
@@ -103,7 +111,7 @@ export async function POST(req: Request) {
           { status: 400 },
         );
       }
-      skillMd = (await res.text()).slice(0, 20_000);
+      skillMd = await res.text();
     } catch {
       return NextResponse.json(
         { error: "Не удалось загрузить URL SKILL.md" },
@@ -111,12 +119,13 @@ export async function POST(req: Request) {
       );
     }
   }
-  if (skillMd.trim().length < 8) {
-    return NextResponse.json(
-      { error: "Нужен catalogKey, url или текст SKILL.md" },
-      { status: 400 },
-    );
+
+  const mdCheck = validateImportedSkillMd(skillMd);
+  if (!mdCheck.ok) {
+    return NextResponse.json({ error: mdCheck.error }, { status: 400 });
   }
+  skillMd = mdCheck.skillMd;
+
   const meta = parseFrontmatter(skillMd);
   const row = await db.skill.create({
     data: {

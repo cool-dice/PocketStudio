@@ -1352,6 +1352,13 @@ export const api = {
     ).then((r) => r.skill);
   },
 
+  listEnabledSkills(): Promise<{
+    skills: import("@/lib/skill-shapes").SkillDto[];
+    promptBlock: string;
+  }> {
+    return request("/api/skills/enabled");
+  },
+
   getDesign(
     workspaceId: string,
     mode: "raster" | "layout",
@@ -1571,6 +1578,42 @@ export const api = {
     return request(`/api/admin/offers/${encodeURIComponent(id)}/paid`, {
       method: "POST",
       body: JSON.stringify({}),
+    });
+  },
+
+  listAdminPayouts(): Promise<
+    Array<{
+      id: string;
+      amountCents: number;
+      currency: string;
+      status: string;
+      note: string | null;
+      userEmail: string;
+      userName: string;
+      createdAt: string;
+    }>
+  > {
+    return request<{
+      payouts: Array<{
+        id: string;
+        amountCents: number;
+        currency: string;
+        status: string;
+        note: string | null;
+        userEmail: string;
+        userName: string;
+        createdAt: string;
+      }>;
+    }>("/api/admin/payouts").then((r) => r.payouts);
+  },
+
+  patchPayout(
+    id: string,
+    status: "paid" | "failed",
+  ): Promise<{ payout: { id: string; status: string; amountCents: number } }> {
+    return request("/api/payouts", {
+      method: "PATCH",
+      body: JSON.stringify({ id, status }),
     });
   },
 

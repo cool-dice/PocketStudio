@@ -9,7 +9,12 @@ import {
   validateMcpConfig,
 } from "@/lib/mcp-catalog";
 import { mcpDto } from "@/lib/mcp-shapes";
-import { mcpRuntimeStatus, probeMcpRuntime } from "@/lib/mcp-runtime";
+import {
+  attachMcpRuntimeStatus,
+  probeMcpRuntime,
+  resolveCommandPresence,
+  stdioCommandFromConfig,
+} from "@/lib/mcp-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -64,17 +69,22 @@ export async function GET(req: Request) {
   });
 
   const runtime = await probeMcpRuntime();
+  const dtos = sorted.map(mcpDto);
+  const commandPresence = await resolveCommandPresence(
+    dtos
+      .map((dto) =>
+        dto.transport === "stdio" ? stdioCommandFromConfig(dto.config) : null,
+      )
+      .filter((cmd): cmd is string => Boolean(cmd)),
+  );
   return NextResponse.json({
     runtime,
-    servers: sorted.map((row) => ({
-      ...mcpDto(row),
-      runtimeStatus: mcpRuntimeStatus({
-        enabled: row.enabled,
-        external: row.external,
-        adapter: row.adapter,
+    servers: dtos.map((dto) =>
+      attachMcpRuntimeStatus(dto, {
         agentBrowser: runtime.agentBrowser,
+        commandPresence,
       }),
-    })),
+    ),
   });
 }
 
@@ -139,5 +149,18 @@ export async function POST(req: Request) {
     },
   });
 
-  return NextResponse.json({ server: mcpDto(row) }, { status: 201 });
+  const runtime = await probeMcpRuntime();
+  const dto = mcpDto(row);
+  const command =
+    dto.transport === "stdio" ? stdioCommandFromConfig(dto.config) : null;
+  const commandPresence = await resolveCommandPresence(command ? [command] : []);
+  return NextResponse.json(
+    {
+      server: attachMcpRuntimeStatus(dto, {
+        agentBrowser: runtime.agentBrowser,
+        commandPresence,
+      }),
+    },
+    { status: 201 },
+  );
 }

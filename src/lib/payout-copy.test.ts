@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   adminPaymentsHint,
+  adminPayoutHint,
   monetizePaymentsHint,
   offerCheckoutSuccessCopy,
   offerPaidLabel,
@@ -24,5 +25,7 @@ describe("payout copy never claims a card payout for simulation", () => {
     expect(monetizePaymentsHint()).toMatch(/без карты/i);
     expect(adminPaymentsHint()).toMatch(/карта не списывается/i);
     expect(adminPaymentsHint()).not.toMatch(/выплачено картой/i);
+    expect(adminPayoutHint()).toMatch(/не выполняется/i);
+    expect(adminPayoutHint()).not.toMatch(/банковский перевод выполняется/i);
   });
 });

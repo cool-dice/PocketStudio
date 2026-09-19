@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import type { SkillDto, StoreSkillDto } from "@/lib/skill-shapes";
+import { validateImportedSkillMd, validateSkillImportUrl } from "@/lib/skill-import";
 import { type MySkill, type SkillSource } from "./data";
 import { skillIcon } from "./icon-map";
 import { SectionHeading } from "./section-heading";
@@ -56,6 +57,7 @@ export function SkillsScreen({ onOpenMobileNav }: ModuleScreenProps) {
   const [store, setStore] = useState<StoreSkillDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -67,7 +69,11 @@ export function SkillsScreen({ onOpenMobileNav }: ModuleScreenProps) {
       const res = await api.listSkills();
       setSkills(res.skills);
       setStore(res.store);
+      setLoadError(null);
     } catch (err) {
+      setLoadError(
+        err instanceof ApiError ? err.message : "Не удалось загрузить скиллы",
+      );
       toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить скиллы");
     } finally {
       setLoading(false);
@@ -168,7 +174,11 @@ export function SkillsScreen({ onOpenMobileNav }: ModuleScreenProps) {
                   : `включено ${enabledCount} из ${skills.length}`
               }
             />
-            {skills.length === 0 && !loading ? (
+            {loadError ? (
+              <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+                {loadError}
+              </p>
+            ) : skills.length === 0 && !loading ? (
               <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
                 Пока нет скиллов — импортируйте из магазина или создайте SKILL.md.
               </p>
@@ -222,11 +232,18 @@ export function SkillsScreen({ onOpenMobileNav }: ModuleScreenProps) {
         description="Файл SKILL.md станет частью системного промпта, пока скилл включён."
         onClose={() => setCreateOpen(false)}
         onSubmit={async (values) => {
-          const skill = await api.createSkill(values);
-          setSkills((prev) => [...prev, skill]);
-          setSelectedId(skill.id);
-          setCreateOpen(false);
-          toast.success("Скилл создан и включён");
+          try {
+            const skill = await api.createSkill(values);
+            setSkills((prev) => [...prev, skill]);
+            setSelectedId(skill.id);
+            setCreateOpen(false);
+            toast.success("Скилл создан и включён");
+          } catch (err) {
+            toast.error(
+              err instanceof ApiError ? err.message : "Не удалось создать скилл",
+            );
+            throw err;
+          }
         }}
       />
 
@@ -234,7 +251,9 @@ export function SkillsScreen({ onOpenMobileNav }: ModuleScreenProps) {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImported={(skill) => {
-          setSkills((prev) => [...prev, skill]);
+          setSkills((prev) =>
+            prev.some((s) => s.id === skill.id) ? prev : [...prev, skill],
+          );
           setSelectedId(skill.id);
           setImportOpen(false);
         }}
@@ -376,7 +395,47 @@ function ImportDialog({
 }) {
   const [url, setUrl] = useState("");
   const [skillMd, setSkillMd] = useState("");
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setUrl("");
+      setSkillMd("");
+      setFileName(null);
+      setError(null);
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }, [open]);
+
+  async function readFile(file: File) {
+    setError(null);
+    if (file.size > 80_000) {
+      setError("Файл слишком большой для SKILL.md");
+      setFileName(null);
+      return;
+    }
+    try {
+      const text = await file.text();
+      const check = validateImportedSkillMd(text);
+      if (!check.ok) {
+        setError(check.error);
+        setSkillMd("");
+        setFileName(null);
+        return;
+      }
+      setFileName(file.name);
+      setSkillMd(check.skillMd);
+    } catch {
+      setError("Не удалось прочитать файл SKILL.md");
+      setFileName(null);
+    }
+  }
+
+  const canSubmit = Boolean(url.trim() || skillMd.trim().length >= 8);
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -384,34 +443,74 @@ function ImportDialog({
         <DialogHeader>
           <DialogTitle>Импорт SKILL.md</DialogTitle>
           <DialogDescription>
-            Вставьте URL сырого markdown или сам текст файла.
+            Файл, URL сырого markdown или текст. Ошибка импорта не считается успехом.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <Input
+            type="file"
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            aria-label="Файл SKILL.md"
+            ref={fileRef}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void readFile(file);
+            }}
+          />
+          {fileName ? (
+            <p className="text-xs text-muted-foreground">Файл: {fileName}</p>
+          ) : null}
+          <Input
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              setError(null);
+            }}
             placeholder="https://…/SKILL.md"
             aria-label="URL SKILL.md"
           />
           <Textarea
             value={skillMd}
-            onChange={(e) => setSkillMd(e.target.value)}
+            onChange={(e) => {
+              setSkillMd(e.target.value);
+              setError(null);
+            }}
             rows={8}
             className="font-mono text-xs"
             placeholder="Или вставьте SKILL.md сюда"
             aria-label="Текст SKILL.md"
           />
+          {error ? (
+            <p className="text-xs text-rose-600 dark:text-rose-400" role="alert">
+              {error}
+            </p>
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Отмена
           </Button>
           <Button
-            disabled={busy || (!url.trim() && skillMd.trim().length < 8)}
+            disabled={busy || !canSubmit}
             onClick={async () => {
               setBusy(true);
+              setError(null);
               try {
+                if (url.trim()) {
+                  const urlCheck = validateSkillImportUrl(url);
+                  if (!urlCheck.ok) {
+                    setError(urlCheck.error);
+                    toast.error(urlCheck.error);
+                    return;
+                  }
+                } else {
+                  const mdCheck = validateImportedSkillMd(skillMd);
+                  if (!mdCheck.ok) {
+                    setError(mdCheck.error);
+                    toast.error(mdCheck.error);
+                    return;
+                  }
+                }
                 const skill = await api.importSkill({
                   url: url.trim() || undefined,
                   skillMd: skillMd.trim() || undefined,
@@ -419,9 +518,10 @@ function ImportDialog({
                 onImported(skill);
                 toast.success("SKILL.md импортирован");
               } catch (err) {
-                toast.error(
-                  err instanceof ApiError ? err.message : "Не удалось импортировать",
-                );
+                const message =
+                  err instanceof ApiError ? err.message : "Не удалось импортировать";
+                setError(message);
+                toast.error(message);
               } finally {
                 setBusy(false);
               }

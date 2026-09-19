@@ -98,7 +98,9 @@ export function AddServerDialog({
       onCreated(server);
       toast.success(`Сервер «${server.name}» добавлен в реестр`, {
         description:
-          "Конфиг сохранён; запуск внешних серверов заработает в полной версии",
+          server.runtimeStatus === "cli_missing"
+            ? "Конфиг сохранён, но CLI не найден — это не «подключено»."
+            : "Конфиг сохранён; запуск внешних серверов заработает в полной версии",
       });
       setOpen(false);
     } catch (err) {

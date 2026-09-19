@@ -34,7 +34,7 @@ export async function GET(req: Request) {
   });
 }
 
-/** Admin: mark a payout paid. */
+/** Admin: mark a payout paid or failed. Status in the studio — not a bank transfer. */
 export async function PATCH(req: Request) {
   const guard = await requireAdmin(req);
   if (!guard.ok) return guard.response;
@@ -45,19 +45,29 @@ export async function PATCH(req: Request) {
   if (!body.id || (body.status !== "paid" && body.status !== "failed")) {
     return NextResponse.json({ error: "Нужны id и status paid|failed" }, { status: 400 });
   }
-  try {
-    const row = await db.payout.update({
-      where: { id: body.id },
-      data: { status: body.status },
-    });
-    return NextResponse.json({
-      payout: {
-        id: row.id,
-        status: row.status,
-        amountCents: row.amountCents,
-      },
-    });
-  } catch {
+  const existing = await db.payout.findUnique({
+    where: { id: body.id },
+    select: { id: true, note: true },
+  });
+  if (!existing) {
     return NextResponse.json({ error: "Выплата не найдена" }, { status: 404 });
   }
+  const note =
+    existing.note?.trim() ||
+    (body.status === "paid"
+      ? "Помечено админом (симуляция, не банковский перевод)"
+      : "Помечено как сбой (симуляция, перевод не выполнялся)");
+  const row = await db.payout.update({
+    where: { id: existing.id },
+    data: { status: body.status, note },
+  });
+  return NextResponse.json({
+    payout: {
+      id: row.id,
+      status: row.status,
+      amountCents: row.amountCents,
+      note: row.note,
+    },
+    hint: "Статус в студии изменён. Банковский перевод не выполнялся.",
+  });
 }

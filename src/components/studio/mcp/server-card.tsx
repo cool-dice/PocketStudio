@@ -44,19 +44,19 @@ function StatusBadge({ server }: { server: McpServerDto }) {
       </span>
     );
   }
-  if (server.enabled && !server.external) {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
-        <Check className="size-3" aria-hidden="true" />
-        Работает
-      </span>
-    );
-  }
   if (server.enabled && server.external) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
         <CloudOff className="size-3" aria-hidden="true" />
         Конфиг сохранён
+      </span>
+    );
+  }
+  if (server.enabled && !server.external) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+        <Check className="size-3" aria-hidden="true" />
+        Работает
       </span>
     );
   }
@@ -273,14 +273,14 @@ export function ServerCard({
               className="h-7 rounded-lg px-2.5 text-xs"
               onClick={() => onToggle(server.id, true)}
               disabled={busy}
-              aria-label={`Подключить сервер ${server.name}`}
+              aria-label={`Включить сервер ${server.name}`}
             >
               {busy ? (
                 <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
               ) : (
                 <Plus className="size-3.5" aria-hidden="true" />
               )}
-              Подключить
+              Включить
             </Button>
           )}
         </div>

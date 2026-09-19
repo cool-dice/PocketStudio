@@ -11,6 +11,7 @@ import { PATCH as patchOffer } from "./offers/[id]/route";
 import { GET as listPayouts, PATCH as patchPayout } from "./payouts/route";
 import { POST as markOfferPaid } from "./admin/offers/[id]/paid/route";
 import { GET as listAdminOffers } from "./admin/offers/route";
+import { GET as listAdminPayouts } from "./admin/payouts/route";
 
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 const stamp = Date.now().toString(36);
@@ -326,5 +327,76 @@ describe.skipIf(SKIP_PG)("invites + payouts API", () => {
       offers: { id: string; status: string }[];
     };
     expect(adminListJson.offers.some((o) => o.id === offerJson.offer.id)).toBe(true);
+
+    const clientAdminPayouts = await listAdminPayouts(
+      jsonRequest("http://localhost/api/admin/payouts", "GET", undefined, clientToken),
+    );
+    expect(clientAdminPayouts.status).toBe(403);
+
+    const adminPayouts = await listAdminPayouts(
+      jsonRequest("http://localhost/api/admin/payouts", "GET", undefined, adminToken),
+    );
+    expect(adminPayouts.status).toBe(200);
+    const adminPayoutsJson = (await adminPayouts.json()) as {
+      payouts: { id: string; status: string; userEmail: string }[];
+    };
+    expect(
+      adminPayoutsJson.payouts.some((p) => p.id === payoutsJson.payouts[0]?.id),
+    ).toBe(true);
+
+    const badStatus = await patchPayout(
+      jsonRequest(
+        "http://localhost/api/payouts",
+        "PATCH",
+        { id: payoutsJson.payouts[0]?.id, status: "wired" },
+        adminToken,
+      ),
+    );
+    expect(badStatus.status).toBe(400);
+
+    const missing = await patchPayout(
+      jsonRequest(
+        "http://localhost/api/payouts",
+        "PATCH",
+        { id: "missing-payout-id", status: "paid" },
+        adminToken,
+      ),
+    );
+    expect(missing.status).toBe(404);
+
+    const adminPaid = await patchPayout(
+      jsonRequest(
+        "http://localhost/api/payouts",
+        "PATCH",
+        { id: payoutsJson.payouts[0]?.id, status: "paid" },
+        adminToken,
+      ),
+    );
+    expect(adminPaid.status).toBe(200);
+    const paidPayout = (await adminPaid.json()) as {
+      payout: { status: string };
+      hint: string;
+    };
+    expect(paidPayout.payout.status).toBe("paid");
+    expect(paidPayout.hint).toMatch(/не выполнялся/i);
+
+    const failedPayout = await db.payout.create({
+      data: {
+        userId: client.id,
+        amountCents: 1000,
+        status: "pending",
+      },
+    });
+    const adminFailed = await patchPayout(
+      jsonRequest(
+        "http://localhost/api/payouts",
+        "PATCH",
+        { id: failedPayout.id, status: "failed" },
+        adminToken,
+      ),
+    );
+    expect(adminFailed.status).toBe(200);
+    const failedJson = (await adminFailed.json()) as { payout: { status: string } };
+    expect(failedJson.payout.status).toBe("failed");
   });
 });

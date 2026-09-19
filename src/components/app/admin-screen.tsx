@@ -42,6 +42,7 @@ import { toast } from "sonner";
 import { AdminAiPanel } from "@/components/app/admin-ai-panel";
 import { AdminInvitesPanel } from "@/components/app/admin-invites-panel";
 import { AdminOffersPanel } from "@/components/app/admin-offers-panel";
+import { AdminPayoutsPanel } from "@/components/app/admin-payouts-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -281,7 +282,10 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
           ) : tab === "invites" ? (
             <AdminInvitesPanel />
           ) : tab === "payments" ? (
-            <AdminOffersPanel />
+            <div className="space-y-8">
+              <AdminOffersPanel />
+              <AdminPayoutsPanel />
+            </div>
           ) : error ? (
             <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card p-10 text-center">
               <span className="flex size-12 items-center justify-center rounded-full bg-destructive/10">

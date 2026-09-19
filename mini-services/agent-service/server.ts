@@ -34,6 +34,10 @@ import { createServer } from "http";
 import { randomUUID } from "node:crypto";
 import { Server, type Socket } from "socket.io";
 import { db } from "./db-client";
+import {
+  enabledMcpAdapters,
+  filesystemOffFromRows,
+} from "../../src/lib/mcp-runtime";
 import { verifyWsToken, type WsUser } from "./auth";
 import {
   generateLLMResponse,
@@ -292,19 +296,15 @@ async function loadMcpState(userId: string): Promise<TurnMcpState> {
         filesystemOff: false,
       };
     }
-    const adapters = new Set<string>();
-    for (const row of rows) {
-      if (row.enabled && !row.external && row.adapter) adapters.add(row.adapter);
-    }
+    const adapters = enabledMcpAdapters(rows);
     const docs: string[] = [];
     for (const adapter of adapters) {
       docs.push(...(MCP_ADAPTER_DOCS[adapter] ?? []));
     }
-    const filesystemRow = rows.find((r) => r.adapter === "filesystem");
     return {
       adapters,
       docs,
-      filesystemOff: Boolean(filesystemRow) && !filesystemRow!.enabled,
+      filesystemOff: filesystemOffFromRows(rows),
     };
   } catch (err) {
     // Реестр недоступен (миграция/сбой) — дефолты, ход не ломаем.

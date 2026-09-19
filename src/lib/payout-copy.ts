@@ -27,3 +27,7 @@ export function monetizePaymentsHint(): string {
 export function adminPaymentsHint(): string {
   return "Карта не списывается. «Отметить оплачено» — симуляция: оффер paid и выплата в кабинете автора.";
 }
+
+export function adminPayoutHint(): string {
+  return "«Отметить выплаченным» меняет статус в студии. Банковский перевод не выполняется.";
+}
