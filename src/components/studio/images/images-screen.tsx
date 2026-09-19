@@ -13,11 +13,11 @@ import { ImagePlus, Images, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared/module-header";
+import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
-import type { WorkspaceDto } from "@/lib/workspace-types";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import { FilterBar, type GalleryFilter, type GallerySort } from "./filter-bar";
 import { GalleryGrid } from "./gallery-grid";
@@ -35,8 +35,8 @@ export function ImagesScreen({
   onOpenMobileNav,
   workspaceId,
 }: ModuleScreenProps & { workspaceId?: string }) {
-  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
-  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const { workspaces, loading: wsLoading, error: wsError, load: loadWorkspaces } =
+    useWorkspaces();
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
 
@@ -61,25 +61,7 @@ export function ImagesScreen({
   const [drawerTileId, setDrawerTileId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const setMainArea = useAppUi((s) => s.setMainArea);
   const workspaceVersion = useAppUi((s) => s.workspaceVersion);
-
-  /* Загрузка списка воркспейсов для глобального экрана. */
-  useEffect(() => {
-    if (workspaceId) return;
-    let cancelled = false;
-    api
-      .listWorkspaces()
-      .then((ws) => {
-        if (!cancelled) setWorkspaces(ws);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaces([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
 
   /* Загрузка галереи воркспейса: image + portrait. */
   const loadGallery = useCallback(async () => {
@@ -276,25 +258,13 @@ export function ImagesScreen({
             <p className="mt-1 text-xs text-muted-foreground">
               Генерация и галерея живут внутри воркспейса — выберите, куда рисуем.
             </p>
-            {workspaces === null ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {Array.from({ length: 4 }, (_, i) => (
-                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
-                ))}
-              </div>
-            ) : workspaces.length === 0 ? (
-              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
-                <p className="text-sm text-muted-foreground">
-                  Пока нет ни одного воркспейса — сначала создайте его.
-                </p>
-                <Button size="sm" onClick={() => setMainArea("workspaces")}>
-                  <Images className="size-4" aria-hidden="true" />
-                  К воркспейсам
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {workspaces.map((ws) => {
+            <WorkspacePickerStatus
+              loading={!workspaceId && wsLoading}
+              error={!workspaceId && wsError}
+              empty={!workspaceId && !wsLoading && !wsError && workspaces.length === 0}
+              onRetry={loadWorkspaces}
+            >
+              {workspaces.map((ws) => {
                   const Meta = WORKSPACE_TYPE_META[ws.type];
                   const Icon = Meta.icon;
                   return (
@@ -309,8 +279,7 @@ export function ImagesScreen({
                     />
                   );
                 })}
-              </div>
-            )}
+            </WorkspacePickerStatus>
           </section>
           {effectiveId ? (
             <>

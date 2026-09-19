@@ -22,15 +22,14 @@ import {
   ModuleHeader,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
+import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { useAppUi } from "@/lib/store";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import type {
   ArtifactDto,
   DocumentDto,
-  WorkspaceDto,
 } from "@/lib/workspace-types";
 import { AssetsSection } from "./assets-section";
 import { ForecastChart } from "./forecast-chart";
@@ -43,8 +42,8 @@ export function MonetizeScreen({
   onOpenMobileNav,
   workspaceId,
 }: ModuleScreenProps & { workspaceId?: string }) {
-  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
-  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const { workspaces, loading: wsLoading, error: wsError, load: loadWorkspaces } =
+    useWorkspaces();
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
 
@@ -54,25 +53,6 @@ export function MonetizeScreen({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
-
-  const setMainArea = useAppUi((s) => s.setMainArea);
-
-  /* Загрузка списка воркспейсов для глобального экрана. */
-  useEffect(() => {
-    if (workspaceId) return;
-    let cancelled = false;
-    api
-      .listWorkspaces()
-      .then((ws) => {
-        if (!cancelled) setWorkspaces(ws);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaces([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
 
   /* Загрузка контента воркспейса: план-документ + все артефакты. */
   const loadContent = useCallback(async () => {
@@ -173,25 +153,13 @@ export function MonetizeScreen({
               План монетизации живёт внутри воркспейса — выберите, для чего
               считаем.
             </p>
-            {workspaces === null ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {Array.from({ length: 4 }, (_, i) => (
-                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
-                ))}
-              </div>
-            ) : workspaces.length === 0 ? (
-              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
-                <p className="text-sm text-muted-foreground">
-                  Пока нет ни одного воркспейса — сначала создайте его.
-                </p>
-                <Button size="sm" onClick={() => setMainArea("workspaces")}>
-                  <Coins className="size-4" aria-hidden="true" />
-                  К воркспейсам
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {workspaces.map((ws) => {
+            <WorkspacePickerStatus
+              loading={!workspaceId && wsLoading}
+              error={!workspaceId && wsError}
+              empty={!workspaceId && !wsLoading && !wsError && workspaces.length === 0}
+              onRetry={loadWorkspaces}
+            >
+              {workspaces.map((ws) => {
                   const Meta = WORKSPACE_TYPE_META[ws.type];
                   const Icon = Meta.icon;
                   return (
@@ -208,8 +176,7 @@ export function MonetizeScreen({
                     />
                   );
                 })}
-              </div>
-            )}
+            </WorkspacePickerStatus>
           </section>
         ) : null}
 

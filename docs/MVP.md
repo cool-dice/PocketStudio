@@ -321,5 +321,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Prompts + proto port | Аудит промптов (`docs/PROMPTS.md`), retrieve_canon/apply_patch, инспектор DOM, теги/напоминания/график блокнота, ffmpeg-сборка если есть, брендинг PocketStudio |
 | 2026-09-19 | Honesty + RAG harden | Cookie/token `ps_session`/`ps_token` (dual-read `vf_*`). Лендинг: деплой/выплаты/MCP без вранья. Напоминания стреляют в колокол. RAG: очередь с retry, skip huge files. MCP: CLI missing. CI `bun test` + prisma generate. |
 | 2026-09-19 | Reminder bell + inspect send | Тип `reminder` в колоколе (иконка, клик → заметка). Бейдж RAG = `Thread.projectId`. «Попросить агента» отправляет контекст в чат. Tool JSON: trailing commas + name/arguments. Login `useState` (крэш входа). |
+| 2026-09-19 | Studio chip honesty | Глобальные экраны Видео/Аудио/Изображения/Дизайн/Деплой/Доход больше не показывают «воркспейсов нет» при ошибке загрузки — retry. |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

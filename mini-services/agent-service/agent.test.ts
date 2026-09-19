@@ -57,6 +57,14 @@ describe("parseToolCall", () => {
     expect(call?.args.query).toBe("Марина");
   });
 
+  test("accepts nested function.name / arguments", () => {
+    const call = parseToolCall(
+      '{"function":{"name":"retrieve_canon","arguments":{"query":"глаза"}}}',
+    );
+    expect(call?.tool).toBe("retrieve_canon");
+    expect(call?.args.query).toBe("глаза");
+  });
+
   test("accepts stringified arguments", () => {
     const call = parseToolCall(
       '{"tool":"retrieve_canon","arguments":"{\\"query\\":\\"глаза\\"}"}',

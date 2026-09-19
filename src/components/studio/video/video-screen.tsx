@@ -11,23 +11,21 @@
  */
 
 import { useEffect, useState } from "react";
-import { Clapperboard, Film, Images, Scissors } from "lucide-react";
+import { Clapperboard, Film, Scissors } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   ModuleHeader,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { api } from "@/lib/api";
-import { useAppUi } from "@/lib/store";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { cn } from "@/lib/utils";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
-import type { WorkspaceDto } from "@/lib/workspace-types";
+import type { ArtifactDto } from "@/lib/workspace-types";
 import { StoryboardWorkspace } from "./storyboard-workspace";
 import { NleTimeline } from "./nle-timeline";
-import type { ArtifactDto } from "@/lib/workspace-types";
 
 const VIDEO_DESCRIPTION =
   "Раскадровка, озвучка, монтажный стол и сборка фильма";
@@ -37,26 +35,9 @@ export function VideoScreen({
   workspaceId,
 }: ModuleScreenProps & { workspaceId?: string }) {
   /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
-  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const { workspaces, loading, error, load } = useWorkspaces();
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
-  const setMainArea = useAppUi((s) => s.setMainArea);
-
-  useEffect(() => {
-    if (workspaceId) return undefined;
-    let cancelled = false;
-    api
-      .listWorkspaces()
-      .then((list) => {
-        if (!cancelled) setWorkspaces(list);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaces([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
 
   return (
     <section
@@ -86,25 +67,13 @@ export function VideoScreen({
             <p className="mt-1 text-xs text-muted-foreground">
               Сцены и фильмы живут внутри воркспейса — выберите, где снимаем.
             </p>
-            {workspaces === null ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {Array.from({ length: 4 }, (_, i) => (
-                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
-                ))}
-              </div>
-            ) : workspaces.length === 0 ? (
-              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
-                <p className="text-sm text-muted-foreground">
-                  Пока нет ни одного воркспейса — сначала создайте его.
-                </p>
-                <Button size="sm" onClick={() => setMainArea("workspaces")}>
-                  <Images className="size-4" aria-hidden="true" />
-                  К воркспейсам
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {workspaces.map((ws) => {
+            <WorkspacePickerStatus
+              loading={!workspaceId && loading}
+              error={!workspaceId && error}
+              empty={!workspaceId && !loading && !error && workspaces.length === 0}
+              onRetry={load}
+            >
+              {workspaces.map((ws) => {
                   const Icon = WORKSPACE_TYPE_META[ws.type].icon;
                   return (
                     <button
@@ -127,8 +96,7 @@ export function VideoScreen({
                     </button>
                   );
                 })}
-              </div>
-            )}
+            </WorkspacePickerStatus>
           </section>
 
           {effectiveId ? (
