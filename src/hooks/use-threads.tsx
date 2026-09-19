@@ -22,10 +22,16 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { applyMessageDelta } from "@/lib/message-delta";
+import {
+  applyAbortTurn,
+  applyMessageDelta,
+  applyMessageEnd,
+  applyMessageStart,
+  mergeTranscriptOnReconnect,
+} from "@/lib/message-delta";
+import { api } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import {
-  isEmptyAssistantBubble,
   shouldBlockSend,
   shouldKeepBusyOnSocketError,
 } from "@/lib/chat-send-guard";
@@ -518,14 +524,13 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     const s = socketRef.current;
     if (id && s?.connected) s.emit("turn:abort", { threadId: id });
     abortingRef.current = id;
+    setStreaming(null);
     if (id) {
       setThinkingThreadId(id);
       busyRef.current = true;
     }
     // Keep busy until message:end so a second send cannot race the in-flight tool.
-    setMessages((prev) =>
-      prev.filter((m) => !isEmptyAssistantBubble(m)),
-    );
+    setMessages((prev) => applyAbortTurn(prev));
   }, []);
 
   // Re-join the active thread room after every (re)connect.
@@ -539,18 +544,12 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         try {
           const { messages: loaded } = await api.getThread(id);
           if (activeIdRef.current !== id) return;
-          setMessages((prev) => {
-            const pending = prev.filter(
-              (m) => m.pending && m.id.startsWith("temp-"),
-            );
-            const extra = pending.filter(
-              (p) =>
-                !loaded.some(
-                  (l) => l.role === "user" && l.content === p.content,
-                ),
-            );
-            return [...loaded.map((m) => ({ ...m })), ...extra];
-          });
+          setMessages((prev) =>
+            mergeTranscriptOnReconnect(
+              prev,
+              loaded.map((m) => ({ ...m })),
+            ),
+          );
           const st = streamingRef.current;
           if (st && loaded.some((m) => m.id === st.messageId && m.content)) {
             setStreaming(null);
@@ -689,21 +688,19 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     };
 
     const onMessageStart = ({ threadId, messageId }: WsMessageStartPayload) => {
+      if (abortingRef.current === threadId) return;
       setThinkingThreadId((cur) => (cur === threadId ? null : cur));
-      setStreaming({ threadId, messageId });
       if (threadId === activeIdRef.current) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: messageId,
-            threadId,
-            role: "assistant",
-            content: "",
-            createdAt: new Date().toISOString(),
-            streaming: true,
-          },
-        ]);
+        setStreaming({ threadId, messageId });
       }
+      setMessages((prev) =>
+        applyMessageStart(
+          prev,
+          { threadId, messageId },
+          activeIdRef.current,
+          abortingRef.current,
+        ),
+      );
     };
 
     const onMessageDelta = ({
@@ -712,7 +709,12 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       delta,
     }: WsMessageDeltaPayload) => {
       setMessages((prev) =>
-        applyMessageDelta(prev, { threadId, messageId, delta }, activeIdRef.current),
+        applyMessageDelta(
+          prev,
+          { threadId, messageId, delta },
+          activeIdRef.current,
+          abortingRef.current,
+        ),
       );
     };
 
@@ -723,25 +725,14 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       );
       setThinkingThreadId((cur) => (cur === threadId ? null : cur));
       setPhase((cur) => (cur && cur.threadId === threadId ? null : cur));
-      if (threadId === activeIdRef.current) {
-        setMessages((prev) => {
-          const withoutEmpty = prev.filter(
-            (m) =>
-              !(
-                isEmptyAssistantBubble(m) &&
-                m.id !== message.id
-              ),
-          );
-          const idx = withoutEmpty.findIndex((m) => m.id === message.id);
-          if (idx >= 0) {
-            const copy = [...withoutEmpty];
-            copy[idx] = { ...message };
-            return copy;
-          }
-          return [...withoutEmpty, { ...message }];
-        });
-      }
-      bumpThread(threadId, message);
+      setMessages((prev) =>
+        applyMessageEnd(
+          prev,
+          { threadId, message },
+          activeIdRef.current,
+        ),
+      );
+      if (message) bumpThread(threadId, message);
     };
 
     const onThreadUpdated = ({ thread }: WsThreadUpdatedPayload) => {

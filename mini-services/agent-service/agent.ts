@@ -13,6 +13,7 @@ import { sleepAbortable } from "../../src/lib/abort-flag";
 import { chatCompletionStream } from "../../src/lib/ai/stream";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
 import type { AiToolId } from "../../src/lib/ai/tools";
+import { recordChatUsage } from "../../src/lib/ai/usage-log";
 import { db } from "./db-client";
 
 /** LLM conversation turn (system prompt is passed separately). */
@@ -74,6 +75,17 @@ export async function generateLLMResponse(
           : undefined,
       });
       if (!result.text) throw new Error("LLM returned empty content");
+      void recordChatUsage(db, {
+        userId: opts.userId,
+        toolId,
+        route,
+        usage: result.usage,
+      }).catch((err) => {
+        console.warn(
+          "[agent] usage log failed:",
+          err instanceof Error ? err.message : String(err),
+        );
+      });
       return result.text;
     } catch (err) {
       lastError = err;

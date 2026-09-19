@@ -323,7 +323,6 @@ export function Composer({
     } finally {
       submittingRef.current = false;
     }
-  };
     taRef.current?.focus();
   };
 

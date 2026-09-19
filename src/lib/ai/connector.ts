@@ -220,7 +220,11 @@ export function buildChatBody(
     max_tokens: maxTokens,
   };
   if (opts.jsonMode) body.response_format = { type: "json_object" };
-  if (opts.stream) body.stream = true;
+  if (opts.stream) {
+    body.stream = true;
+    // OpenAI omits usage on SSE unless asked; billing needs the final frame.
+    body.stream_options = { include_usage: true };
+  }
   return body;
 }
 

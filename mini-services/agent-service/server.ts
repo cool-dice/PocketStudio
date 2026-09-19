@@ -31,6 +31,7 @@
 // Path MUST be "/" (Caddy gateway requirement), port 3003 (hardcoded).
 
 import { createServer } from "http";
+import { randomUUID } from "node:crypto";
 import { Server, type Socket } from "socket.io";
 import { db } from "./db-client";
 import { verifyWsToken, type WsUser } from "./auth";
@@ -38,9 +39,17 @@ import {
   generateLLMResponse,
   parseToolCall,
   parsePlannerSteps,
-  looksLikeToolStart,
   type LlmMessage,
 } from "./agent";
+import {
+  decideLiveDelta,
+  newLiveStream,
+  proseFromMixed,
+  resetLiveBubble,
+  resetLiveCall,
+  streamedProseSoFar,
+  type LiveStream,
+} from "./live-stream";
 import {
   buildAgentSystemPrompt,
   buildPlannerPrompt,
@@ -387,34 +396,32 @@ function sanitizeTextAnswer(raw: string): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
-/** Live SSE → socket forwarding for one LLM call. */
-interface LiveStream {
-  messageId: string | null;
-  mode: "peek" | "text" | "tool";
-  acc: string;
-}
-
-function newLiveStream(): LiveStream {
-  return { messageId: null, mode: "peek", acc: "" };
-}
-
-async function startAssistantMessage(
+/** Emit start immediately; persist the empty row in the background. */
+function beginAssistantMessage(
   live: LiveStream,
   room: string,
   threadId: string,
-): Promise<void> {
+): void {
   if (live.messageId) return;
-  const row = await db.message.create({
-    data: { threadId, role: "assistant", content: "" },
-  });
-  live.messageId = row.id;
-  io.to(room).emit("message:start", { threadId, messageId: row.id });
+  live.messageId = randomUUID();
+  io.to(room).emit("message:start", { threadId, messageId: live.messageId });
+  const id = live.messageId;
+  live.persist = db.message
+    .create({
+      data: { id, threadId, role: "assistant", content: "" },
+    })
+    .then(() => undefined)
+    .catch((err) => {
+      console.warn(
+        "[agent] persist stream start failed:",
+        err instanceof Error ? err.message : err,
+      );
+    });
 }
 
 /**
  * Forward provider tokens on the existing `message:delta` event.
- * JSON / fenced tool candidates are buffered until `parseToolCall` can
- * see a complete object — partial `{"tool"` never reaches the UI or tools.
+ * JSON / fenced tool candidates are held so `{` never reaches the bubble.
  */
 function attachLiveDeltas(
   room: string,
@@ -422,29 +429,13 @@ function attachLiveDeltas(
   live: LiveStream,
 ): (delta: string) => Promise<void> {
   return async (delta: string) => {
-    live.acc += delta;
-    if (live.mode === "peek") {
-      const t = live.acc.trimStart();
-      if (!t) return;
-      if (looksLikeToolStart(t)) {
-        live.mode = "tool";
-        return;
-      }
-      live.mode = "text";
-      await startAssistantMessage(live, room, threadId);
+    const decision = decideLiveDelta(live, delta);
+    if (decision.emitStart) beginAssistantMessage(live, room, threadId);
+    if (decision.emitDelta && live.messageId) {
       io.to(room).emit("message:delta", {
         threadId,
         messageId: live.messageId,
-        delta: live.acc,
-      });
-      return;
-    }
-    if (live.mode === "text") {
-      await startAssistantMessage(live, room, threadId);
-      io.to(room).emit("message:delta", {
-        threadId,
-        messageId: live.messageId,
-        delta,
+        delta: decision.emitDelta,
       });
     }
   };
@@ -459,18 +450,27 @@ async function streamFinalResponse(
   room: string,
   threadId: string,
   text: string,
-  existingId?: string | null,
+  live?: LiveStream | null,
 ): Promise<void> {
-  if (existingId) {
-    const assistantMessage = await db.message.update({
-      where: { id: existingId },
-      data: { content: text },
-    });
-    io.to(room).emit("message:end", {
-      threadId,
-      message: serializeMessage(assistantMessage),
-    });
-    return;
+  const existingId = live?.messageId ?? null;
+  if (existingId && live) {
+    await live.persist;
+    try {
+      const assistantMessage = await db.message.update({
+        where: { id: existingId },
+        data: { content: text },
+      });
+      io.to(room).emit("message:end", {
+        threadId,
+        message: serializeMessage(assistantMessage),
+      });
+      return;
+    } catch (err) {
+      console.warn(
+        "[agent] persist stream end failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
   let assistantMessage = await db.message.create({
     data: { threadId, role: "assistant", content: "" },
@@ -982,8 +982,7 @@ async function runAgentTurn(
       io.to(room).emit("agent:thinking", { threadId });
 
       const history = await buildLLMHistory(threadId);
-      live.acc = "";
-      live.mode = "peek";
+      resetLiveCall(live);
       const onDelta = attachLiveDeltas(room, threadId, live);
       let raw: string;
       try {
@@ -995,61 +994,66 @@ async function runAgentTurn(
         });
       } catch (err) {
         if (signal.aborted || isAbortErr(err)) {
-          finalText = ABORT_REPLY;
+          finalText = streamedProseSoFar(live) || ABORT_REPLY;
           break;
         }
         throw err;
       }
 
-      // Streamed prose is a text answer. Tool JSON is only parsed when we
-      // buffered a complete object — never on a partial `{"tool"` prefix.
-      if (live.mode === "text") {
-        finalText = sanitizeTextAnswer(raw) || live.acc.trim() || raw.trim();
-        break;
-      }
-
       const call = parseToolCall(raw);
-      if (!call) {
-        // Would-be plain text: strip leaked protocol artifacts first.
-        const clean = sanitizeTextAnswer(raw);
-        if (clean) {
-          finalText = clean;
+      if (call) {
+        if (live.messageId) {
+          const prose =
+            sanitizeTextAnswer(proseFromMixed(raw, live.acc)) ||
+            proseFromMixed(raw, live.acc);
+          await streamFinalResponse(
+            room,
+            threadId,
+            prose || streamedProseSoFar(live) || "…",
+            live,
+          );
+          resetLiveBubble(live);
+        }
+        const result = await executeToolCall({
+          room,
+          userRoom,
+          threadId,
+          userId: user.sub,
+          thread,
+          call,
+          mcp,
+          signal,
+        });
+        const r = resultObject(result);
+        if (r && r.error === undefined) {
+          toolCallsSucceeded++;
+          if (
+            (call.tool === "write_file" ||
+              call.tool === "delete_file" ||
+              call.tool === "apply_patch") &&
+            thread.projectId
+          ) {
+            turnDirty = true;
+          }
+        }
+        const after = decideAfterTool({
+          signalAborted: signal.aborted,
+          result,
+        });
+        if (after !== "continue") {
+          finalText = ABORT_REPLY;
           break;
         }
-        // Nothing human-readable left (model emitted protocol garbage) —
-        // keep looping; the model gets another chance to answer properly.
+        resetLiveBubble(live);
         continue;
       }
 
-      const result = await executeToolCall({
-        room,
-        userRoom,
-        threadId,
-        userId: user.sub,
-        thread,
-        call,
-        mcp,
-        signal,
-      });
-      const r = resultObject(result);
-      if (r && r.error === undefined) {
-        toolCallsSucceeded++;
-        if (
-          (call.tool === "write_file" || call.tool === "delete_file" || call.tool === "apply_patch") &&
-          thread.projectId
-        ) {
-          turnDirty = true;
-        }
-      }
-      const decision = decideAfterTool({
-        signalAborted: signal.aborted,
-        result,
-      });
-      if (decision !== "continue") {
-        finalText = ABORT_REPLY;
+      const clean = sanitizeTextAnswer(raw);
+      if (clean || live.mode === "text") {
+        finalText = clean || live.acc.trim() || raw.trim();
         break;
       }
-      // Loop continues — the next iteration sees [TOOL_CALL]/[TOOL_RESULT].
+      continue;
     }
 
     // 3b. Completion sweep (Stage 4c): the coder often finishes with a text
@@ -1138,7 +1142,7 @@ async function runAgentTurn(
     //    Done BEFORE streaming so the card appears with the answer.
     let answerText =
       signal.aborted
-        ? (live.messageId && live.acc.trim() ? live.acc.trim() : ABORT_REPLY)
+        ? (streamedProseSoFar(live) || ABORT_REPLY)
         : (finalText ??
           (toolCallsSucceeded > 0 ? TOOL_LOOP_CAP_REPLY : FALLBACK_REPLY));
     if (thread.mode === "plan" && finalText) {
@@ -1190,7 +1194,7 @@ async function runAgentTurn(
       }
     }
 
-    await streamFinalResponse(room, threadId, answerText, live.messageId);
+    await streamFinalResponse(room, threadId, answerText, live);
     emitPhase(room, threadId, "idle");
 
     // NOTE: nothing slow may happen after the final message:end emit —
@@ -1201,9 +1205,8 @@ async function runAgentTurn(
   } catch (err) {
     if (signal.aborted || isAbortErr(err)) {
       try {
-        const abortText =
-          live.messageId && live.acc.trim() ? live.acc.trim() : ABORT_REPLY;
-        await streamFinalResponse(room, threadId, abortText, live.messageId);
+        const abortText = streamedProseSoFar(live) || ABORT_REPLY;
+        await streamFinalResponse(room, threadId, abortText, live);
         emitPhase(room, threadId, "idle");
       } catch {
         socket.emit("error", { message: ABORT_REPLY });

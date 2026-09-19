@@ -110,6 +110,7 @@ describe("OpenAI SSE chat", () => {
       expect(String(input)).toBe("https://api.openai.com/v1/chat/completions");
       const body = JSON.parse(String(init?.body));
       expect(body.stream).toBe(true);
+      expect(body.stream_options).toEqual({ include_usage: true });
       expect(body.model).toBe("gpt-4o-mini");
       return sseResponse([
         openaiFrame("Hel"),
@@ -177,6 +178,7 @@ describe("Anthropic SSE chat", () => {
       expect(String(input)).toBe("https://api.anthropic.com/v1/messages");
       const body = JSON.parse(String(init?.body));
       expect(body.stream).toBe(true);
+      expect(body.stream_options).toBeUndefined();
       expect(body.system).toBe("sys");
       const headers = init?.headers as Record<string, string>;
       expect(headers["x-api-key"]).toBe("sk-ant-test");

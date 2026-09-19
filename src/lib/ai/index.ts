@@ -19,6 +19,7 @@ import {
 import { GatewayError, isGatewayError } from "./errors";
 import { resolveToolRoute } from "./resolve";
 import type { AiToolId } from "./tools";
+import { recordChatUsage } from "./usage-log";
 import { composeImagePrompt, DOCUMENT_ANALYST_SYSTEM } from "./prompts";
 
 export { GatewayError, isGatewayError } from "./errors";
@@ -97,6 +98,17 @@ async function chatForTool(
 ): Promise<string> {
   const route = await resolveToolRoute(db, userId, toolId);
   const result = await chatCompletion(route, messages, { jsonMode });
+  void recordChatUsage(db, {
+    userId,
+    toolId,
+    route,
+    usage: result.usage,
+  }).catch((err) => {
+    console.warn(
+      "[ai] usage log failed:",
+      err instanceof Error ? err.message : err,
+    );
+  });
   return result.text;
 }
 

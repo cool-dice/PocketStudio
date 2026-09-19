@@ -11,6 +11,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import { Sparkles } from "lucide-react";
 
 import { ToolCard } from "@/components/app/tool-card";
+import { stabilizeStreamingMarkdown } from "@/lib/streaming-markdown";
 import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -136,7 +137,9 @@ export const MessageBubble = memo(function MessageBubble({
           ) : (
             <div className="min-w-0">
               <ReactMarkdown components={markdownComponents}>
-                {message.content}
+                {message.streaming
+                  ? stabilizeStreamingMarkdown(message.content)
+                  : message.content}
               </ReactMarkdown>
               {message.streaming && <span className="vf-caret" aria-hidden="true" />}
             </div>
