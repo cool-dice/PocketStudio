@@ -17,7 +17,8 @@
 // (worklog Task 4, Task 1-a).
 
 import { db } from "./db-client";
-import { scheduleIndexFile, scheduleIndexNote, scheduleRemove } from "../../src/lib/rag/hooks";
+import { scheduleIndexFile, scheduleIndexNote } from "../../src/lib/rag/hooks";
+import { removeFileChunks } from "../../src/lib/rag/indexer";
 import { shouldSkipPath } from "../../src/lib/rag/skip";
 import {
   projectRoot,
@@ -788,7 +789,7 @@ const deleteFile: ToolDef = {
     try {
       const root = projectRoot(loaded.project.id);
       const deleted = await deleteWorkspacePath(root, args.path.trim());
-      scheduleRemove(db, userId, "file", `${loaded.project.id}:${deleted.path}`);
+      await removeFileChunks(db, userId, loaded.project.id, deleted.path);
       return deleted;
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };

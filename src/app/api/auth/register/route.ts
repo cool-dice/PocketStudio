@@ -46,47 +46,78 @@ export async function POST(req: Request) {
   // Seed env admin first so it takes priority over "first user becomes admin".
   await ensureAdminSeed();
 
-  const existing = await db.user.findUnique({ where: { email } });
-  if (existing) {
-    return NextResponse.json(
-      { error: "Пользователь с таким email уже существует" },
-      { status: 409 }
-    );
-  }
+  const passwordHash = await hashPassword(password);
+  let user;
+  try {
+    user = await db.$transaction(async (tx) => {
+      const existing = await tx.user.findUnique({ where: { email } });
+      if (existing) {
+        throw Object.assign(new Error("email-taken"), { code: "EMAIL_TAKEN" });
+      }
 
-  let inviteRole: string | null = null;
-  if (inviteToken) {
-    const invite = await db.invite.findUnique({ where: { token: inviteToken } });
-    if (!invite || invite.usedAt) {
-      return NextResponse.json({ error: "Инвайт недействителен" }, { status: 400 });
+      let inviteRole: string | null = null;
+      if (inviteToken) {
+        const invite = await tx.invite.findUnique({ where: { token: inviteToken } });
+        if (!invite || invite.usedAt) {
+          throw Object.assign(new Error("invite-invalid"), { code: "INVITE_INVALID" });
+        }
+        if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) {
+          throw Object.assign(new Error("invite-expired"), { code: "INVITE_EXPIRED" });
+        }
+        if (invite.email && invite.email !== email) {
+          throw Object.assign(new Error("invite-email"), { code: "INVITE_EMAIL" });
+        }
+        inviteRole = invite.role;
+      }
+
+      const userCount = await tx.user.count();
+      const created = await tx.user.create({
+        data: {
+          name,
+          email,
+          passwordHash,
+          role: inviteRole ?? (userCount === 0 ? "admin" : "client"),
+        },
+      });
+
+      if (inviteToken) {
+        const consumed = await tx.invite.updateMany({
+          where: { token: inviteToken, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+        if (consumed.count !== 1) {
+          throw Object.assign(new Error("invite-invalid"), { code: "INVITE_INVALID" });
+        }
+      }
+      return created;
+    });
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "EMAIL_TAKEN") {
+      return NextResponse.json(
+        { error: "Пользователь с таким email уже существует" },
+        { status: 409 },
+      );
     }
-    if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) {
+    if (code === "INVITE_EXPIRED") {
       return NextResponse.json({ error: "Срок инвайта истёк" }, { status: 400 });
     }
-    if (invite.email && invite.email !== email) {
+    if (code === "INVITE_EMAIL") {
       return NextResponse.json(
         { error: "Этот инвайт выписан на другой email" },
         { status: 400 },
       );
     }
-    inviteRole = invite.role;
-  }
-
-  const userCount = await db.user.count();
-  const user = await db.user.create({
-    data: {
-      name,
-      email,
-      passwordHash: await hashPassword(password),
-      role: inviteRole ?? (userCount === 0 ? "admin" : "client"),
-    },
-  });
-
-  if (inviteToken) {
-    await db.invite.updateMany({
-      where: { token: inviteToken, usedAt: null },
-      data: { usedAt: new Date() },
-    });
+    if (code === "INVITE_INVALID") {
+      return NextResponse.json({ error: "Инвайт недействителен" }, { status: 400 });
+    }
+    if (code === "P2002") {
+      return NextResponse.json(
+        { error: "Пользователь с таким email уже существует" },
+        { status: 409 },
+      );
+    }
+    throw err;
   }
 
   // Best-effort audit log.

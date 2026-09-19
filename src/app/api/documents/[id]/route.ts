@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
 import { documentDto } from "@/lib/workspace-shapes";
-import { scheduleRemove } from "@/lib/rag";
+import { removeSource } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +76,7 @@ export async function DELETE(req: Request, { params }: Params) {
   });
   await db.document.delete({ where: { id } });
   for (const section of sections) {
-    scheduleRemove(db, check.userId, "section", section.id);
+    await removeSource(db, check.userId, "section", section.id);
   }
   return NextResponse.json({ ok: true });
 }

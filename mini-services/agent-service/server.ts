@@ -55,6 +55,12 @@ import {
   listProjectCommits,
   checkpointProject,
 } from "../../src/lib/workspace";
+import { retrieve } from "../../src/lib/rag/retrieve";
+import { resolveRetrieveScope } from "../../src/lib/rag/scope";
+import {
+  formatPrefetchBlock,
+  looksLikeCanonQuestion,
+} from "../../src/lib/rag/prefetch";
 
 const PORT = 3003;
 const MAX_CONTENT_LENGTH = 20000;
@@ -536,6 +542,26 @@ function looksLikeWorkRequest(content: string): boolean {
   );
 }
 
+/** Inject RAG snippets before the first LLM turn on content/code questions. */
+async function prefetchCanonContext(
+  userId: string,
+  thread: ThreadTurnInfo,
+  userText: string,
+): Promise<string> {
+  if (!looksLikeCanonQuestion(userText)) return "";
+  const scope = resolveRetrieveScope({
+    userId,
+    threadProjectId: thread.projectId,
+    requestedProjectId: null,
+  });
+  const result = await retrieve(db, {
+    scope,
+    query: userText.slice(0, 400),
+    limit: 6,
+  });
+  return formatPrefetchBlock(result.hits);
+}
+
 /**
  * Planner sub-agent: one dedicated LLM call that turns the request into a
  * short task list. Returns the steps or null (→ plain turn, no plan).
@@ -806,6 +832,16 @@ async function runAgentTurn(
       } else {
         emitPhase(room, threadId, "act", "Работаю над запросом…");
       }
+    }
+
+    try {
+      const prefetch = await prefetchCanonContext(user.sub, thread, content);
+      if (prefetch) systemPrompt += `\n\n${prefetch}`;
+    } catch (err) {
+      console.warn(
+        "[agent] canon prefetch failed (ignored):",
+        err instanceof Error ? err.message : String(err),
+      );
     }
 
     // 3. Tool-calling loop.

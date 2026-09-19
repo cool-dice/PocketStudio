@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { attachSessionCookie, signSession, verifyPassword } from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
+import { consumeRateLimit, resetRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,18 @@ export async function POST(req: Request) {
   }
 
   const { email, password } = parsed.data;
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "local";
+  const rateKey = `login:${email}:${ip}`;
+  const gated = consumeRateLimit(rateKey, 8, 15 * 60 * 1000);
+  if (!gated.ok) {
+    return NextResponse.json(
+      { error: "Слишком много попыток входа. Подождите и попробуйте снова." },
+      { status: 429, headers: { "retry-after": String(gated.retryAfterSec) } },
+    );
+  }
 
   // Ensure seeded admin exists so it can log in.
   await ensureAdminSeed();
@@ -42,6 +55,7 @@ export async function POST(req: Request) {
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     return NextResponse.json({ error: "Неверный email или пароль" }, { status: 401 });
   }
+  resetRateLimit(rateKey);
 
   // Best-effort audit log.
   try {

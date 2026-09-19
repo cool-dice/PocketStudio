@@ -238,6 +238,102 @@ describe.skipIf(SKIP_PG)("retrieve scope isolation (postgres)", () => {
     expect(result.hits.some((h) => h.excerpt.includes("инбокс"))).toBe(false);
   });
 
+  test("deleted document sections disappear from retrieve", async () => {
+    await seed();
+    const goneDoc = await db.document.create({
+      data: { projectId: book, title: "Черновик на выброс" },
+    });
+    const goneSec = await db.documentSection.create({
+      data: {
+        documentId: goneDoc.id,
+        title: "удалённая глава",
+        content: "уникальный фрагмент про маяк который исчезнет",
+      },
+    });
+    await upsertChunk(db, {
+      userId: userA,
+      projectId: book,
+      sourceType: "section",
+      sourceId: goneSec.id,
+      path: "удалённая глава",
+      ordinal: 0,
+      content: "уникальный фрагмент про маяк который исчезнет",
+      tokenCount: 10,
+      contentHash: "h-del-doc",
+      embedding: unitVec(4),
+    });
+    const before = await retrieve(db, {
+      scope: ragScopeFromThread(userA, book),
+      query: "уникальный фрагмент про маяк который исчезнет",
+      limit: 12,
+    });
+    expect(before.hits.some((h) => h.sourceId === goneSec.id)).toBe(true);
+
+    const { DELETE: deleteDocument } = await import("../../app/api/documents/[id]/route");
+    const { signSession } = await import("../auth");
+    const owner = await db.user.findUnique({ where: { id: userA } });
+    const token = await signSession({
+      sub: userA,
+      email: owner!.email,
+      name: owner!.name,
+      role: owner!.role,
+    });
+    const del = await deleteDocument(
+      new Request(`http://localhost/api/documents/${goneDoc.id}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      }),
+      { params: Promise.resolve({ id: goneDoc.id }) },
+    );
+    expect(del.status).toBe(200);
+
+    const after = await retrieve(db, {
+      scope: ragScopeFromThread(userA, book),
+      query: "уникальный фрагмент про маяк который исчезнет",
+      limit: 12,
+    });
+    expect(after.hits.some((h) => h.sourceId === goneSec.id)).toBe(false);
+    expect(after.hits.some((h) => h.excerpt.includes("исчезнет"))).toBe(false);
+  });
+
+  test("deleted file on disk is dropped from retrieve", async () => {
+    await seed();
+    const { writeWorkspaceFile, deleteWorkspacePath, projectRoot, removeProjectDir } =
+      await import("../workspace");
+    const rel = "src/gone.ts";
+    const body = "export const goneMarker = 'удалённый файл маяк';";
+    await writeWorkspaceFile(projectRoot(coder), rel, body);
+    await upsertChunk(db, {
+      userId: userA,
+      projectId: coder,
+      sourceType: "file",
+      sourceId: `${coder}:${rel}`,
+      path: rel,
+      ordinal: 0,
+      content: body,
+      tokenCount: 8,
+      contentHash: "h-del-file",
+      embedding: unitVec(5),
+    });
+    const before = await retrieve(db, {
+      scope: ragScopeFromThread(userA, coder),
+      query: "удалённый файл маяк goneMarker",
+      limit: 12,
+    });
+    expect(before.hits.some((h) => h.path === rel)).toBe(true);
+
+    await deleteWorkspacePath(projectRoot(coder), rel);
+
+    const after = await retrieve(db, {
+      scope: ragScopeFromThread(userA, coder),
+      query: "удалённый файл маяк goneMarker",
+      limit: 12,
+    });
+    expect(after.hits.some((h) => h.path === rel)).toBe(false);
+
+    await removeProjectDir(coder).catch(() => {});
+  });
+
   test("vector: mocked /v1/embeddings still honors workspace filter", async () => {
     await seed();
     const provider = await db.aiProvider.create({

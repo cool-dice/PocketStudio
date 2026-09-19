@@ -3,9 +3,12 @@
  * Vector search when embeddings exist; keyword fallback in the SAME scope.
  */
 
+import { promises as fsp } from "node:fs";
+
 import type { PrismaClient } from "@prisma/client";
 
 import { rankCanonHits } from "../retrieve";
+import { projectRoot, safeJoin, WorkspaceError } from "../workspace";
 import { tryEmbedTexts } from "./embed";
 import { chunkMatchesScope } from "./scope";
 import { loadScopedChunks, searchVector } from "./store";
@@ -62,12 +65,51 @@ async function filterLiveChunks(
             })
           ).map((s) => s.id),
         );
-  if (!liveNotes && !liveSections) return next;
-  return next.filter((r) => {
+  if (!liveNotes && !liveSections) {
+    return filterLiveFiles(next);
+  }
+  const withSources = next.filter((r) => {
     if (r.sourceType === "note" && liveNotes) return liveNotes.has(r.sourceId);
     if (r.sourceType === "section" && liveSections) return liveSections.has(r.sourceId);
     return true;
   });
+  return filterLiveFiles(withSources);
+}
+
+async function filterLiveFiles(rows: RagChunkRow[]): Promise<RagChunkRow[]> {
+  const files = rows.filter((r) => r.sourceType === "file");
+  if (files.length === 0) return rows;
+  const exists = new Map<string, boolean>();
+  for (const row of files) {
+    if (!row.path || !row.projectId) continue;
+    const key = `${row.projectId}:${row.path}`;
+    if (!exists.has(key)) {
+      exists.set(key, await fileExistsOnDisk(row.projectId, row.path));
+    }
+  }
+  return rows.filter((r) => {
+    if (r.sourceType !== "file") return true;
+    if (!r.path || !r.projectId) return false;
+    return exists.get(`${r.projectId}:${r.path}`) === true;
+  });
+}
+
+async function fileExistsOnDisk(projectId: string, relPath: string): Promise<boolean> {
+  try {
+    const root = projectRoot(projectId);
+    try {
+      await fsp.stat(root);
+    } catch {
+      // No workspace on disk yet — keep indexed chunks (tests / not cloned).
+      return true;
+    }
+    const abs = safeJoin(root, relPath);
+    const st = await fsp.stat(abs);
+    return st.isFile();
+  } catch (err) {
+    if (err instanceof WorkspaceError) return false;
+    return false;
+  }
 }
 
 export async function retrieve(

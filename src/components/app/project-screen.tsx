@@ -161,6 +161,8 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [fileDeletePath, setFileDeletePath] = useState<string | null>(null);
+  const [deletingFile, setDeletingFile] = useState(false);
   const [discussing, setDiscussing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -431,6 +433,28 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
     }
   };
 
+  const doDeleteFile = async () => {
+    if (!fileDeletePath || deletingFile) return;
+    setDeletingFile(true);
+    try {
+      const deleted = await api.deleteProjectFile(projectId, fileDeletePath);
+      const gone = deleted.path;
+      setOpenFiles((prev) =>
+        prev.filter((f) => f.path !== gone && !f.path.startsWith(`${gone}/`)),
+      );
+      setActivePath((cur) =>
+        cur && (cur === gone || cur.startsWith(`${gone}/`)) ? null : cur,
+      );
+      setFileDeletePath(null);
+      toast.success("Файл удалён", { description: deleted.path });
+      void loadTree(true);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось удалить файл");
+    } finally {
+      setDeletingFile(false);
+    }
+  };
+
   const treeNodes = useMemo(() => buildTree(tree), [tree]);
   const dirtyPaths = useMemo(
     () =>
@@ -602,6 +626,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             activePath={activePath}
             dirtyPaths={dirtyPaths}
             onOpenFile={(path) => void openFile(path)}
+            onDeleteFile={(path) => setFileDeletePath(path)}
           />
         </nav>
 
@@ -644,6 +669,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
                 activePath={activePath}
                 dirtyPaths={dirtyPaths}
                 onOpenFile={(path) => void openFile(path)}
+                onDeleteFile={(path) => setFileDeletePath(path)}
               />
             </div>
           </SheetContent>
@@ -651,12 +677,12 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
 
         {/* Editor area */}
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Mobile tree trigger */}
-          <div className="flex h-10 shrink-0 items-center gap-1.5 border-b px-2 md:hidden">
+          {/* File actions (tree sheet on mobile + save/delete) */}
+          <div className="flex h-10 shrink-0 items-center gap-1.5 border-b px-2">
             <Button
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+              className="h-8 gap-1.5 rounded-lg px-2.5 text-xs md:hidden"
               onClick={() => setMobileTreeOpen(true)}
               aria-label="Показать файлы проекта"
             >
@@ -670,21 +696,34 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             )}
             <div className="flex-1" />
             {activeFile && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
-                onClick={() => void saveActiveFile()}
-                disabled={!activeDirty || saving}
-                aria-label="Сохранить файл"
-              >
-                {saving ? (
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Save className="size-3.5" aria-hidden="true" />
-                )}
-                Сохранить
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+                  onClick={() => void saveActiveFile()}
+                  disabled={!activeDirty || saving}
+                  aria-label="Сохранить файл"
+                >
+                  {saving ? (
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Save className="size-3.5" aria-hidden="true" />
+                  )}
+                  Сохранить
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-lg px-2.5 text-xs text-destructive hover:text-destructive"
+                  onClick={() => setFileDeletePath(activeFile.path)}
+                  disabled={deletingFile}
+                  aria-label={`Удалить файл ${activeFile.path}`}
+                >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
+                  Удалить
+                </Button>
+              </>
             )}
           </div>
 
@@ -880,6 +919,34 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog
+        open={fileDeletePath !== null}
+        onOpenChange={(open) => {
+          if (!open && !deletingFile) setFileDeletePath(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить файл?</AlertDialogTitle>
+            <AlertDialogDescription>
+              «{fileDeletePath}» будет удалён с диска, а его фрагменты исчезнут из поиска по канону.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingFile}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void doDeleteFile();
+              }}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deletingFile ? "Удаляем…" : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </section>
   );
 }
@@ -895,6 +962,7 @@ function FileTreeBody({
   activePath,
   dirtyPaths,
   onOpenFile,
+  onDeleteFile,
 }: {
   nodes: TreeNode[];
   truncated: boolean;
@@ -904,6 +972,7 @@ function FileTreeBody({
   activePath: string | null;
   dirtyPaths: Set<string>;
   onOpenFile: (path: string) => void;
+  onDeleteFile: (path: string) => void;
 }) {
   if (loading) {
     return (
@@ -933,6 +1002,7 @@ function FileTreeBody({
             activePath={activePath}
             dirtyPaths={dirtyPaths}
             onOpenFile={onOpenFile}
+            onDeleteFile={onDeleteFile}
           />
         </li>
       ))}
@@ -953,6 +1023,7 @@ function TreeNodeRow({
   activePath,
   dirtyPaths,
   onOpenFile,
+  onDeleteFile,
 }: {
   node: TreeNode;
   depth: number;
@@ -961,6 +1032,7 @@ function TreeNodeRow({
   activePath: string | null;
   dirtyPaths: Set<string>;
   onOpenFile: (path: string) => void;
+  onDeleteFile: (path: string) => void;
 }) {
   const isOpen = !collapsed.has(node.path);
 
@@ -968,28 +1040,40 @@ function TreeNodeRow({
     const Icon = isOpen ? FolderOpen : Folder;
     return (
       <div>
-        <button
-          type="button"
-          onClick={() => onToggleFolder(node.path)}
-          aria-expanded={isOpen}
-          aria-label={`Папка ${node.name}`}
-          className="flex min-h-9 w-full items-center gap-1 rounded-lg pr-2 text-left text-xs text-foreground/90 transition-colors duration-150 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60"
+        <div
+          className="group flex min-h-9 w-full items-center gap-1 rounded-lg pr-1 text-xs text-foreground/90 hover:bg-accent/60"
           style={{ paddingLeft: `${6 + depth * 14}px` }}
         >
-          <motion.span
-            animate={{ rotate: isOpen ? 90 : 0 }}
-            transition={{ duration: 0.15 }}
-            className="flex shrink-0 items-center"
-            aria-hidden="true"
+          <button
+            type="button"
+            onClick={() => onToggleFolder(node.path)}
+            aria-expanded={isOpen}
+            aria-label={`Папка ${node.name}`}
+            className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
-            <ChevronRight className="size-3.5 text-muted-foreground/70" />
-          </motion.span>
-          <Icon
-            className="size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <span className="min-w-0 truncate font-medium">{node.name}</span>
-        </button>
+            <motion.span
+              animate={{ rotate: isOpen ? 90 : 0 }}
+              transition={{ duration: 0.15 }}
+              className="flex shrink-0 items-center"
+              aria-hidden="true"
+            >
+              <ChevronRight className="size-3.5 text-muted-foreground/70" />
+            </motion.span>
+            <Icon
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 truncate font-medium">{node.name}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteFile(node.path)}
+            aria-label={`Удалить папку ${node.name}`}
+            className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+          </button>
+        </div>
         <AnimatePresence initial={false}>
           {isOpen && node.children.length > 0 && (
             <motion.div
@@ -1010,6 +1094,7 @@ function TreeNodeRow({
                       activePath={activePath}
                       dirtyPaths={dirtyPaths}
                       onOpenFile={onOpenFile}
+                      onDeleteFile={onDeleteFile}
                     />
                   </li>
                 ))}
@@ -1025,32 +1110,44 @@ function TreeNodeRow({
   const dirty = dirtyPaths.has(node.path);
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpenFile(node.path)}
-      aria-current={active ? "true" : undefined}
-      aria-label={`Файл ${node.name}`}
-      title={node.path}
+    <div
       className={cn(
-        "flex min-h-9 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-xs transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        "group flex min-h-9 w-full items-center gap-1 rounded-lg pr-1 text-xs",
         active
           ? "bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-300"
           : "text-foreground/80 hover:bg-accent/60",
       )}
       style={{ paddingLeft: `${6 + depth * 14}px` }}
     >
-      <FileCode2
-        className={cn("size-3.5 shrink-0", fileDotStyle(node.path))}
-        aria-hidden="true"
-      />
-      <span className="min-w-0 truncate">{node.name}</span>
-      {dirty && (
-        <span
-          className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500"
-          aria-label="Есть несохранённые изменения"
+      <button
+        type="button"
+        onClick={() => onOpenFile(node.path)}
+        aria-current={active ? "true" : undefined}
+        aria-label={`Файл ${node.name}`}
+        title={node.path}
+        className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <FileCode2
+          className={cn("size-3.5 shrink-0", fileDotStyle(node.path))}
+          aria-hidden="true"
         />
-      )}
-    </button>
+        <span className="min-w-0 truncate">{node.name}</span>
+        {dirty && (
+          <span
+            className="size-1.5 shrink-0 rounded-full bg-amber-500"
+            aria-label="Есть несохранённые изменения"
+          />
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={() => onDeleteFile(node.path)}
+        aria-label={`Удалить файл ${node.name}`}
+        className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <Trash2 className="size-3.5" aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 

@@ -13,6 +13,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { parseAppLocation, pathFor, TAB_SET, type AppLocation } from "@/lib/app-url";
 import { useAppUi } from "@/lib/store";
+import { createUrlSyncGuard } from "@/lib/url-sync-guard";
 import type { WorkspaceTab } from "@/lib/workspace-data";
 
 function currentHref(pathname: string, searchParams: URLSearchParams): string {
@@ -52,6 +53,7 @@ export function UrlSync({
   const workspaceId = useAppUi((s) => s.activeWorkspaceId);
   const workspaceTab = useAppUi((s) => s.workspaceTab);
   const hydrated = useRef(false);
+  const guardRef = useRef(createUrlSyncGuard());
 
   useEffect(() => {
     if (hydrated.current) return;
@@ -70,6 +72,7 @@ export function UrlSync({
 
   useEffect(() => {
     if (!hydrated.current) return;
+    if (guardRef.current.consumeSkip()) return;
     applyLocationToStore(parseAppLocation(pathname, searchParams));
   }, [pathname, searchParams]);
 
@@ -77,6 +80,7 @@ export function UrlSync({
     if (!hydrated.current) return;
     const next = pathFor(mainArea, workspaceId, workspaceTab);
     if (currentHref(pathname, searchParams) === next) return;
+    guardRef.current.markStoreNav();
     router.replace(next, { scroll: false });
     // Pathname is read for the equality check but must NOT be a dependency:
     // a back/forward change updates the path first, while zustand still

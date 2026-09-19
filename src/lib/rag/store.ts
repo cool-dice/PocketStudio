@@ -33,6 +33,28 @@ export async function deleteSourceChunks(
   await db.ragChunk.deleteMany({ where: { userId, sourceType, sourceId } });
 }
 
+/** Drop file chunks for a path or any nested path under a deleted folder. */
+export async function deleteFileChunksForPath(
+  db: PrismaClient,
+  userId: string,
+  projectId: string,
+  relPath: string,
+): Promise<void> {
+  const sourceId = `${projectId}:${relPath}`;
+  await db.ragChunk.deleteMany({
+    where: {
+      userId,
+      sourceType: "file",
+      projectId,
+      OR: [
+        { sourceId },
+        { path: relPath },
+        { path: { startsWith: `${relPath}/` } },
+      ],
+    },
+  });
+}
+
 export async function loadSourceHashes(
   db: PrismaClient,
   userId: string,

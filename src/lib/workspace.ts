@@ -146,6 +146,45 @@ export function safeJoin(root: string, relPath: string): string {
   return abs;
 }
 
+/**
+ * After safeJoin: reject symlink hops (even if the lexical path is inside
+ * root) so write/delete cannot follow a link to /etc or another project.
+ */
+export async function assertInsideRoot(root: string, abs: string): Promise<void> {
+  let rootReal: string;
+  try {
+    rootReal = await fsp.realpath(root);
+  } catch {
+    throw new WorkspaceError("Корень проекта недоступен", 500);
+  }
+  const rootWithSep = rootReal.endsWith(path.sep) ? rootReal : rootReal + path.sep;
+
+  let probe = abs;
+  for (;;) {
+    let st;
+    try {
+      st = await fsp.lstat(probe);
+    } catch {
+      const parent = path.dirname(probe);
+      if (parent === probe) return;
+      probe = parent;
+      continue;
+    }
+    if (st.isSymbolicLink()) {
+      throw new WorkspaceError("Путь вне проекта запрещён");
+    }
+    try {
+      const real = await fsp.realpath(probe);
+      if (real !== rootReal && !real.startsWith(rootWithSep)) {
+        throw new WorkspaceError("Путь вне проекта запрещён");
+      }
+    } catch (err) {
+      if (err instanceof WorkspaceError) throw err;
+    }
+    return;
+  }
+}
+
 /** POSIX-style relative path for display/transport. */
 export function toRel(root: string, abs: string): string {
   const rel = path.relative(root, abs);
@@ -161,6 +200,7 @@ export async function readWorkspaceFile(
   maxBytes = MAX_FILE_BYTES,
 ): Promise<{ path: string; content: string; size: number }> {
   const abs = safeJoin(root, relPath);
+  await assertInsideRoot(root, abs);
   let stat;
   try {
     stat = await fsp.stat(abs);
@@ -195,6 +235,7 @@ export async function writeWorkspaceFile(
     throw new WorkspaceError(`Файл больше ${maxBytes} байт`, 413);
   }
   const abs = safeJoin(root, relPath);
+  await assertInsideRoot(root, abs);
   const segments = toRel(root, abs).split("/");
   if (segments.length === 0) {
     throw new WorkspaceError("Путь должен указывать на файл");
@@ -220,7 +261,13 @@ export async function deleteWorkspacePath(
   relPath: string,
 ): Promise<{ deleted: true; path: string }> {
   const abs = safeJoin(root, relPath);
+  await assertInsideRoot(root, abs);
   if (abs === root) throw new WorkspaceError("Нельзя удалить корень проекта");
+  try {
+    await fsp.lstat(abs);
+  } catch {
+    throw new WorkspaceError("Файл не найден", 404);
+  }
   await fsp.rm(abs, { recursive: true, force: true });
   return { deleted: true as const, path: toRel(root, abs) };
 }

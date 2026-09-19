@@ -7,7 +7,12 @@ import type { PrismaClient } from "@prisma/client";
 import { chunkCode, chunkText, type TextChunk } from "./chunk";
 import { tryEmbedTexts } from "./embed";
 import { ragContentHash } from "./hash";
-import { deleteSourceChunks, loadSourceHashes, upsertChunk } from "./store";
+import {
+  deleteFileChunksForPath,
+  deleteSourceChunks,
+  loadSourceHashes,
+  upsertChunk,
+} from "./store";
 import type { RagSourceType } from "./types";
 
 export interface IndexDocument {
@@ -115,4 +120,13 @@ export async function removeSource(
   sourceId: string,
 ): Promise<void> {
   await deleteSourceChunks(db, userId, sourceType, sourceId);
+}
+
+export async function removeFileChunks(
+  db: PrismaClient,
+  userId: string,
+  projectId: string,
+  relPath: string,
+): Promise<void> {
+  await deleteFileChunksForPath(db, userId, projectId, relPath);
 }

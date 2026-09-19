@@ -498,6 +498,17 @@ export const api = {
     });
   },
 
+  deleteProjectFile(
+    id: string,
+    path: string,
+  ): Promise<{ deleted: true; path: string }> {
+    const qs = new URLSearchParams({ path });
+    return request(
+      `/api/projects/${encodeURIComponent(id)}/file?${qs.toString()}`,
+      { method: "DELETE" },
+    );
+  },
+
   listProjectCommits(id: string, limit = 50): Promise<CommitInfo[]> {
     return request<{ commits: CommitInfo[] }>(
       `/api/projects/${encodeURIComponent(id)}/commits?limit=${limit}`,

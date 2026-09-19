@@ -7,8 +7,9 @@ import {
   projectRoot,
   readWorkspaceFile,
   writeWorkspaceFile,
+  deleteWorkspacePath,
 } from "@/lib/workspace";
-import { scheduleIndexFile } from "@/lib/rag";
+import { removeFileChunks, scheduleIndexFile } from "@/lib/rag";
 import { shouldSkipPath } from "@/lib/rag/skip";
 
 export const dynamic = "force-dynamic";
@@ -115,6 +116,43 @@ export async function PUT(
       });
     }
     return NextResponse.json(result);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/* ── DELETE /api/projects/[id]/file?path=… — remove file/dir + RAG chunks ── */
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await getUserFromRequest(req);
+  if (!session) {
+    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
+  }
+  const { id } = await params;
+
+  const project = await db.project.findFirst({
+    where: { id, userId: session.sub },
+  });
+  if (!project) {
+    return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+  }
+
+  const filePath = new URL(req.url).searchParams.get("path");
+  if (!filePath) {
+    return NextResponse.json({ error: "Параметр path обязателен" }, { status: 400 });
+  }
+
+  try {
+    const deleted = await deleteWorkspacePath(projectRoot(project.id), filePath);
+    await db.project.update({
+      where: { id: project.id },
+      data: { updatedAt: new Date() },
+    });
+    await removeFileChunks(db, session.sub, project.id, deleted.path);
+    return NextResponse.json(deleted);
   } catch (err) {
     return errorResponse(err);
   }

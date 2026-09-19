@@ -8,7 +8,8 @@ export {
   resolveRetrieveScope,
 } from "./scope";
 export { retrieve } from "./retrieve";
-export { indexDocument, removeSource } from "./indexer";
+export { indexDocument, removeSource, removeFileChunks } from "./indexer";
+export { looksLikeCanonQuestion, formatPrefetchBlock } from "./prefetch";
 export {
   scheduleIndex,
   scheduleIndexNote,
