@@ -63,7 +63,7 @@ export function SceneCard({
   const [draft, setDraft] = useState(section.content);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [prompt, setPrompt] = useState("");
-  const [voice, setVoice] = useState("tongtong");
+  const [voice, setVoice] = useState("alloy");
 
   /* Карточка переиспользуется для другой секции — сброс локального драфта. */
   const [prevId, setPrevId] = useState(section.id);

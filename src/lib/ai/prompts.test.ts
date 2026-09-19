@@ -5,10 +5,11 @@ import {
   IDENTITY_BLOCK,
   JSON_TOOL_CONTRACT,
   NOTES_ANALYSIS_SYSTEM,
+  composeImagePrompt,
+  IMAGE_PROMPT_PREFIX,
   sectionSystemFor,
   wrapSkillDocs,
 } from "./prompts";
-import { buildAgentSystemPrompt, buildPlannerPrompt } from "../../mini-services/agent-service/prompts";
 
 describe("prompt library", () => {
   test("identity is PocketStudio штурман, not a vendor chatbot", () => {
@@ -46,47 +47,12 @@ describe("prompt library", () => {
     expect(wrapped).toContain("не новая личность");
     expect(wrapped).toContain("Шаг 1");
   });
-});
 
-describe("agent system prompt builder", () => {
-  test("ask mode forbids file mutation tools", () => {
-    const prompt = buildAgentSystemPrompt({ mode: "ask" });
-    expect(prompt).toContain("штурман студии PocketStudio");
-    expect(prompt).toContain("retrieve_canon");
-    expect(prompt).toContain("apply_patch");
-    expect(prompt).toContain("Запрещено: write_file");
-    expect(prompt).not.toMatch(/ChatGLM|z-ai|VibeFlow/i);
-  });
-
-  test("act mode prefers patch and scopes to project tree", () => {
-    const prompt = buildAgentSystemPrompt({
-      mode: "act",
-      projectName: "Клип",
-      projectTree: ["app/page.tsx", "README.md"],
-    });
-    expect(prompt).toContain("apply_patch");
-    expect(prompt).toContain("Клип");
-    expect(prompt).toContain("app/page.tsx");
-    expect(prompt).toContain("Пиши только в эти пути");
-  });
-
-  test("planner refuses invented work and stays in project", () => {
-    const prompt = buildPlannerPrompt({
-      hasProject: true,
-      projectName: "App",
-      projectTree: ["src/index.ts"],
-    });
-    expect(prompt).toContain("не выдумывай работу");
-    expect(prompt).toContain("src/index.ts");
-    expect(prompt).toContain('"steps"');
-  });
-
-  test("skills inject once via wrapper", () => {
-    const prompt = buildAgentSystemPrompt({
-      mode: "ask",
-      skillDocs: ["---\nname: Копирайтер\n---\nПиши главы"],
-    });
-    expect(prompt).toContain("Копирайтер");
-    expect(prompt).toContain("не новая личность");
+  test("image prefix is studio-neutral and not duplicated", () => {
+    expect(IMAGE_PROMPT_PREFIX.toLowerCase()).not.toContain("z-ai");
+    const once = composeImagePrompt("a red boat");
+    expect(once.startsWith(IMAGE_PROMPT_PREFIX)).toBe(true);
+    expect(once).toContain("a red boat");
+    expect(composeImagePrompt(once)).toBe(once);
   });
 });

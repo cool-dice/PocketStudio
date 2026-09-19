@@ -17,6 +17,7 @@ pgvector, Docker sandboxes) stays replaced per `worklog.md`.
 | Notebook activity chart | **Ported** — 14-day bars (`GET /api/notes/stats`) |
 | Admin 14-day stacked chart | Already in admin |
 | Quest dialog with selected note | **Ported** as onboarding Quest → capture → composer draft (not a separate QuestMessage table) |
+| TTS voice picker | **Ported labels** — OpenAI alloy/nova/…; legacy z-ai ids still mapped in the gateway |
 
 ## proto2 Aiflow / AI Studio
 

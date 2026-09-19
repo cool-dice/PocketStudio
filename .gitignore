@@ -53,3 +53,9 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# local sqlite (never commit)
+db/custom.db
+db/custom.db-journal
+db/custom.db-shm
+db/custom.db-wal

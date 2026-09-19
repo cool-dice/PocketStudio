@@ -24,7 +24,11 @@ import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
 import { generateImage as gatewayGenerateImage, synthesizeSpeech, chatCompletion } from "../../src/lib/ai/connector";
 import { resolveToolRoute } from "../../src/lib/ai/resolve";
-import { DOCUMENT_ANALYST_SYSTEM, sectionSystemFor } from "../../src/lib/ai/prompts";
+import {
+  composeImagePrompt,
+  DOCUMENT_ANALYST_SYSTEM,
+  sectionSystemFor,
+} from "../../src/lib/ai/prompts";
 
 // ─────────────────────────── shared helpers ───────────────────────────
 
@@ -459,7 +463,10 @@ const generateImage: ToolDef = {
 
     try {
       const route = await resolveToolRoute(db, userId, "image");
-      const { buffer } = await gatewayGenerateImage(route, { prompt, size });
+      const { buffer } = await gatewayGenerateImage(route, {
+        prompt: composeImagePrompt(prompt),
+        size,
+      });
       const url = saveGenFile(buffer, "png");
       const artifact = await db.artifact.create({
         data: {

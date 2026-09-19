@@ -23,7 +23,7 @@ Inventory of every LLM surface. Winners are implemented in
 | `palette` | `PALETTE_SYSTEM` | PocketStudio art-director JSON | Extra mood essays |
 | `monetize` | `MONETIZE_SYSTEM` | PocketStudio producer JSON | Stripe/legal fantasy |
 | `rewrite_section` | `SECTION_*_SYSTEM` + `sectionSystemFor` | PocketStudio rewrite/continue/custom **plus write-for-empty** | Routing empty chapters through rewrite (weaker drafts) |
-| `image` / `tts` / `asr` | capabilities, not chat roles | Gateway only | z-ai voice names in user copy (ids still accepted) |
+| `image` / `tts` / `asr` | capabilities, not chat roles | `composeImagePrompt` studio prefix; OpenAI voice ids in UI | z-ai voice names in user copy (API still maps tongtong→alloy) |
 
 ## Agent tools added to the prompt
 
@@ -44,13 +44,15 @@ Inventory of every LLM surface. Winners are implemented in
 
 Enabled `SKILL.md` bodies inject via `wrapSkillDocs`: playbook, not a second identity. Catalog bodies in `src/lib/skills-catalog.ts` stay short step lists.
 
+Image prompts always get `IMAGE_PROMPT_PREFIX` via `composeImagePrompt` (no vendor watermark, prefix is not duplicated).
+
 ## Few-shot policy
 
 Only the tool-call example in `JSON_TOOL_CONTRACT`. Extra shots for analysis/palette/monetize were not added: those schemas are already short and parsed leniently.
 
 ## Discarded outright
 
-- z-ai / ChatGLM vendor voice
+- z-ai / ChatGLM vendor voice (including «Тонгтунг» labels in video TTS)
 - VibeFlow product name in prompts
 - proto2 Analyst SPEC.md 7-stage interview as the default chat
 - proto2 Coder “never commit / ESLint 200 lines” (that was the Aider sandbox, not this agent)

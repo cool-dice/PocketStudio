@@ -104,6 +104,13 @@ export function sectionSystemFor(
 export const IMAGE_PROMPT_PREFIX =
   "Studio still, coherent lighting, no watermark, no vendor signature.";
 
+export function composeImagePrompt(userPrompt: string): string {
+  const p = userPrompt.trim();
+  if (!p) return IMAGE_PROMPT_PREFIX;
+  if (p.toLowerCase().startsWith(IMAGE_PROMPT_PREFIX.toLowerCase())) return p;
+  return `${IMAGE_PROMPT_PREFIX} ${p}`;
+}
+
 /** Compact skill wrapper — avoids repeating identity inside SKILL.md. */
 export function wrapSkillDocs(skillDocs: string[]): string {
   const skills = skillDocs.filter((d) => d.trim().length > 0);

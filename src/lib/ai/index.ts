@@ -19,7 +19,7 @@ import {
 import { GatewayError, isGatewayError } from "./errors";
 import { resolveToolRoute } from "./resolve";
 import type { AiToolId } from "./tools";
-import { DOCUMENT_ANALYST_SYSTEM } from "./prompts";
+import { composeImagePrompt, DOCUMENT_ANALYST_SYSTEM } from "./prompts";
 
 export { GatewayError, isGatewayError } from "./errors";
 export { AI_TOOLS, AI_TOOL_IDS, UNCONFIGURED_TOOL_MESSAGE } from "./tools";
@@ -170,7 +170,7 @@ export async function aiGenerateImage(
 ): Promise<{ url: string }> {
   const route = await resolveToolRoute(db, userId, "image");
   const { buffer } = await generateImage(route, {
-    prompt,
+    prompt: composeImagePrompt(prompt),
     size: sanitizeImageSize(size),
   });
   const url = saveGeneratedFile(buffer, "png");
