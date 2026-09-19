@@ -3,6 +3,8 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { isToolUnconfigured } from "@/lib/ai/resolve";
+import { noteAnalysisFieldsForQueue } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 import { scheduleIndexNote } from "@/lib/rag";
 import { persistableTranscription } from "@/lib/voice-copy";
@@ -173,13 +175,16 @@ export async function POST(req: Request) {
     projectId = project.id;
   }
 
+  const analysis = noteAnalysisFieldsForQueue(
+    await isToolUnconfigured(db, session.sub, "notes"),
+  );
   const note = await db.note.create({
     data: {
       userId: session.sub,
       rawText: parsed.data.text,
       transcription: persistableTranscription(parsed.data.transcription),
-      status: "pending",
       categoryId: category?.id ?? undefined,
+      ...analysis,
     },
   });
 

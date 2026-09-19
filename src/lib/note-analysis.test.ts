@@ -20,6 +20,7 @@ import {
   isUsableNoteText,
   parseNoteAnalysis,
   processedNoteAnalysisData,
+  noteAnalysisFieldsForQueue,
 } from "./note-analysis";
 
 const completeJson = JSON.stringify({
@@ -103,6 +104,17 @@ describe("note analysis honesty", () => {
     expect(data.finalBlock).toBeNull();
     expect(data.recommendations).toBeNull();
     expect(data.analyzedAt).toBeNull();
+  });
+
+  test("queue payload is error immediately when notes is unconfigured", () => {
+    const queued = noteAnalysisFieldsForQueue(false);
+    expect(queued.status).toBe("pending");
+    expect(queued.errorMessage).toBeNull();
+    const failed = noteAnalysisFieldsForQueue(true);
+    expect(failed.status).toBe("error");
+    expect(failed.errorMessage).toBe(UNCONFIGURED_TOOL_MESSAGE);
+    expect(failed.positiveBlock).toBeNull();
+    expect(failed.finalBlock).toBeNull();
   });
 
   test("processed analysis data persists the four blocks", () => {

@@ -178,6 +178,16 @@ export function queuedNoteAnalysisData() {
   };
 }
 
+/**
+ * Create / re-queue payload. Unconfigured `notes` is status=error
+ * immediately — do not leave the row pending for the analyzer poll.
+ */
+export function noteAnalysisFieldsForQueue(unconfigured: boolean) {
+  return unconfigured
+    ? failedNoteAnalysisData(UNCONFIGURED_TOOL_MESSAGE)
+    : queuedNoteAnalysisData();
+}
+
 export function processedNoteAnalysisData(analysis: ParsedNoteAnalysis) {
   return {
     status: "processed" as const,

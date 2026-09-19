@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { aiChatJson, aiErrorResponse } from "@/lib/ai";
+import { aiChatJson, aiErrorResponse, resolveToolRoute } from "@/lib/ai";
 import { MONETIZE_SYSTEM } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
@@ -12,8 +12,10 @@ export const maxDuration = 180;
 
 /* ── POST /api/ai/monetize — LLM-план монетизации воркспейса ──
  * Бриф = имя+тип+описание+стадия воркспейса + краткий бриф пользователя.
- * План сохраняется как Document kind="spec" с 5 секциями; прежний план
- * (title начинается с «План монетизации») удаляется и пересобирается. */
+ * Unconfigured `monetize` fails immediately with UNCONFIGURED_TOOL_MESSAGE
+ * and writes no document (no Stripe/product fantasy). План сохраняется как
+ * Document kind="spec" с 5 секциями; прежний план (title начинается с
+ * «План монетизации») удаляется только после успешного ответа модели. */
 
 const schema = z.object({
   projectId: z.string().trim().min(1),
@@ -146,6 +148,16 @@ export async function POST(req: Request) {
 
   const check = await ensureWorkspace(req, projectId);
   if (!check.ok) return check.response;
+
+  try {
+    await resolveToolRoute(db, check.userId, "monetize");
+  } catch (err) {
+    const mapped = aiErrorResponse(
+      err,
+      "Модель не собрала план — попробуйте ещё раз",
+    );
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+  }
 
   const project = await db.project.findFirst({
     where: { id: projectId, userId: check.userId },

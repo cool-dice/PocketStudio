@@ -17,6 +17,8 @@
 // (worklog Task 4, Task 1-a).
 
 import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
+import { isToolUnconfigured } from "../../src/lib/ai/resolve";
+import { noteAnalysisFieldsForQueue } from "../../src/lib/note-analysis";
 import { db } from "./db-client";
 import { scheduleIndexFile, scheduleIndexNote } from "../../src/lib/rag/hooks";
 import { removeFileChunks } from "../../src/lib/rag/indexer";
@@ -238,12 +240,16 @@ const createNote: ToolDef = {
     }
 
     // Typed agent thought — not ASR. Do not copy text into transcription.
+    // Unconfigured `notes` is error immediately (no pending wait for analyzer).
+    const analysis = noteAnalysisFieldsForQueue(
+      await isToolUnconfigured(db, userId, "notes"),
+    );
     const note = await db.note.create({
       data: {
         userId,
         rawText: text,
-        status: "pending",
         categoryId: category?.id ?? null,
+        ...analysis,
       },
     });
 

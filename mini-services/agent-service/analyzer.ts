@@ -1,8 +1,11 @@
 // PocketStudio analyzer — Stage 2 honest analysis pipeline.
 //
 // Every new note (from ⌘K capture after the user confirms a transcript, the
-// chat agent's create_note tool, or a typed save) is created with status
-// "pending". This worker polls Postgres
+// chat agent's create_note tool, or a typed save) is queued as status
+// "pending" when the `notes` tool has a model. If the tool is unconfigured,
+// create/queue paths set status=error immediately (same UNCONFIGURED
+// message) — this worker must not be the first place that surfaces that.
+// This worker polls Postgres
 // every ANALYSIS_POLL_MS, picks the oldest pending notes (up to
 // BATCH_PER_TICK, processed sequentially) and runs the 4-block LLM analysis:
 //

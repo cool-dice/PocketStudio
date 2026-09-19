@@ -38,6 +38,10 @@ import { PlanCard } from "./plan-card";
 import { SectionHeading } from "./section-heading";
 import { OfferCabinet } from "./offer-cabinet";
 import { monetizePaymentsHint } from "@/lib/payout-copy";
+import {
+  MONETIZE_PLAN_FAILED,
+  monetizeGenerateErrorHint,
+} from "@/lib/monetize-copy";
 
 export function MonetizeScreen({
   onOpenMobileNav,
@@ -105,10 +109,11 @@ export function MonetizeScreen({
           description: res.document.title,
         });
       } catch (err) {
-        toast.error(
-          err instanceof ApiError ? err.message : "Не удалось собрать план",
-          { description: "Модель иногда занята — попробуйте ещё раз." },
-        );
+        const message =
+          err instanceof ApiError ? err.message : MONETIZE_PLAN_FAILED;
+        toast.error(message, {
+          description: monetizeGenerateErrorHint(message),
+        });
       } finally {
         setGenerating(false);
       }

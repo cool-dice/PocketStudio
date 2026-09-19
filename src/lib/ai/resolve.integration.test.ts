@@ -5,13 +5,30 @@ import { PrismaClient } from "@prisma/client";
 import { encryptSecret, last4OfKey } from "./crypto";
 import { GatewayError } from "./errors";
 import { assertHttpUrl } from "./http";
-import { resolveToolRoute } from "./resolve";
+import { isToolUnconfigured, resolveToolRoute } from "./resolve";
 import { UNCONFIGURED_TOOL_MESSAGE } from "./tools";
 
 const db = new PrismaClient();
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 
 describe.skipIf(SKIP_PG)("resolveToolRoute unconfigured", () => {
+  test("isToolUnconfigured is true when notes has no model", async () => {
+    const email = `resolve-notes-flag-${Date.now().toString(36)}@example.test`;
+    const user = await db.user.create({
+      data: {
+        email,
+        name: "NotesFlag",
+        passwordHash: "x",
+        role: "client",
+      },
+    });
+    try {
+      expect(await isToolUnconfigured(db, user.id, "notes")).toBe(true);
+    } finally {
+      await db.user.delete({ where: { id: user.id } }).catch(() => {});
+    }
+  });
+
   test("throws the Russian admin message when no default exists", async () => {
     const email = `resolve-unconfigured-${Date.now().toString(36)}@example.test`;
     const user = await db.user.create({

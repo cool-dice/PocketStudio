@@ -333,5 +333,7 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | TTS / audio honesty | Ненастроенный `tts` → `UNCONFIGURED_TOOL_MESSAGE`, без WAV и артефакта; голоса UI — OpenAI (alloy/nova/…), не Tongtong; сбой не оставляет «играющий» плеер; успех пишет артефакт + RAG; пустая аудиотека ≠ ошибка загрузки; IDOR 404 |
 | 2026-09-19 | Image generation honesty | Ненастроенный `image` → `UNCONFIGURED_TOOL_MESSAGE`, без PNG и артефакта; сбой не оставляет битый файл / 404 `<img>`; успех пишет `public/gen` + Artifact + RAG; пустая галерея ≠ ошибка загрузки; IDOR 404 |
 | 2026-09-19 | Notes LLM analysis honesty | Ненастроенный `notes` → `UNCONFIGURED_TOOL_MESSAGE`, `status=error`, без фейкового 4-block JSON; сбой не выдумывает positive/negative/final; успех пишет блоки в Note и переживает reload; пустой блокнот ≠ ошибка загрузки; IDOR 404 |
+| 2026-09-19 | Notes analysis fail-fast | POST/PATCH/очередь анализа: ненастроенный `notes` сразу `status=error` (тот же UNCONFIGURED), без ~5 с `pending` до воркера; GET сразу ошибка |
+| 2026-09-19 | Monetize plan honesty | Ненастроенный `monetize` → `UNCONFIGURED_TOOL_MESSAGE`, документ не пишется; сбой LLM не затирает прежний план; успех переживает GET reload; IDOR 404 |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

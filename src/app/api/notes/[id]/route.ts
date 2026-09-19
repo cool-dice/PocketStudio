@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { isToolUnconfigured } from "@/lib/ai/resolve";
+import { noteAnalysisFieldsForQueue } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 import { scheduleIndexNote, scheduleRemove } from "@/lib/rag";
 
@@ -98,7 +100,8 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     recommendations?: null;
     analysisRaw?: null;
     analyzedAt?: null;
-    errorMessage?: null;
+    errorMessage?: string | null;
+    updatedAt?: Date;
   } = {};
   if (parsed.data.favorite !== undefined) data.favorite = parsed.data.favorite;
   if (parsed.data.categoryId !== undefined) data.categoryId = parsed.data.categoryId;
@@ -117,15 +120,13 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     }
   }
   if (parsed.data.rawText !== undefined) {
-    data.rawText = parsed.data.rawText;
-    data.status = "pending";
-    data.positiveBlock = null;
-    data.negativeBlock = null;
-    data.finalBlock = null;
-    data.recommendations = null;
-    data.analysisRaw = null;
-    data.analyzedAt = null;
-    data.errorMessage = null;
+    Object.assign(
+      data,
+      { rawText: parsed.data.rawText },
+      noteAnalysisFieldsForQueue(
+        await isToolUnconfigured(db, session.sub, "notes"),
+      ),
+    );
   }
 
   if (parsed.data.tags) {

@@ -8,7 +8,7 @@ import {
   EMPTY_NOTE_ANALYSIS_MESSAGE,
   failedNoteAnalysisData,
   isUsableNoteText,
-  queuedNoteAnalysisData,
+  noteAnalysisFieldsForQueue,
 } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 
@@ -19,10 +19,10 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * POST /api/notes/[id]/analyze — re-queue a note for the LLM analysis
  * pipeline (tool id `notes`). Unconfigured models fail immediately with
- * UNCONFIGURED_TOOL_MESSAGE and status=error — never a fake 4-block JSON.
- * Otherwise resets status to "pending"; the agent-service analyzer worker
- * picks the note up. Re-analysis of a processed note is a legitimate
- * "переанализировать" action.
+ * UNCONFIGURED_TOOL_MESSAGE and status=error — never a fake 4-block JSON
+ * and never a ~5s pending wait for the analyzer worker. Otherwise resets
+ * status to "pending"; the worker picks the note up. Re-analysis of a
+ * processed note is a legitimate "переанализировать" action.
  */
 export async function POST(req: Request, ctx: RouteContext) {
   const session = await getUserFromRequest(req);
@@ -67,7 +67,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
   const note = await db.note.update({
     where: { id },
-    data: queuedNoteAnalysisData(),
+    data: noteAnalysisFieldsForQueue(false),
     include: { category: true },
   });
 
