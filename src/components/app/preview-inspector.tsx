@@ -26,6 +26,8 @@ export function PreviewInspector({
   const [instruction, setInstruction] = useState("");
   const setComposerDraft = useAppUi((s) => s.setComposerDraft);
   const setMainArea = useAppUi((s) => s.setMainArea);
+  const activeWorkspaceId = useAppUi((s) => s.activeWorkspaceId);
+  const openWorkspace = useAppUi((s) => s.openWorkspace);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -56,7 +58,11 @@ export function PreviewInspector({
       .filter(Boolean)
       .join(" ");
     setComposerDraft(body);
-    setMainArea("chat");
+    if (activeWorkspaceId) {
+      openWorkspace(activeWorkspaceId, "chat");
+    } else {
+      setMainArea("chat");
+    }
   }
 
   function reloadFrame() {

@@ -27,6 +27,24 @@ const STEPS = [
   },
 ];
 
+const ONBOARDING_DONE_KEY = "pocketstudio-onboarding-done";
+
+function readLocalOnboardingDone(): boolean {
+  try {
+    return window.localStorage.getItem(ONBOARDING_DONE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeLocalOnboardingDone() {
+  try {
+    window.localStorage.setItem(ONBOARDING_DONE_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
 export function OnboardingTour() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -35,15 +53,15 @@ export function OnboardingTour() {
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
 
   useEffect(() => {
-    if (!user || user.onboardingDone) return;
+    if (!user || user.onboardingDone || readLocalOnboardingDone()) return;
     let cancelled = false;
     api
       .getOnboarding()
       .then((r) => {
-        if (!cancelled && !r.onboardingDone) setOpen(true);
+        if (!cancelled && !r.onboardingDone && !readLocalOnboardingDone()) setOpen(true);
       })
       .catch(() => {
-        if (!cancelled) setOpen(true);
+        if (!cancelled && !readLocalOnboardingDone()) setOpen(true);
       });
     return () => {
       cancelled = true;
@@ -56,10 +74,11 @@ export function OnboardingTour() {
 
   async function finish(andQuest: boolean) {
     setOpen(false);
+    writeLocalOnboardingDone();
     try {
       await api.setOnboardingDone(true);
     } catch {
-      // ignore — tour is UX only
+      // local flag already set — tour will not loop on reload
     }
     if (andQuest) {
       try {

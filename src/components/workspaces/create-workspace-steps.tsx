@@ -132,6 +132,7 @@ export function StepName({
           type="button"
           onClick={onEditType}
           className="ml-auto shrink-0 text-xs text-primary underline-offset-2 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          aria-label="Изменить тип воркспейса"
         >
           Изменить тип
         </button>

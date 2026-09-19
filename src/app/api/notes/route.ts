@@ -29,6 +29,7 @@ export async function GET(req: Request) {
   const categoryId = url.searchParams.get("categoryId")?.trim() || null;
   const favorite = url.searchParams.get("favorite") === "1";
   const reminders = url.searchParams.get("reminders") === "1";
+  const due = url.searchParams.get("due") === "1";
   const tagId = url.searchParams.get("tagId")?.trim() || null;
   const projectId = url.searchParams.get("projectId")?.trim() || null;
   // Case-insensitive substring search on rawText.
@@ -62,7 +63,8 @@ export async function GET(req: Request) {
   const where: Prisma.NoteWhereInput = { userId: session.sub };
   if (categoryId) where.categoryId = categoryId;
   if (favorite) where.favorite = true;
-  if (reminders) where.remindAt = { not: null };
+  if (due) where.remindAt = { not: null, lte: new Date() };
+  else if (reminders) where.remindAt = { not: null };
   if (tagId) where.tags = { some: { tagId } };
 
   if (projectId) {

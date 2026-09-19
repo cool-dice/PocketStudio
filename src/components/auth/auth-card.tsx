@@ -5,7 +5,7 @@
  * Used inside a Dialog (from the landing hero) and as a standalone view.
  */
 
-import { useState } from "react";
+import { cloneElement, isValidElement, type ReactElement } from "react";
 import { Loader2, LogIn, UserPlus } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
@@ -248,12 +248,20 @@ function FieldRow({
   error?: string;
   children: React.ReactNode;
 }) {
+  const errorId = `${id}-error`;
+  const control =
+    isValidElement(children)
+      ? cloneElement(children as ReactElement<{ "aria-describedby"?: string; "aria-invalid"?: boolean }>, {
+          "aria-describedby": error ? errorId : undefined,
+          "aria-invalid": !!error,
+        })
+      : children;
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      {children}
+      {control}
       {error && (
-        <p className="text-xs text-destructive" role="alert">
+        <p id={errorId} className="text-xs text-destructive" role="alert">
           {error}
         </p>
       )}

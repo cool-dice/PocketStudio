@@ -4,8 +4,9 @@ import { SocketProvider } from "@/hooks/use-socket";
 import { ThreadsProvider } from "@/hooks/use-threads";
 import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/app/app-shell";
-import { UrlSync } from "@/components/app/url-sync";
+import { DueRemindersWatcher } from "@/components/app/due-reminders-watcher";
 import { OnboardingTour } from "@/components/app/onboarding-tour";
+import { UrlSync } from "@/components/app/url-sync";
 
 export function AuthenticatedApp({
   workspaceId,
@@ -19,6 +20,7 @@ export function AuthenticatedApp({
       <ThreadsProvider>
         <UrlSync initialWorkspaceId={workspaceId} />
         <OnboardingTour />
+        <DueRemindersWatcher />
         <AppShell />
       </ThreadsProvider>
     </SocketProvider>

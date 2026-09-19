@@ -41,18 +41,47 @@ export async function POST(req: Request, { params }: Params) {
     });
   }
 
-  const images = await db.artifact.findMany({
-    where: {
-      projectId: id,
-      type: "image",
-      stage: { startsWith: "scene:" },
-    },
-    orderBy: { createdAt: "asc" },
-  });
-  const withFiles = images
-    .filter((a) => a.url)
-    .map((a) => ({ artifact: a, abs: publicToAbs(a.url!) }))
-    .filter((x): x is { artifact: (typeof images)[number]; abs: string } => Boolean(x.abs));
+  const body = (await req.json().catch(() => ({}))) as {
+    clips?: { imageUrl?: string | null; durationSec?: number }[];
+  };
+  const requested = Array.isArray(body.clips) ? body.clips : null;
+
+  type SceneFile = { abs: string; durationSec: number };
+  let withFiles: SceneFile[] = [];
+
+  if (requested && requested.length > 0) {
+    withFiles = requested
+      .map((c) => {
+        const abs = c.imageUrl ? publicToAbs(c.imageUrl) : null;
+        return abs
+          ? { abs, durationSec: Math.max(1, Math.min(30, c.durationSec ?? 4)) }
+          : null;
+      })
+      .filter((x): x is SceneFile => Boolean(x));
+    if (withFiles.length === 0) {
+      return NextResponse.json({
+        status: "unavailable",
+        log: "У клипов таймлайна нет файлов на диске — сборка ffmpeg невозможна.",
+        url: null,
+      });
+    }
+  } else {
+    const images = await db.artifact.findMany({
+      where: {
+        projectId: id,
+        type: "image",
+        stage: { startsWith: "scene:" },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    withFiles = images
+      .filter((a) => a.url)
+      .map((a) => {
+        const abs = publicToAbs(a.url!);
+        return abs ? { abs, durationSec: 4 } : null;
+      })
+      .filter((x): x is SceneFile => Boolean(x));
+  }
 
   if (withFiles.length === 0) {
     return NextResponse.json({
@@ -67,7 +96,7 @@ export async function POST(req: Request, { params }: Params) {
   const result = await compileFilmFfmpeg(
     withFiles.map((s) => ({
       imagePath: s.abs,
-      durationSec: 4,
+      durationSec: s.durationSec,
     })),
     outTmp,
   );

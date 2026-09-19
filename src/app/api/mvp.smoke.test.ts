@@ -362,4 +362,87 @@ describe.skipIf(SKIP_PG)("full app smoke: skills, favorite, duplicate, offers", 
     const hJson = (await h.json()) as { service: string };
     expect(hJson.service).toBe("pocketstudio");
   });
+
+  test("unauthenticated notes and rag search are 401; login sets ps_session", async () => {
+    const { GET: listNotes } = await import("./notes/route");
+    const { POST: ragSearch } = await import("./rag/search/route");
+    const { POST: login } = await import("./auth/login/route");
+
+    const notes401 = await listNotes(
+      jsonRequest("http://localhost/api/notes", "GET"),
+    );
+    expect(notes401.status).toBe(401);
+
+    const rag401 = await ragSearch(
+      jsonRequest("http://localhost/api/rag/search", "POST", { query: "глаза" }),
+    );
+    expect(rag401.status).toBe(401);
+
+    expect(userId).toBeTruthy();
+    await db.user.update({
+      where: { id: userId! },
+      data: { passwordHash: await hashPassword("password-ok") },
+    });
+    const loginRes = await login(
+      jsonRequest("http://localhost/api/auth/login", "POST", {
+        email,
+        password: "password-ok",
+      }),
+    );
+    expect(loginRes.status).toBe(200);
+    const cookieHeader =
+      typeof loginRes.headers.getSetCookie === "function"
+        ? loginRes.headers.getSetCookie().join("\n")
+        : (loginRes.headers.get("set-cookie") ?? "");
+    expect(cookieHeader).toMatch(/ps_session=/);
+  });
+
+  test("due reminder fire is idempotent and lists due notes", async () => {
+    expect(token).toBeTruthy();
+    const { POST: fire } = await import("./notes/reminders/fire/route");
+    const { PATCH: patchNote } = await import("./notes/[id]/route");
+    const { GET: listNotes } = await import("./notes/route");
+
+    const noteRes = await createNote(
+      jsonRequest(
+        "http://localhost/api/notes",
+        "POST",
+        { text: "напомни про маяк" },
+        token!,
+      ),
+    );
+    expect(noteRes.status).toBe(201);
+    const { note } = (await noteRes.json()) as { note: { id: string } };
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const tagged = await patchNote(
+      jsonRequest(
+        `http://localhost/api/notes/${note.id}`,
+        "PATCH",
+        { remindAt: past },
+        token!,
+      ),
+      { params: Promise.resolve({ id: note.id }) },
+    );
+    expect(tagged.status).toBe(200);
+
+    const dueList = await listNotes(
+      jsonRequest("http://localhost/api/notes?due=1", "GET", undefined, token!),
+    );
+    expect(dueList.status).toBe(200);
+    const dueJson = (await dueList.json()) as { notes: { id: string }[] };
+    expect(dueJson.notes.some((n) => n.id === note.id)).toBe(true);
+
+    const first = await fire(
+      jsonRequest("http://localhost/api/notes/reminders/fire", "POST", {}, token!),
+    );
+    expect(first.status).toBe(200);
+    const firstJson = (await first.json()) as { fired: number };
+    expect(firstJson.fired).toBeGreaterThanOrEqual(1);
+
+    const second = await fire(
+      jsonRequest("http://localhost/api/notes/reminders/fire", "POST", {}, token!),
+    );
+    const secondJson = (await second.json()) as { fired: number };
+    expect(secondJson.fired).toBe(0);
+  });
 });

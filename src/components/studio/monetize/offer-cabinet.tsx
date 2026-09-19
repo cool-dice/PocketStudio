@@ -67,10 +67,14 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  async function checkout(id: string) {
+  async function checkout(id: string, paymentMode: string) {
     try {
       await api.checkoutOffer(id);
-      toast.success("Симулированная оплата прошла, выплата в кабинете");
+      toast.success(
+        paymentMode === "live"
+          ? "Сервер принял live-запрос. Карту мы всё равно не проводим."
+          : "Симулированная оплата прошла, выплата в кабинете",
+      );
       await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Оплата не прошла");
@@ -118,24 +122,37 @@ export function OfferCabinet({ workspaceId }: { workspaceId: string }) {
         </Button>
       </div>
       <ul className="space-y-2">
-        {offers.map((o) => (
-          <li
-            key={o.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
-          >
-            <span>
-              {o.title} · {(o.priceCents / 100).toFixed(0)} {o.currency} ·{" "}
-              <span className="text-muted-foreground">{o.status}</span>
-            </span>
-            {o.status !== "paid" ? (
-              <Button size="sm" variant="outline" onClick={() => void checkout(o.id)}>
-                Симулировать оплату
-              </Button>
-            ) : (
-              <span className="text-xs text-emerald-600">оплачено</span>
-            )}
+        {offers.length === 0 ? (
+          <li className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+            Офферов пока нет — создайте черновик. «Оплачено» появляется только после
+            симуляции или пометки админа, не с клиента в live.
           </li>
-        ))}
+        ) : (
+          offers.map((o) => (
+            <li
+              key={o.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
+            >
+              <span>
+                {o.title} · {(o.priceCents / 100).toFixed(0)} {o.currency} ·{" "}
+                <span className="text-muted-foreground">{o.status}</span>
+              </span>
+              {o.status !== "paid" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void checkout(o.id, o.paymentMode)}
+                >
+                  {o.paymentMode === "live" ? "Оплатить (live)" : "Симулировать оплату"}
+                </Button>
+              ) : (
+                <span className="text-xs text-emerald-600">
+                  {o.paymentMode === "live" ? "оплачено (live-заглушка)" : "оплачено (симуляция)"}
+                </span>
+              )}
+            </li>
+          ))
+        )}
       </ul>
       {payouts ? (
         <p className="text-xs text-muted-foreground">

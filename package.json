@@ -13,7 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "db:pgvector": "bun scripts/ensure-pgvector.ts",
-    "test": "bun test --preload ./scripts/test-postgres-env.ts src/lib/ai src/lib/rag src/lib/apply-patch.test.ts src/lib/retrieve.test.ts src/lib/preview-inspect.test.ts src/app/api/mvp.smoke.test.ts src/app/api/rag mini-services/agent-service/prompts.test.ts mini-services/agent-service/agent.test.ts"
+    "test": "bun test --preload ./scripts/test-postgres-env.ts src/lib/ai src/lib/rag src/lib/apply-patch.test.ts src/lib/retrieve.test.ts src/lib/preview-inspect.test.ts src/lib/auth-cookie.test.ts src/lib/mcp-runtime.test.ts src/app/api/mvp.smoke.test.ts src/app/api/rag mini-services/agent-service/prompts.test.ts mini-services/agent-service/agent.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -362,6 +362,7 @@ export function Composer() {
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
+            aria-describedby="composer-hint"
             placeholder={
               isRecording
                 ? "Слушаем вас…"
@@ -450,7 +451,7 @@ export function Composer() {
             <ArrowUp className="size-4" aria-hidden="true" />
           </Button>
         </div>
-        <p className="mt-2 px-1 text-center text-xs text-muted-foreground">
+        <p id="composer-hint" className="mt-2 px-1 text-center text-xs text-muted-foreground">
           {isRecording
             ? "Идёт запись голоса"
             : voiceState === "processing"

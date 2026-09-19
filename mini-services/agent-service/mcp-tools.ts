@@ -294,10 +294,14 @@ const browserRead: ToolDef = {
         text: text.slice(0, MAX_BROWSER_TEXT),
       };
     } catch (err) {
+      const missing =
+        err instanceof Error &&
+        (err.message.includes("ENOENT") || /not found|не найден/i.test(err.message));
       return {
-        error:
-          "Не удалось открыть страницу в браузере: " +
-          (err instanceof Error ? err.message : String(err)),
+        error: missing
+          ? "agent-browser не найден в PATH. Builtin fetch_url работает без CLI — включите Fetch в Интеграциях или установите agent-browser."
+          : "Не удалось открыть страницу в браузере: " +
+            (err instanceof Error ? err.message : String(err)),
       };
     }
   },

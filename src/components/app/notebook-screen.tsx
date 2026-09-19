@@ -36,6 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NotebookStats } from "@/components/app/notebook-stats";
+import { useNotes } from "@/hooks/use-notes";
 import { formatNoteDate } from "@/lib/format";
 import { useAppUi } from "@/lib/store";
 import {

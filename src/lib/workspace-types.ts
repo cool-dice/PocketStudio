@@ -199,4 +199,6 @@ export interface McpServerDto {
   own: boolean;
   config: Record<string, unknown>;
   createdAt: string;
+  /** Honest runtime: ready | off | config_saved | cli_missing */
+  runtimeStatus?: "ready" | "off" | "config_saved" | "cli_missing";
 }

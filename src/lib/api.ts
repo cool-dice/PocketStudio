@@ -3,7 +3,7 @@
  * Auth uses a hybrid scheme:
  *   1. `Authorization: Bearer <jwt>` from localStorage (primary — works inside
  *      sandbox preview iframes where third-party cookies are blocked);
- *   2. `vf_session` cookie (fallback for same-origin contexts, e.g. zip export).
+ *   2. `ps_session` cookie (legacy `vf_session` still accepted server-side).
  */
 
 import type {
@@ -53,11 +53,13 @@ import type {
   WorkspaceKind,
 } from "@/lib/workspace-types";
 
-const TOKEN_STORAGE_KEY = "vf_token";
+const TOKEN_STORAGE_KEY = "ps_token";
+const LEGACY_TOKEN_STORAGE_KEY = "vf_token";
 
 export function setAuthToken(token: string): void {
   try {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    window.localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
   } catch {
     // localStorage unavailable (private mode) — cookie fallback still applies.
   }
@@ -66,6 +68,7 @@ export function setAuthToken(token: string): void {
 export function clearAuthToken(): void {
   try {
     window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
   } catch {
     // ignore
   }
@@ -73,7 +76,16 @@ export function clearAuthToken(): void {
 
 function getAuthToken(): string | null {
   try {
-    return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    const current = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (current) return current;
+    const legacy = window.localStorage.getItem(LEGACY_TOKEN_STORAGE_KEY);
+    if (legacy) {
+      // Migrate once so DevTools and future requests show PocketStudio keys.
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, legacy);
+      window.localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+      return legacy;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -288,6 +300,7 @@ export const api = {
     categoryId?: string;
     favorite?: boolean;
     reminders?: boolean;
+    due?: boolean;
     tagId?: string;
     q?: string;
     page?: number;
@@ -298,6 +311,7 @@ export const api = {
     if (params?.categoryId) qs.set("categoryId", params.categoryId);
     if (params?.favorite) qs.set("favorite", "1");
     if (params?.reminders) qs.set("reminders", "1");
+    if (params?.due) qs.set("due", "1");
     if (params?.tagId) qs.set("tagId", params.tagId);
     if (params?.q) qs.set("q", params.q);
     if (params?.page) qs.set("page", String(params.page));
@@ -383,6 +397,10 @@ export const api = {
     total14d: number;
   }> {
     return request("/api/notes/stats");
+  },
+
+  fireDueReminders(): Promise<{ fired: number; notes: { id: string; preview: string }[] }> {
+    return request("/api/notes/reminders/fire", { method: "POST" });
   },
 
   /* ── Projects & workspace files (Stage 3) ── */
@@ -1423,14 +1441,20 @@ export const api = {
     );
   },
 
-  compileFilmFfmpeg(workspaceId: string): Promise<{
+  compileFilmFfmpeg(
+    workspaceId: string,
+    body?: { clips?: { imageUrl?: string | null; durationSec?: number }[] },
+  ): Promise<{
     status: string;
     log: string;
     url: string | null;
   }> {
     return request(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/compile-film`,
-      { method: "POST" },
+      {
+        method: "POST",
+        body: JSON.stringify(body ?? {}),
+      },
     );
   },
 

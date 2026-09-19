@@ -9,6 +9,7 @@ import {
   validateMcpConfig,
 } from "@/lib/mcp-catalog";
 import { mcpDto } from "@/lib/mcp-shapes";
+import { mcpRuntimeStatus, probeMcpRuntime } from "@/lib/mcp-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +63,19 @@ export async function GET(req: Request) {
     return a.createdAt.getTime() - b.createdAt.getTime();
   });
 
-  return NextResponse.json({ servers: sorted.map(mcpDto) });
+  const runtime = await probeMcpRuntime();
+  return NextResponse.json({
+    runtime,
+    servers: sorted.map((row) => ({
+      ...mcpDto(row),
+      runtimeStatus: mcpRuntimeStatus({
+        enabled: row.enabled,
+        external: row.external,
+        adapter: row.adapter,
+        agentBrowser: runtime.agentBrowser,
+      }),
+    })),
+  });
 }
 
 /* ── POST /api/mcp — добавить свой сервер ── */

@@ -142,15 +142,23 @@ export function NleTimeline({
       return;
     }
     const a1 = tl.tracks.find((t) => t.id === "a1")?.clips ?? [];
-    const scenes = clips.map((c, i) => ({
-      imageUrl: c.url,
-      audioUrl: a1[i]?.url ?? null,
-      title: c.title,
-      text: c.title,
-    }));
+    const scenes = clips
+      .map((c, i) => ({
+        imageUrl: c.url,
+        audioUrl: a1[i]?.url ?? null,
+        title: c.title,
+        text: c.title,
+      }))
+      .filter((s) => Boolean(s.imageUrl));
+    if (scenes.length === 0) {
+      toast.error("У клипов на V1 нет файлов — сборка невозможна");
+      return;
+    }
     setCompiling(true);
     try {
-      const ff = await api.compileFilmFfmpeg(workspaceId);
+      const ff = await api.compileFilmFfmpeg(workspaceId, {
+        clips: scenes.map((s) => ({ imageUrl: s.imageUrl, durationSec: 4 })),
+      });
       if (ff.status === "built" && ff.url) {
         toast.success("ffmpeg собрал WebM");
         const a = document.createElement("a");
