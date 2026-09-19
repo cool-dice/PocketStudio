@@ -3,7 +3,7 @@
 // Own instance (NOT the shared src/lib/db.ts one) because the main app's
 // client enables `log: ['query']` for dev visibility — in this long-running
 // service that would spam /tmp/agent-service.log with every analyzer poll.
-// Same SQLite file (DATABASE_URL from index.ts bootstrap).
+// Same DATABASE_URL as the Next app (PostgreSQL + pgvector).
 
 import { PrismaClient } from "@prisma/client";
 

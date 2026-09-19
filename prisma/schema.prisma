@@ -1,4 +1,4 @@
-// PocketStudio — unified platform schema (SQLite)
+// PocketStudio — unified platform schema (PostgreSQL + pgvector)
 // Dual storage: project sources live on disk + git; platform data lives here.
 
 generator client {
@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -41,6 +41,7 @@ model User {
   offers        Offer[]
   payouts       Payout[]
   invitesCreated Invite[] @relation("InviteCreator")
+  ragChunks      RagChunk[]
 }
 
 // ─────────────────────────── Notebook ───────────────────────────
@@ -164,6 +165,7 @@ model Project {
   designDocs DesignDoc[]
   videoProject VideoProject?
   offers    Offer[]
+  ragChunks RagChunk[]
 
   @@index([userId])
 }
@@ -727,4 +729,33 @@ model Invite {
   createdAt DateTime @default(now())
 
   @@index([email])
+}
+
+// ─────────────────────────── RAG (pgvector) ───────────────────────────
+
+/// Indexed chunk of a user's canon. `projectId` null = user-global
+/// (inbox notes, skills) — visible in main chat, never in another workspace.
+model RagChunk {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Null = user-global (not tied to a workspace).
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// note | section | entity | artifact | file | thread | skill | finding
+  sourceType  String
+  sourceId    String
+  path        String?
+  ordinal     Int      @default(0)
+  content     String
+  tokenCount  Int      @default(0)
+  /// pgvector column. Written/queried via raw SQL (Prisma 6 Unsupported).
+  embedding   Unsupported("vector")?
+  contentHash String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, sourceType, sourceId, ordinal])
+  @@index([userId, projectId, sourceType])
+  @@index([userId, sourceType, sourceId])
 }
