@@ -7,26 +7,31 @@ import { db } from "@/lib/db";
 import {
   CATEGORY_COLOR_INVALID,
   TAG_NAME_TAKEN,
+  TAG_NOT_FOUND,
   validateTagName,
 } from "@/lib/notebook-taxonomy";
 import { COLORS } from "@/lib/note-utils";
 
 export const dynamic = "force-dynamic";
 
-const createTagColorSchema = z.object({
+const patchTagColorSchema = z.object({
   color: z.enum(COLORS, CATEGORY_COLOR_INVALID).optional(),
 });
+
+type RouteContext = { params: Promise<{ id: string }> };
 
 function tagDto(tag: {
   id: string;
   name: string;
   color: string;
+  createdAt: Date;
   _count: { notes: number };
 }) {
   return {
     id: tag.id,
     name: tag.name,
     color: tag.color,
+    createdAt: tag.createdAt,
     noteCount: tag._count.notes,
   };
 }
@@ -39,26 +44,13 @@ function ownNotesCount(userId: string) {
   } as const;
 }
 
-export async function GET(req: Request) {
+export async function PATCH(req: Request, ctx: RouteContext) {
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
-  const tags = await db.tag.findMany({
-    where: { userId: session.sub },
-    include: ownNotesCount(session.sub),
-    orderBy: { name: "asc" },
-  });
-  return NextResponse.json({
-    tags: tags.map(tagDto),
-  });
-}
 
-export async function POST(req: Request) {
-  const session = await getUserFromRequest(req);
-  if (!session) {
-    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
-  }
+  const { id } = await ctx.params;
 
   let body: unknown;
   try {
@@ -74,15 +66,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
   }
 
-  const nameParsed = validateTagName(record.name);
-  if (!nameParsed.ok) {
-    return NextResponse.json(
-      { error: nameParsed.error, fields: { name: nameParsed.error } },
-      { status: 400 },
-    );
+  const existing = await db.tag.findFirst({
+    where: { id, userId: session.sub },
+    select: { id: true },
+  });
+  if (!existing) {
+    return NextResponse.json({ error: TAG_NOT_FOUND }, { status: 404 });
   }
 
-  const colorParsed = createTagColorSchema.safeParse(record);
+  const data: { name?: string; color?: string } = {};
+  if (Object.prototype.hasOwnProperty.call(record, "name")) {
+    const nameParsed = validateTagName(record.name);
+    if (!nameParsed.ok) {
+      return NextResponse.json(
+        { error: nameParsed.error, fields: { name: nameParsed.error } },
+        { status: 400 },
+      );
+    }
+    data.name = nameParsed.name;
+  }
+
+  const colorParsed = patchTagColorSchema.safeParse(record);
   if (!colorParsed.success) {
     const fields: Record<string, string> = {};
     for (const issue of colorParsed.error.issues) {
@@ -91,21 +95,40 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ error: "Ошибка валидации", fields }, { status: 400 });
   }
+  if (colorParsed.data.color !== undefined) data.color = colorParsed.data.color;
 
   try {
-    const tag = await db.tag.create({
-      data: {
-        userId: session.sub,
-        name: nameParsed.name,
-        color: colorParsed.data.color ?? "stone",
-      },
+    const tag = await db.tag.update({
+      where: { id },
+      data,
       include: ownNotesCount(session.sub),
     });
-    return NextResponse.json({ tag: tagDto(tag) }, { status: 201 });
+    return NextResponse.json({ tag: tagDto(tag) });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return NextResponse.json({ error: TAG_NAME_TAKEN }, { status: 409 });
     }
     throw e;
   }
+}
+
+export async function DELETE(req: Request, ctx: RouteContext) {
+  const session = await getUserFromRequest(req);
+  if (!session) {
+    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
+  }
+
+  const { id } = await ctx.params;
+
+  const existing = await db.tag.findFirst({
+    where: { id, userId: session.sub },
+    select: { id: true },
+  });
+  if (!existing) {
+    return NextResponse.json({ error: TAG_NOT_FOUND }, { status: 404 });
+  }
+
+  await db.tag.deleteMany({ where: { id, userId: session.sub } });
+
+  return NextResponse.json({ ok: true });
 }

@@ -21,7 +21,7 @@ import { useSocket, type NoteEvent } from "@/hooks/use-socket";
 import { api } from "@/lib/api";
 import { NOTEBOOK_LOAD_ERROR } from "@/lib/note-analysis";
 import { useAppUi } from "@/lib/store";
-import type { Category, Note } from "@/lib/types";
+import type { Category, Note, Tag } from "@/lib/types";
 
 const PAGE_SIZE = 20;
 
@@ -29,6 +29,7 @@ export interface NotesFilters {
   categoryId: string | null;
   favorite: boolean;
   reminders: boolean;
+  tagId: string | null;
 }
 
 export function useNotes() {
@@ -39,6 +40,7 @@ export function useNotes() {
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -46,6 +48,7 @@ export function useNotes() {
     categoryId: null,
     favorite: false,
     reminders: false,
+    tagId: null,
   });
   const [tick, setTick] = useState(0);
 
@@ -76,15 +79,17 @@ export function useNotes() {
         setLoadError(null);
       }
       try {
-        const [list, cats] = await Promise.all([
+        const [list, cats, tagList] = await Promise.all([
           api.listNotes({
             categoryId: f.categoryId ?? undefined,
             favorite: f.favorite || undefined,
             reminders: f.reminders || undefined,
+            tagId: f.tagId ?? undefined,
             page: 1,
             limit: PAGE_SIZE,
           }),
           api.listCategories(),
+          api.listTags(),
         ]);
         if (seq !== seqRef.current) return;
         pageRef.current = 1;
@@ -92,6 +97,7 @@ export function useNotes() {
         setTotal(list.total);
         setHasMore(list.hasMore);
         setCategories(cats);
+        setTags(tagList);
         setLoadError(null);
       } catch {
         if (seq === seqRef.current) {
@@ -129,7 +135,12 @@ export function useNotes() {
   const setFilter = useCallback((patch: Partial<NotesFilters>) => {
     setFilters((prev) => {
       const next = { ...prev, ...patch };
-      if (next.categoryId === prev.categoryId && next.favorite === prev.favorite) {
+      if (
+        next.categoryId === prev.categoryId &&
+        next.favorite === prev.favorite &&
+        next.reminders === prev.reminders &&
+        next.tagId === prev.tagId
+      ) {
         return prev;
       }
       return next;
@@ -188,6 +199,7 @@ export function useNotes() {
         categoryId: f.categoryId ?? undefined,
         favorite: f.favorite || undefined,
         reminders: f.reminders || undefined,
+        tagId: f.tagId ?? undefined,
         page,
         limit: PAGE_SIZE,
       });
@@ -254,6 +266,7 @@ export function useNotes() {
     total,
     hasMore,
     categories,
+    tags,
     loading,
     loadError,
     loadingMore,

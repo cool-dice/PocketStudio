@@ -14,6 +14,7 @@ import type {
   AiToolDefaultDto,
   AuditLogEntry,
   Category,
+  Tag,
   CheckpointResult,
   CommitDiff,
   CommitInfo,
@@ -454,10 +455,59 @@ export const api = {
     );
   },
 
-  listTags(): Promise<{ id: string; name: string; color: string; noteCount: number }[]> {
-    return request<{ tags: { id: string; name: string; color: string; noteCount: number }[] }>(
-      "/api/tags",
-    ).then((r) => r.tags);
+  createCategory(data: {
+    name: string;
+    color?: string;
+    icon?: string;
+  }): Promise<Category> {
+    return request<{ category: Category }>("/api/categories", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => r.category);
+  },
+
+  updateCategory(
+    id: string,
+    patch: { name?: string; color?: string; icon?: string },
+  ): Promise<Category> {
+    return request<{ category: Category }>(
+      `/api/categories/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ).then((r) => r.category);
+  },
+
+  async deleteCategory(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/categories/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  listTags(): Promise<Tag[]> {
+    return request<{ tags: Tag[] }>("/api/tags").then((r) => r.tags);
+  },
+
+  createTag(data: { name: string; color?: string }): Promise<Tag> {
+    return request<{ tag: Tag }>("/api/tags", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => r.tag);
+  },
+
+  updateTag(
+    id: string,
+    patch: { name?: string; color?: string },
+  ): Promise<Tag> {
+    return request<{ tag: Tag }>(`/api/tags/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }).then((r) => r.tag);
+  },
+
+  async deleteTag(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/tags/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
   },
 
   notesStats(): Promise<{

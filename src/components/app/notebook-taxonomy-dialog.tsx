@@ -1,0 +1,359 @@
+"use client";
+
+/**
+ * Manage own note categories and tags. Mutations toast only after the API;
+ * empty lists are not load errors; a failed load is not «пока нет».
+ */
+
+import { useCallback, useEffect, useState } from "react";
+import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { api, ApiError } from "@/lib/api";
+import {
+  CATEGORY_DELETE_CONFIRM,
+  CATEGORY_DELETE_CONFIRM_HINT,
+  TAG_DELETE_CONFIRM,
+  TAG_DELETE_CONFIRM_HINT,
+  TAXONOMY_CANCEL,
+  TAXONOMY_CREATE,
+  TAXONOMY_DELETE,
+  TAXONOMY_DIALOG_HINT,
+  TAXONOMY_DIALOG_TITLE,
+  TAXONOMY_RENAME,
+  TAXONOMY_RETRY,
+  taxonomyAfterCreate,
+  taxonomyAfterDelete,
+  taxonomyEmptyCopy,
+  taxonomyListView,
+  taxonomyLoadErrorCopy,
+  taxonomyRenamed,
+  taxonomyToast,
+  validateCategoryName,
+  validateTagName,
+  type TaxonomyKind,
+} from "@/lib/notebook-taxonomy";
+
+type Row = { id: string; name: string; noteCount: number };
+
+export function NotebookTaxonomyDialog({
+  open,
+  onOpenChange,
+  onChanged,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onChanged?: (kind: TaxonomyKind, deletedId?: string) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{TAXONOMY_DIALOG_TITLE}</DialogTitle>
+          <DialogDescription>{TAXONOMY_DIALOG_HINT}</DialogDescription>
+        </DialogHeader>
+        {open ? (
+          <div className="space-y-6">
+            <TaxonomySection kind="category" onChanged={onChanged} />
+            <TaxonomySection kind="tag" onChanged={onChanged} />
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TaxonomySection({
+  kind,
+  onChanged,
+}: {
+  kind: TaxonomyKind;
+  onChanged?: (kind: TaxonomyKind, deletedId?: string) => void;
+}) {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const list =
+        kind === "category" ? await api.listCategories() : await api.listTags();
+      setRows(list);
+    } catch {
+      setRows([]);
+      setLoadError(taxonomyLoadErrorCopy(kind).title);
+    } finally {
+      setLoading(false);
+    }
+  }, [kind]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const view = taxonomyListView(loading, loadError, rows.length);
+  const empty = taxonomyEmptyCopy(kind);
+  const errorCopy = taxonomyLoadErrorCopy(kind);
+  const heading = kind === "category" ? "Категории" : "Теги";
+  const placeholder = kind === "category" ? "Название категории" : "Название тега";
+
+  async function createRow() {
+    const parsed =
+      kind === "category" ? validateCategoryName(draft) : validateTagName(draft);
+    if (!parsed.ok) {
+      setFieldError(parsed.error);
+      return;
+    }
+    setBusy(true);
+    setFieldError(null);
+    try {
+      const created =
+        kind === "category"
+          ? await api.createCategory({ name: parsed.name })
+          : await api.createTag({ name: parsed.name });
+      setRows((prev) => taxonomyAfterCreate(prev, created, true));
+      setDraft("");
+      toast.success(taxonomyToast(true, kind, "create").message);
+      onChanged?.(kind);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.message : taxonomyToast(false, kind, "create").message;
+      setFieldError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function renameRow(id: string) {
+    const previous = rows.find((r) => r.id === id)?.name ?? editDraft;
+    const parsed =
+      kind === "category"
+        ? validateCategoryName(editDraft)
+        : validateTagName(editDraft);
+    if (!parsed.ok) {
+      setFieldError(parsed.error);
+      return;
+    }
+    setBusy(true);
+    setFieldError(null);
+    try {
+      const updated =
+        kind === "category"
+          ? await api.updateCategory(id, { name: parsed.name })
+          : await api.updateTag(id, { name: parsed.name });
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? { ...r, name: taxonomyRenamed(true, previous, updated.name) }
+            : r,
+        ),
+      );
+      setEditingId(null);
+      toast.success(taxonomyToast(true, kind, "rename").message);
+      onChanged?.(kind);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.message : taxonomyToast(false, kind, "rename").message;
+      setFieldError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setBusy(true);
+    try {
+      if (kind === "category") await api.deleteCategory(id);
+      else await api.deleteTag(id);
+      setRows((prev) => taxonomyAfterDelete(prev, id, true));
+      toast.success(taxonomyToast(true, kind, "delete").message);
+      onChanged?.(kind, id);
+    } catch {
+      toast.error(taxonomyToast(false, kind, "delete").message);
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
+  }
+
+  return (
+    <section className="space-y-3" aria-label={heading}>
+      <h3 className="text-sm font-medium">{heading}</h3>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void createRow();
+        }}
+      >
+        <Input
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (fieldError) setFieldError(null);
+          }}
+          placeholder={placeholder}
+          disabled={busy}
+          aria-invalid={Boolean(fieldError)}
+          aria-label={placeholder}
+        />
+        <Button type="submit" size="sm" className="shrink-0" disabled={busy}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+          {TAXONOMY_CREATE}
+        </Button>
+      </form>
+      {fieldError ? (
+        <p className="text-xs text-destructive">{fieldError}</p>
+      ) : null}
+
+      {view === "loading" ? (
+        <p className="text-sm text-muted-foreground">Загрузка…</p>
+      ) : view === "error" ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+          <p className="font-medium">{errorCopy.title}</p>
+          <p className="mt-1 text-muted-foreground">{errorCopy.hint}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => void load()}
+          >
+            {TAXONOMY_RETRY}
+          </Button>
+        </div>
+      ) : view === "empty" ? (
+        <p className="text-sm text-muted-foreground">
+          {empty.title}. {empty.hint}
+        </p>
+      ) : (
+        <ul className="divide-y rounded-lg border">
+          {rows.map((row) => (
+            <li key={row.id} className="flex items-center gap-2 px-3 py-2">
+              {editingId === row.id ? (
+                <Input
+                  value={editDraft}
+                  onChange={(e) => setEditDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void renameRow(row.id);
+                    }
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  disabled={busy}
+                  className="h-8"
+                  aria-label={TAXONOMY_RENAME}
+                />
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {row.name}
+                  <span className="ml-2 text-muted-foreground">{row.noteCount}</span>
+                </span>
+              )}
+              {editingId === row.id ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void renameRow(row.id)}
+                >
+                  {TAXONOMY_RENAME}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-8"
+                  disabled={busy}
+                  aria-label={`${TAXONOMY_RENAME} «${row.name}»`}
+                  onClick={() => {
+                    setEditingId(row.id);
+                    setEditDraft(row.name);
+                    setFieldError(null);
+                  }}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-8"
+                disabled={busy}
+                aria-label={`${TAXONOMY_DELETE} «${row.name}»`}
+                onClick={() => setDeleteTarget(row)}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {kind === "category" ? CATEGORY_DELETE_CONFIRM : TAG_DELETE_CONFIRM}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {kind === "category"
+                ? CATEGORY_DELETE_CONFIRM_HINT
+                : TAG_DELETE_CONFIRM_HINT}{" "}
+              «{deleteTarget?.name}».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{TAXONOMY_CANCEL}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => void confirmDelete()}
+            >
+              {TAXONOMY_DELETE}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </section>
+  );
+}

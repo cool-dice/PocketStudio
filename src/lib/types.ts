@@ -101,6 +101,13 @@ export interface Category extends NoteCategoryRef {
   noteCount: number;
 }
 
+export interface Tag {
+  id: string;
+  name: string;
+  color: string;
+  noteCount: number;
+}
+
 /* ── WS payloads (mini-services/agent-service contract) ── */
 
 export interface WsToolStartPayload {

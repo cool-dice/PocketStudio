@@ -12,6 +12,7 @@ import { useState } from "react";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import {
   AlertTriangle,
+  FolderKanban,
   Loader2,
   ListChecks,
   Menu,
@@ -37,6 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NotebookStats } from "@/components/app/notebook-stats";
+import { NotebookTaxonomyDialog } from "@/components/app/notebook-taxonomy-dialog";
 import { useNotes } from "@/hooks/use-notes";
 import { formatNoteDate } from "@/lib/format";
 import { useAppUi } from "@/lib/store";
@@ -53,7 +55,8 @@ import {
   NOTEBOOK_LOAD_ERROR_HINT,
 } from "@/lib/note-analysis";
 import { notebookFeedView } from "@/lib/notes-list-state";
-import type { Category, Note, NoteStatus } from "@/lib/types";
+import { TAXONOMY_OPEN } from "@/lib/notebook-taxonomy";
+import type { Category, Note, NoteStatus, Tag } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface NotebookScreenProps {
@@ -66,12 +69,14 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
     total,
     hasMore,
     categories,
+    tags,
     loading,
     loadError,
     loadingMore,
     filters,
     setFilter,
     loadMore,
+    refresh,
     retryLoad,
     toggleFavorite,
     deleteNote,
@@ -81,9 +86,13 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
   const openNote = useAppUi((s) => s.openNote);
 
   const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
+  const [taxonomyOpen, setTaxonomyOpen] = useState(false);
 
   const isAll =
-    filters.categoryId === null && filters.favorite === false && !filters.reminders;
+    filters.categoryId === null &&
+    filters.favorite === false &&
+    !filters.reminders &&
+    filters.tagId === null;
   const isFavorite = filters.favorite;
 
   const confirmDelete = () => {
@@ -132,11 +141,26 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
           <PenLine className="size-4" aria-hidden="true" />
           <span className="hidden sm:inline">Записать мысль</span>
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-9 gap-2 rounded-xl px-3"
+          onClick={() => setTaxonomyOpen(true)}
+          aria-label={TAXONOMY_OPEN}
+        >
+          <FolderKanban className="size-4" aria-hidden="true" />
+          <span className="hidden sm:inline">{TAXONOMY_OPEN}</span>
+        </Button>
       </header>
 
       <NotebookStats
         onDueClick={() =>
-          setFilter({ categoryId: null, favorite: false, reminders: true })
+          setFilter({
+            categoryId: null,
+            favorite: false,
+            reminders: true,
+            tagId: null,
+          })
         }
       />
 
@@ -146,7 +170,12 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
           <FilterChip
             active={isAll}
             onClick={() =>
-              setFilter({ categoryId: null, favorite: false, reminders: false })
+              setFilter({
+                categoryId: null,
+                favorite: false,
+                reminders: false,
+                tagId: null,
+              })
             }
           >
             Все
@@ -154,7 +183,12 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
           <FilterChip
             active={isFavorite}
             onClick={() =>
-              setFilter({ categoryId: null, favorite: true, reminders: false })
+              setFilter({
+                categoryId: null,
+                favorite: true,
+                reminders: false,
+                tagId: null,
+              })
             }
           >
             <span aria-hidden="true">⭐</span> Избранные
@@ -162,7 +196,12 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
           <FilterChip
             active={filters.reminders}
             onClick={() =>
-              setFilter({ categoryId: null, favorite: false, reminders: true })
+              setFilter({
+                categoryId: null,
+                favorite: false,
+                reminders: true,
+                tagId: null,
+              })
             }
           >
             Напоминания
@@ -177,6 +216,22 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
                   categoryId: category.id,
                   favorite: false,
                   reminders: false,
+                  tagId: null,
+                })
+              }
+            />
+          ))}
+          {tags.map((tag) => (
+            <TagFilterChip
+              key={tag.id}
+              tag={tag}
+              active={filters.tagId === tag.id}
+              onClick={() =>
+                setFilter({
+                  categoryId: null,
+                  favorite: false,
+                  reminders: false,
+                  tagId: tag.id,
                 })
               }
             />
@@ -260,6 +315,20 @@ export function NotebookScreen({ onOpenMobileNav }: NotebookScreenProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <NotebookTaxonomyDialog
+        open={taxonomyOpen}
+        onOpenChange={setTaxonomyOpen}
+        onChanged={(kind, deletedId) => {
+          if (kind === "category" && deletedId && filters.categoryId === deletedId) {
+            setFilter({ categoryId: null });
+          }
+          if (kind === "tag" && deletedId && filters.tagId === deletedId) {
+            setFilter({ tagId: null });
+          }
+          refresh();
+        }}
+      />
     </section>
   );
 }
@@ -289,6 +358,27 @@ function CategoryFilterChip({
       <CategoryGlyph icon={category.icon} className="size-3.5 shrink-0" />
       <span className="whitespace-nowrap">{category.name}</span>
       <span className="text-muted-foreground/70">{category.noteCount}</span>
+    </FilterChip>
+  );
+}
+
+function TagFilterChip({
+  tag,
+  active,
+  onClick,
+}: {
+  tag: Tag;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <FilterChip
+      active={active}
+      onClick={onClick}
+      aria-label={`Тег «${tag.name}»`}
+    >
+      <span className="whitespace-nowrap">#{tag.name}</span>
+      <span className="text-muted-foreground/70">{tag.noteCount}</span>
     </FilterChip>
   );
 }
