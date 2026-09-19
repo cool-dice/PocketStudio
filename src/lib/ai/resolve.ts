@@ -192,6 +192,10 @@ const MODEL_INCLUDE = {
 } as const;
 
 /** True only for the shared UNCONFIGURED_TOOL_MESSAGE (no model assigned). */
+export function isUnconfiguredToolError(err: unknown): boolean {
+  return err instanceof GatewayError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+}
+
 export async function isToolUnconfigured(
   db: PrismaClient,
   userId: string,
@@ -201,7 +205,7 @@ export async function isToolUnconfigured(
     await resolveToolRoute(db, userId, toolId);
     return false;
   } catch (err) {
-    return err instanceof GatewayError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+    return isUnconfiguredToolError(err);
   }
 }
 

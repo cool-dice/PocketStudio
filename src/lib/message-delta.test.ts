@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+
 import {
   applyAbortTurn,
   applyMessageDelta,
@@ -156,5 +158,37 @@ describe("applyMessageDelta", () => {
     const merged = mergeTranscriptOnReconnect(prev, []);
     expect(merged).toHaveLength(1);
     expect(merged[0]?.id).toBe("m-live");
+  });
+
+  test("unconfigured assistant end is visible and not streaming (composer can type)", () => {
+    let rows: ChatMessage[] = [
+      msg({ id: "u1", role: "user", content: "Привет" }),
+    ];
+    rows = applyMessageStart(rows, { threadId: "t1", messageId: "m-err" }, "t1");
+    rows = applyMessageDelta(
+      rows,
+      {
+        threadId: "t1",
+        messageId: "m-err",
+        delta: UNCONFIGURED_TOOL_MESSAGE,
+      },
+      "t1",
+    );
+    rows = applyMessageEnd(
+      rows,
+      {
+        threadId: "t1",
+        message: msg({
+          id: "m-err",
+          content: UNCONFIGURED_TOOL_MESSAGE,
+        }),
+      },
+      "t1",
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[1]?.content).toBe(UNCONFIGURED_TOOL_MESSAGE);
+    expect(rows[1]?.content).toMatch(/Администратор ещё не настроил/);
+    expect(rows[1]?.streaming).toBe(false);
+    expect(rows[1]?.content).not.toMatch(/готово|успешно|я обработал запрос/i);
   });
 });

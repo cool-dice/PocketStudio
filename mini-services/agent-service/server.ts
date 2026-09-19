@@ -64,6 +64,13 @@ import { getTool, type ToolContext } from "./tools";
 import { createNotification } from "./notifications";
 import { startAnalyzer, stopAnalyzer } from "./analyzer";
 import {
+  persistAgentUnconfiguredReply,
+  replyIfAgentUnconfigured,
+  type PersistedAssistant,
+} from "./unconfigured-turn";
+import { isUnconfiguredToolError } from "../../src/lib/ai/resolve";
+import { UNCONFIGURED_TOOL_MESSAGE } from "../../src/lib/ai/tools";
+import {
   projectRoot,
   listWorkspaceTree,
   listProjectCommits,
@@ -618,6 +625,25 @@ function emitPhase(
   io.to(room).emit("turn:phase", { threadId, phase, label: label ?? null });
 }
 
+/** Persist-then-emit the unconfigured error so the composer unlocks on message:end. */
+function emitUnconfiguredAssistant(
+  room: string,
+  threadId: string,
+  row: PersistedAssistant,
+): void {
+  io.to(room).emit("message:start", { threadId, messageId: row.id });
+  io.to(room).emit("message:delta", {
+    threadId,
+    messageId: row.id,
+    delta: row.content,
+  });
+  io.to(room).emit("message:end", {
+    threadId,
+    message: serializeMessage(row),
+  });
+  emitPhase(room, threadId, "idle");
+}
+
 /** Cheap local heuristic: does this act-mode request look like real work? */
 function looksLikeWorkRequest(content: string): boolean {
   if (content.length >= ORCHESTRATE_MIN_CHARS) return true;
@@ -903,6 +929,18 @@ async function runAgentTurn(
     // that nothing slow remains after the final message:end emit — this
     // keeps the busy-flag race window at effectively zero.
     await maybeAutoTitle(threadId, user.sub);
+
+    // 1c. Unconfigured `agent` model: Russian error in the thread immediately.
+    // Skip MCP / planner / RAG / LLM so the socket does not hang.
+    const unconfigured = await replyIfAgentUnconfigured({
+      db,
+      userId: user.sub,
+      threadId,
+    });
+    if (unconfigured) {
+      emitUnconfiguredAssistant(room, threadId, unconfigured);
+      return;
+    }
 
     // 2. Mode + project context for the whole turn (built once; rebuilt
     // after orchestration when a plan was saved). MCP-состояние реестра
@@ -1210,6 +1248,15 @@ async function runAgentTurn(
         emitPhase(room, threadId, "idle");
       } catch {
         socket.emit("error", { message: ABORT_REPLY });
+      }
+      return;
+    }
+    if (isUnconfiguredToolError(err)) {
+      try {
+        const row = await persistAgentUnconfiguredReply(db, threadId);
+        emitUnconfiguredAssistant(room, threadId, row);
+      } catch {
+        socket.emit("error", { message: UNCONFIGURED_TOOL_MESSAGE });
       }
       return;
     }

@@ -11,7 +11,10 @@
 
 import { sleepAbortable } from "../../src/lib/abort-flag";
 import { chatCompletionStream } from "../../src/lib/ai/stream";
-import { resolveToolRoute } from "../../src/lib/ai/resolve";
+import {
+  isUnconfiguredToolError,
+  resolveToolRoute,
+} from "../../src/lib/ai/resolve";
 import type { AiToolId } from "../../src/lib/ai/tools";
 import { recordChatUsage } from "../../src/lib/ai/usage-log";
 import { db } from "./db-client";
@@ -88,6 +91,7 @@ export async function generateLLMResponse(
       });
       return result.text;
     } catch (err) {
+      if (isUnconfiguredToolError(err)) throw err;
       lastError = err;
       console.warn(
         `[agent] LLM attempt ${attempt}/${MAX_ATTEMPTS} failed:`,

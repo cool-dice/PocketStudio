@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+
 import {
   isEmptyAssistantBubble,
   shouldBlockSend,
@@ -28,6 +30,7 @@ describe("chat send guard", () => {
   test("keeps the composer locked when the server says the turn is still running", () => {
     expect(shouldKeepBusyOnSocketError("Агент ещё отвечает…")).toBe(true);
     expect(shouldKeepBusyOnSocketError("Нет соединения")).toBe(false);
+    expect(shouldKeepBusyOnSocketError(UNCONFIGURED_TOOL_MESSAGE)).toBe(false);
   });
 
   test("empty streaming assistant bubbles are the ones to drop on abort", () => {

@@ -5,11 +5,27 @@ import { PrismaClient } from "@prisma/client";
 import { encryptSecret, last4OfKey } from "./crypto";
 import { GatewayError } from "./errors";
 import { assertHttpUrl } from "./http";
-import { isToolUnconfigured, resolveToolRoute } from "./resolve";
+import { isToolUnconfigured, isUnconfiguredToolError, resolveToolRoute } from "./resolve";
 import { UNCONFIGURED_TOOL_MESSAGE } from "./tools";
 
 const db = new PrismaClient();
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
+
+describe("isUnconfiguredToolError", () => {
+  test("matches only the shared Russian 400", () => {
+    expect(
+      isUnconfiguredToolError(new GatewayError(UNCONFIGURED_TOOL_MESSAGE, 400)),
+    ).toBe(true);
+    expect(
+      isUnconfiguredToolError(
+        new GatewayError("Провайдер недоступен. Попробуйте позже", 502),
+      ),
+    ).toBe(false);
+    expect(isUnconfiguredToolError(new Error(UNCONFIGURED_TOOL_MESSAGE))).toBe(
+      false,
+    );
+  });
+});
 
 describe.skipIf(SKIP_PG)("resolveToolRoute unconfigured", () => {
   test("isToolUnconfigured is true when notes has no model", async () => {

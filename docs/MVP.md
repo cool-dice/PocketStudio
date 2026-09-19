@@ -335,5 +335,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-19 | Notes LLM analysis honesty | Ненастроенный `notes` → `UNCONFIGURED_TOOL_MESSAGE`, `status=error`, без фейкового 4-block JSON; сбой не выдумывает positive/negative/final; успех пишет блоки в Note и переживает reload; пустой блокнот ≠ ошибка загрузки; IDOR 404 |
 | 2026-09-19 | Notes analysis fail-fast | POST/PATCH/очередь анализа: ненастроенный `notes` сразу `status=error` (тот же UNCONFIGURED), без ~5 с `pending` до воркера; GET сразу ошибка |
 | 2026-09-19 | Monetize plan honesty | Ненастроенный `monetize` → `UNCONFIGURED_TOOL_MESSAGE`, документ не пишется; сбой LLM не затирает прежний план; успех переживает GET reload; IDOR 404 |
+| 2026-09-19 | Agent/chat unconfigured | Ненастроенный `agent` → русская `UNCONFIGURED_TOOL_MESSAGE` в треде сразу (message:end), без зависания сокета и без фейкового успеха; композер снова печатает |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.
