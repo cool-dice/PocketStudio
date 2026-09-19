@@ -252,12 +252,25 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
       new Request("http://localhost/api/notes", {
         method: "POST",
         headers,
-        body: JSON.stringify({ text: asrJson.text }),
+        body: JSON.stringify({
+          text: asrJson.text,
+          transcription: asrJson.text,
+        }),
       }),
     );
     expect(save.status).toBe(201);
-    const saved = (await save.json()) as { note: { id: string; rawText: string } };
+    const saved = (await save.json()) as {
+      note: { id: string; rawText: string; transcription: string | null };
+    };
     expect(saved.note.rawText).toBe("маяк в тумане");
+    expect(saved.note.transcription).toBe("маяк в тумане");
+
+    const row = await db.note.findUnique({
+      where: { id: saved.note.id },
+      select: { rawText: true, transcription: true },
+    });
+    expect(row?.rawText).toBe("маяк в тумане");
+    expect(row?.transcription).toBe("маяк в тумане");
 
     expect(await db.note.count({ where: { userId: userId! } })).toBe(
       beforeNotes + 1,
@@ -273,6 +286,91 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
     expect(await db.note.count({ where: { userId: userId! } })).toBe(
       beforeNotes + 1,
     );
+
+    await db.note.delete({ where: { id: saved.note.id } });
+  });
+
+  test("save-from-voice keeps transcription when the user edits rawText", async () => {
+    await seedAsrOverride();
+    const beforeNotes = await db.note.count({ where: { userId: userId! } });
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ text: "маяк в тумане" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const asr = await voice(
+      jsonRequest({ audioBase64: AUDIO, mime: "audio/wav" }, token!),
+    );
+    expect(asr.status).toBe(200);
+    const asrJson = (await asr.json()) as { text: string };
+    expect(asrJson.text).toBe("маяк в тумане");
+    expect(await db.note.count({ where: { userId: userId! } })).toBe(
+      beforeNotes,
+    );
+
+    const headers = new Headers({
+      accept: "application/json",
+      "content-type": "application/json",
+      authorization: `Bearer ${token!}`,
+    });
+    const save = await createNote(
+      new Request("http://localhost/api/notes", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          text: "маяк в тумане, проверить свет",
+          transcription: asrJson.text,
+        }),
+      }),
+    );
+    expect(save.status).toBe(201);
+    const saved = (await save.json()) as {
+      note: { id: string; rawText: string; transcription: string | null };
+    };
+    expect(saved.note.rawText).toBe("маяк в тумане, проверить свет");
+    expect(saved.note.transcription).toBe("маяк в тумане");
+    expect(await db.note.count({ where: { userId: userId! } })).toBe(
+      beforeNotes + 1,
+    );
+
+    const row = await db.note.findUnique({
+      where: { id: saved.note.id },
+      select: { rawText: true, transcription: true },
+    });
+    expect(row?.rawText).toBe("маяк в тумане, проверить свет");
+    expect(row?.transcription).toBe("маяк в тумане");
+
+    await db.note.delete({ where: { id: saved.note.id } });
+  });
+
+  test("typed notes can leave transcription null", async () => {
+    await seedUser();
+    const headers = new Headers({
+      accept: "application/json",
+      "content-type": "application/json",
+      authorization: `Bearer ${token!}`,
+    });
+    const save = await createNote(
+      new Request("http://localhost/api/notes", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: "просто набранная мысль" }),
+      }),
+    );
+    expect(save.status).toBe(201);
+    const saved = (await save.json()) as {
+      note: { id: string; rawText: string; transcription: string | null };
+    };
+    expect(saved.note.rawText).toBe("просто набранная мысль");
+    expect(saved.note.transcription).toBeNull();
+
+    const row = await db.note.findUnique({
+      where: { id: saved.note.id },
+      select: { transcription: true },
+    });
+    expect(row?.transcription).toBeNull();
 
     await db.note.delete({ where: { id: saved.note.id } });
   });

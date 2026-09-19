@@ -9,7 +9,7 @@
  * Voice (Stage 2): the mic button records via useVoiceRecorder, the
  * backend transcribes (POST /api/notes/voice → { text }) and the text lands
  * in the textarea. A notebook row is created only when the user saves
- * (POST /api/notes) — one utterance = one note.
+ * (POST /api/notes with rawText + transcription) — one utterance = one note.
  *
  * The form lives in an inner component: Radix unmounts dialog content on
  * close, so the draft state resets naturally without reset effects.
@@ -92,6 +92,8 @@ function CaptureForm() {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [savedText, setSavedText] = useState<string | null>(null);
+  /** Original ASR text(s) — persisted as Note.transcription, even if edited. */
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
@@ -111,6 +113,12 @@ function CaptureForm() {
         toast.error(result.error);
       } else {
         // Text goes INTO the textarea — the user reviews and saves once.
+        // Keep the raw ASR separately so save can write Note.transcription.
+        setVoiceTranscript((prev) => {
+          const piece = result.text;
+          if (!prev) return piece;
+          return `${prev}\n${piece}`.slice(0, MAX_NOTE_LENGTH);
+        });
         setValue((prev) => {
           const base = prev.trim();
           const merged = base ? `${base}\n${result.text}` : result.text;
@@ -165,7 +173,10 @@ function CaptureForm() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const note = await api.createNote({ text: trimmed });
+      const note = await api.createNote({
+        text: trimmed,
+        ...(voiceTranscript ? { transcription: voiceTranscript } : {}),
+      });
       setSavedText(trimmed);
       bumpNotes();
       setCaptureOpen(false);

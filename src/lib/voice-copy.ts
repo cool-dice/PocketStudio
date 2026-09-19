@@ -2,6 +2,8 @@
  * Honest voice-capture copy. Failed ASR / denied mic is never «успешно записано».
  */
 
+import { MAX_NOTE_LENGTH } from "@/lib/types";
+
 /** Stub the old z-ai SDK used to persist instead of a real transcript. */
 const FAKE_SUCCESS_RE = /^успешно записано\.?$/i;
 
@@ -60,4 +62,16 @@ export function isTranscriptAlreadySaved(
   savedText: string | null | undefined,
 ): boolean {
   return Boolean(savedText) && trimmed === savedText;
+}
+
+/**
+ * Original ASR text to store beside rawText. Empty / stub «успешно записано»
+ * → null so typed notes stay without a transcription.
+ */
+export function persistableTranscription(
+  transcript: string | null | undefined,
+): string | null {
+  const text = (transcript ?? "").trim();
+  if (!isUsableTranscript(text)) return null;
+  return text.slice(0, MAX_NOTE_LENGTH);
 }

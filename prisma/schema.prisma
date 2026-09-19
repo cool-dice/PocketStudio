@@ -76,6 +76,7 @@ model Note {
   // 'pending' | 'processing' | 'processed' | 'error'
   status    String   @default("pending")
 
+  /// Исходная ASR-расшифровка. rawText — текст после правки в композере.
   transcription String?
 
   categoryId String?

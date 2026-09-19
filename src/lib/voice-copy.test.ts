@@ -10,6 +10,7 @@ import {
   VOICE_REVIEW_AND_SAVE,
   isTranscriptAlreadySaved,
   isUsableTranscript,
+  persistableTranscription,
   voiceResultCopy,
   voiceReviewCopy,
 } from "./voice-copy";
@@ -69,5 +70,14 @@ describe("voice capture honesty", () => {
     expect(isTranscriptAlreadySaved("маяк", "маяк")).toBe(true);
     expect(isTranscriptAlreadySaved("маяк в тумане", "маяк")).toBe(false);
     expect(isTranscriptAlreadySaved("", "маяк")).toBe(false);
+  });
+
+  test("persistableTranscription keeps real ASR and drops stubs", () => {
+    expect(persistableTranscription("  маяк в тумане  ")).toBe("маяк в тумане");
+    expect(persistableTranscription("")).toBeNull();
+    expect(persistableTranscription("   ")).toBeNull();
+    expect(persistableTranscription(null)).toBeNull();
+    expect(persistableTranscription(undefined)).toBeNull();
+    expect(persistableTranscription("успешно записано")).toBeNull();
   });
 });

@@ -209,7 +209,9 @@ async function analyzeNote(noteId: string): Promise<void> {
   });
   if (!note || note.status !== "pending") return;
 
-  const text = (note.rawText ?? "").trim().slice(0, MAX_NOTE_TEXT_CHARS);
+  const edited = (note.rawText ?? "").trim();
+  const asr = (note.transcription ?? "").trim();
+  const text = edited.slice(0, MAX_NOTE_TEXT_CHARS);
   if (!isUsableNoteText(text)) {
     await db.note.update({
       where: { id: noteId },
@@ -249,7 +251,11 @@ async function analyzeNote(noteId: string): Promise<void> {
   const hasCategoryNote = note.category
     ? `Заметке уже назначена категория «${note.category.name}» — верни её же в category_name.`
     : `У заметки пока нет категории. Подбери подходящую из существующих (${categoryList || "пока никаких"}) или придумай новую (1–2 слова).`;
-  const userMessage = `Мысль пользователя:\n"""\n${text}\n"""\n\n${hasCategoryNote}`;
+  const thoughtBlock =
+    asr && asr !== edited
+      ? `Отредактированный текст:\n"""\n${text}\n"""\n\nИсходная расшифровка:\n"""\n${asr.slice(0, MAX_NOTE_TEXT_CHARS)}\n"""`
+      : `Мысль пользователя:\n"""\n${text}\n"""`;
+  const userMessage = `${thoughtBlock}\n\n${hasCategoryNote}`;
 
   let analysis: AnalysisResult | null = null;
   let lastError: unknown = null;

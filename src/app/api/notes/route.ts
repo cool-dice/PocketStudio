@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { noteWithCategory } from "@/lib/note-utils";
 import { scheduleIndexNote } from "@/lib/rag";
+import { persistableTranscription } from "@/lib/voice-copy";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,11 @@ const createNoteSchema = z.object({
     .trim()
     .min(1, "Текст заметки не может быть пустым")
     .max(5000, "Текст заметки не может превышать 5000 символов"),
+  /** Исходная ASR-расшифровка (голос). Typed notes omit this → null. */
+  transcription: z
+    .string()
+    .max(5000, "Расшифровка не может превышать 5000 символов")
+    .nullish(),
   categoryId: z.string().trim().min(1).optional(),
   /** Привязать к воркспейсу (NoteLink kind=context). */
   projectId: z.string().trim().min(1).optional(),
@@ -171,6 +177,7 @@ export async function POST(req: Request) {
     data: {
       userId: session.sub,
       rawText: parsed.data.text,
+      transcription: persistableTranscription(parsed.data.transcription),
       status: "pending",
       categoryId: category?.id ?? undefined,
     },

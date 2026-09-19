@@ -350,6 +350,8 @@ export const api = {
 
   createNote(data: {
     text: string;
+    /** Original ASR transcript; omit on typed notes. */
+    transcription?: string;
     categoryId?: string;
     projectId?: string;
   }): Promise<Note> {
