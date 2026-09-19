@@ -34,6 +34,7 @@ import {
   WorkspaceModuleFrame,
   WorkspaceTabMetaPlaceholder,
 } from "@/components/workspaces/workspace-tabs-ui";
+import { resolveWorkspaceTab } from "@/components/workspaces/overview-data";
 import type { WorkspaceSummary, WorkspaceTab } from "@/lib/workspace-data";
 
 export interface WorkspaceTabContentProps {
@@ -66,7 +67,8 @@ export function WorkspaceTabContent({
   tab,
   onOpenMobileNav,
 }: WorkspaceTabContentProps) {
-  const ModuleScreen = EMBEDDED_MODULE_SCREENS[tab];
+  const safeTab = resolveWorkspaceTab(workspace, tab);
+  const ModuleScreen = EMBEDDED_MODULE_SCREENS[safeTab];
   if (ModuleScreen) {
     return (
       <WorkspaceModuleFrame>
@@ -78,7 +80,7 @@ export function WorkspaceTabContent({
     );
   }
 
-  if (tab === "code") {
+  if (safeTab === "code") {
     return (
       <WorkspaceCodeTab
         workspace={workspace}
@@ -87,11 +89,11 @@ export function WorkspaceTabContent({
     );
   }
 
-  if (tab === "chat") {
+  if (safeTab === "chat") {
     return <WorkspaceChatTab key={workspace.id} workspace={workspace} />;
   }
 
   /* Обзор/Заметки обрабатываются оболочкой; сюда попадаем только
      в защитных сценариях — мягкий плейсхолдер вместо пустоты. */
-  return <WorkspaceTabMetaPlaceholder workspace={workspace} tab={tab} />;
+  return <WorkspaceTabMetaPlaceholder workspace={workspace} tab={safeTab} />;
 }

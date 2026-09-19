@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { LogoMark } from "@/components/logo";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AuthenticatedApp } from "@/components/app/authenticated-app";
+import { safeNextPath } from "@/lib/safe-next";
 
 function LoginInner() {
   const { user, loading } = useAuth();
@@ -19,12 +20,13 @@ function LoginInner() {
   const next = params.get("next") || "/";
   const invite = params.get("invite") || undefined;
   const tab = params.get("tab") === "register" ? "register" : "login";
+  const safeNext = safeNextPath(next);
 
   useEffect(() => {
-    if (user && next.startsWith("/") && !next.startsWith("//")) {
-      router.replace(next);
+    if (user) {
+      router.replace(safeNext);
     }
-  }, [user, next, router]);
+  }, [user, safeNext, router]);
 
   if (loading) {
     return (
