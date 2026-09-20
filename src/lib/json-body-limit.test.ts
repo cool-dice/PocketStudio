@@ -4,17 +4,21 @@ import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
 
 import {
+  JSON_BODY_INVALID,
   JSON_BODY_LIMIT,
   JSON_BODY_LIMIT_DESIGN,
   JSON_BODY_LIMIT_LARGE,
   JSON_BODY_LIMIT_MEDIA,
   JSON_BODY_TOO_LARGE,
+  JsonBodyTooLargeError,
   contentLengthBytes,
   formatJsonBodyLimit,
   isJsonBodyMethod,
   jsonBodyLimitBytes,
   jsonBodyTooLargeMessage,
   oversizedJsonResponse,
+  readJsonBody,
+  readRequestTextCapped,
 } from "./json-body-limit";
 
 function jsonReq(
@@ -30,6 +34,31 @@ function jsonReq(
     method: init?.method ?? "POST",
     headers,
     body: init?.body ?? "{}",
+  });
+}
+
+/** Stream body — no Content-Length (chunked). Optional lying header. */
+function jsonStreamReq(
+  url: string,
+  body: string,
+  init?: { method?: string; contentLength?: string },
+): Request {
+  const headers = new Headers({
+    "content-type": "application/json",
+  });
+  if (init?.contentLength != null) {
+    headers.set("content-length", init.contentLength);
+  }
+  const bytes = new TextEncoder().encode(body);
+  return new Request(url, {
+    method: init?.method ?? "POST",
+    headers,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
   });
 }
 
@@ -91,7 +120,7 @@ describe("json body limits", () => {
     expect(isJsonBodyMethod("DELETE")).toBe(false);
   });
 
-  test("missing or invalid Content-Length is not 413", () => {
+  test("missing or invalid Content-Length is not 413 from the header gate", () => {
     expect(contentLengthBytes(new Headers())).toBeNull();
     expect(contentLengthBytes(new Headers({ "content-length": "nope" }))).toBeNull();
     const req = new Request("http://localhost/api/notes", {
@@ -100,6 +129,108 @@ describe("json body limits", () => {
       body: "{}",
     });
     expect(oversizedJsonResponse(req)).toBeNull();
+  });
+});
+
+describe("readJsonBody byte cap", () => {
+  test("chunked notes body over 256 KB is 413 Russian", async () => {
+    const req = jsonStreamReq(
+      "http://localhost/api/notes",
+      "x".repeat(JSON_BODY_LIMIT + 1),
+    );
+    expect(req.headers.get("content-length")).toBeNull();
+    expect(oversizedJsonResponse(req)).toBeNull();
+    const read = await readJsonBody(req);
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.response.status).toBe(413);
+    const json = (await read.response.json()) as { error: string };
+    expect(json.error).toContain(JSON_BODY_TOO_LARGE);
+    expect(json.error).toMatch(/256\s*КБ/);
+  });
+
+  test("Content-Length smaller than the real body is still 413 while reading", async () => {
+    const req = jsonStreamReq(
+      "http://localhost/api/notes",
+      "x".repeat(JSON_BODY_LIMIT + 1),
+      { contentLength: "10" },
+    );
+    expect(contentLengthBytes(req.headers)).toBe(10);
+    expect(oversizedJsonResponse(req)).toBeNull();
+    const read = await readJsonBody(req);
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.response.status).toBe(413);
+  });
+
+  test("chunked notes JSON at the cap still parses", async () => {
+    const payload = `{"ok":"${"a".repeat(JSON_BODY_LIMIT - 10)}"}`;
+    expect(payload.length).toBeLessThanOrEqual(JSON_BODY_LIMIT);
+    const read = await readJsonBody(
+      jsonStreamReq("http://localhost/api/notes", payload),
+    );
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect((read.value as { ok: string }).ok.length).toBeGreaterThan(1000);
+  });
+
+  test("voice uses the media cap — 256 KB+1 chunked is not 413", async () => {
+    const payload = JSON.stringify({
+      audioBase64: "a".repeat(JSON_BODY_LIMIT),
+      mime: "audio/wav",
+    });
+    expect(payload.length).toBeGreaterThan(JSON_BODY_LIMIT);
+    expect(payload.length).toBeLessThan(JSON_BODY_LIMIT_MEDIA);
+    const read = await readJsonBody(
+      jsonStreamReq("http://localhost/api/notes/voice", payload),
+    );
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect((read.value as { mime: string }).mime).toBe("audio/wav");
+  });
+
+  test("upload uses the same media cap map as voice", async () => {
+    const payload = JSON.stringify({
+      dataBase64: "a".repeat(JSON_BODY_LIMIT),
+    });
+    const read = await readJsonBody(
+      jsonStreamReq("http://localhost/api/workspaces/w1/upload", payload),
+    );
+    expect(read.ok).toBe(true);
+  });
+
+  test("invalid JSON under the cap is 400, not 413", async () => {
+    const read = await readJsonBody(
+      jsonStreamReq("http://localhost/api/notes", "{not json"),
+    );
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.response.status).toBe(400);
+    const json = (await read.response.json()) as { error: string };
+    expect(json.error).toBe(JSON_BODY_INVALID);
+  });
+
+  test("fallback swallows parse errors but not oversize", async () => {
+    const bad = await readJsonBody(
+      jsonStreamReq("http://localhost/api/notes", "{"),
+      { fallback: {} },
+    );
+    expect(bad.ok).toBe(true);
+    if (bad.ok) expect(bad.value).toEqual({});
+
+    const huge = await readJsonBody(
+      jsonStreamReq("http://localhost/api/notes", "x".repeat(JSON_BODY_LIMIT + 1)),
+      { fallback: {} },
+    );
+    expect(huge.ok).toBe(false);
+    if (!huge.ok) expect(huge.response.status).toBe(413);
+  });
+
+  test("readRequestTextCapped throws once the byte cap is crossed", async () => {
+    const req = jsonStreamReq("http://localhost/api/notes", "abcdefghij");
+    await expect(readRequestTextCapped(req, 4)).rejects.toBeInstanceOf(
+      JsonBodyTooLargeError,
+    );
   });
 });
 

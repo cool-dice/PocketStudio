@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { getUserFromRequest } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -62,12 +63,9 @@ export async function PATCH(req: Request, ctx: RouteContext) {
 
   const { id } = await ctx.params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
 
   const parsed = patchCategorySchema.safeParse(body);
   if (!parsed.success) {

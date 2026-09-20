@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import {
   attachSessionCookie,
@@ -49,7 +50,9 @@ export async function PATCH(req: Request) {
   const loaded = await loadSessionUser(req);
   if ("error" in loaded) return loaded.error;
 
-  const body = await req.json().catch(() => null);
+  const jsonRead = await readJsonBody(req, { fallback: null });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
   const parsed = validatePasswordChange(body);
   if (!parsed.ok) {
     return NextResponse.json(

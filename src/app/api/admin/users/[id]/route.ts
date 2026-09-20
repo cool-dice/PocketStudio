@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/json-body-limit";
 // PATCH /api/admin/users/[id] — change a user's role (admin ⇄ client).
 // DELETE /api/admin/users/[id] — delete a user with ALL their content
 //                                (DB cascade) + workspace directories.
@@ -46,7 +47,9 @@ export async function PATCH(
 
   const { id } = await params;
 
-  const body: unknown = await req.json().catch(() => null);
+  const jsonRead = await readJsonBody(req, { fallback: null });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body: unknown = jsonRead.value;
   const parsed = roleSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

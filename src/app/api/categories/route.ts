@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { getUserFromRequest } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -72,12 +73,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
 
   const parsed = createCategorySchema.safeParse(body);
   if (!parsed.success) {

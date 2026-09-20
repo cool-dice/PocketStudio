@@ -14,7 +14,7 @@ import {
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { oversizedJsonResponse } from "@/lib/json-body-limit";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -175,12 +175,9 @@ export async function POST(req: Request) {
     }
 
     // ── JSON: template | github ──
-    let body: unknown;
-    try {
-      body = await req.json();
-    } catch {
-      body = {};
-    }
+    const jsonRead = await readJsonBody(req, { fallback: {} });
+    if (!jsonRead.ok) return jsonRead.response;
+    const body = jsonRead.value;
     const parsed = createSchema.safeParse(body);
     if (!parsed.success) {
       const fields: Record<string, string> = {};

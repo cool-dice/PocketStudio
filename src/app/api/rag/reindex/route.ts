@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { requireAdmin } from "@/lib/admin";
 import { getUserFromRequest } from "@/lib/auth";
@@ -20,7 +21,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
 
-  const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = bodySchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json({ error: "Некорректный запрос" }, { status: 400 });
   }

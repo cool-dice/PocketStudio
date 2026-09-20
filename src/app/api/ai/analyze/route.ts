@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { aiAnalyzeDocument, aiErrorResponse } from "@/lib/ai";
@@ -19,7 +20,9 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
-  const parsed = schema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = schema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },

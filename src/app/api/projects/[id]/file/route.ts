@@ -12,7 +12,7 @@ import {
 import { isDeletableRelPath } from "@/lib/rel-path";
 import { removeFileChunks, scheduleIndexFile } from "@/lib/rag";
 import { shouldSkipPath } from "@/lib/rag/skip";
-import { oversizedJsonResponse } from "@/lib/json-body-limit";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -86,12 +86,9 @@ export async function PUT(
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
   const parsed = putSchema.safeParse(body);
   if (!parsed.success) {
     const fields: Record<string, string> = {};

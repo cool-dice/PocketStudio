@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
@@ -38,7 +39,9 @@ export async function POST(
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
   }
 
-  const parsed = schema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = schema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Укажите коммит" },

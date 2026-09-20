@@ -11,7 +11,7 @@ import {
 import { db } from "@/lib/db";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
 import { ASR_EMPTY, ASR_UNAVAILABLE, isUsableTranscript } from "@/lib/voice-copy";
-import { oversizedJsonResponse } from "@/lib/json-body-limit";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 /**
  * POST /api/notes/voice — transcribe only.
@@ -59,15 +59,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Некорректный JSON в запросе" },
-      { status: 400 },
-    );
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
 
   const { audioBase64, mime } = (body ?? {}) as {
     audioBase64?: unknown;

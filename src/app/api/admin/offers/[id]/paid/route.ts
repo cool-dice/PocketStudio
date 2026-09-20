@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
@@ -14,7 +15,9 @@ export async function POST(req: Request, { params }: Params) {
   if (!guard.ok) return guard.response;
   const { id } = await params;
   const schema = z.object({ note: z.string().trim().max(200).optional() });
-  schema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  schema.safeParse(jsonRead.value);
 
   const offer = await db.offer.findUnique({ where: { id } });
   if (!offer) {

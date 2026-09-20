@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
@@ -22,7 +23,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!check.ok) return check.response;
   const finding = check.row;
 
-  const parsed = patchSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = patchSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },

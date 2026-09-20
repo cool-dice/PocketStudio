@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { requireAdmin } from "@/lib/admin";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,9 @@ export async function GET(req: Request) {
 export async function PATCH(req: Request) {
   const guard = await requireAdmin(req);
   if (!guard.ok) return guard.response;
-  const body = (await req.json().catch(() => ({}))) as {
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value as {
     id?: string;
     status?: string;
   };

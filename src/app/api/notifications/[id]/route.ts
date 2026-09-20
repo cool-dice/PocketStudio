@@ -1,3 +1,4 @@
+import { readJsonBody } from "@/lib/json-body-limit";
 // PATCH /api/notifications/[id] — mark a single notification read/unread.
 // Body: { read?: boolean } (default true). → { notification }
 //
@@ -47,7 +48,9 @@ export async function PATCH(
 
   const { id } = await params;
 
-  const body: unknown = await req.json().catch(() => null);
+  const jsonRead = await readJsonBody(req, { fallback: null });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body: unknown = jsonRead.value;
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

@@ -166,15 +166,10 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
       return;
     }
 
-    let jsonCalled = false;
     const req = jsonRequest(
       { audioBase64: AUDIO, mime: "audio/wav" },
       token!,
     );
-    req.json = (async () => {
-      jsonCalled = true;
-      throw new Error("ASR must fail-fast before reading the audio body");
-    }) as typeof req.json;
 
     let providerCalled = false;
     globalThis.fetch = (async () => {
@@ -188,7 +183,7 @@ describe.skipIf(SKIP_PG)("POST /api/notes/voice honesty", () => {
     const json = (await res.json()) as { error: string; note?: unknown };
     expect(json.error).toBe(UNCONFIGURED_TOOL_MESSAGE);
     expect(json.note).toBeUndefined();
-    expect(jsonCalled).toBe(false);
+    expect(req.bodyUsed).toBe(false);
     expect(providerCalled).toBe(false);
     expect(await db.note.count({ where: { userId: userId! } })).toBe(before);
   });

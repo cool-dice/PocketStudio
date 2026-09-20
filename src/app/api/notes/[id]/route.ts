@@ -6,7 +6,7 @@ import { isToolUnconfigured } from "@/lib/ai/resolve";
 import { noteAnalysisFieldsForQueue } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 import { scheduleIndexNote, scheduleRemove } from "@/lib/rag";
-import { oversizedJsonResponse } from "@/lib/json-body-limit";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -56,12 +56,9 @@ export async function PATCH(req: Request, ctx: RouteContext) {
 
   const { id } = await ctx.params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
 
   const parsed = patchNoteSchema.safeParse(body);
   if (!parsed.success) {

@@ -9,7 +9,7 @@ import {
   parseDesignPayload,
   tryParseDesignPayload,
 } from "@/lib/design-model";
-import { oversizedJsonResponse } from "@/lib/json-body-limit";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +62,9 @@ export async function PUT(req: Request, { params }: Params) {
   const { id } = await params;
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
-  const parsed = putSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = putSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },

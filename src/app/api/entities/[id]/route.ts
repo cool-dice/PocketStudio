@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import {
@@ -85,15 +86,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!check.ok) return check.response;
   const entity = check.row;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Некорректный JSON в запросе" },
-      { status: 400 },
-    );
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

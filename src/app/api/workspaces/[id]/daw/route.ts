@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { defaultDawState, normalizeDawState, type DawProjectDto } from "@/lib/daw-model";
 import { ensureWorkspace } from "@/lib/workspace-api";
-import { oversizedJsonResponse } from "@/lib/json-body-limit";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -83,7 +83,9 @@ export async function PUT(req: Request, { params }: Params) {
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
 
-  const state = normalizeDawState(await req.json().catch(() => null));
+  const jsonRead = await readJsonBody(req, { fallback: null });
+  if (!jsonRead.ok) return jsonRead.response;
+  const state = normalizeDawState(jsonRead.value);
   if (!state) {
     return NextResponse.json(
       { error: "Некорректное состояние студии" },

@@ -1,7 +1,10 @@
 /**
- * Reject oversized JSON bodies before `req.json()`.
- * Uses Content-Length (cheap; no read). Multipart zip/voice/upload and
- * large studio patches get a higher cap or are skipped.
+ * Reject oversized JSON bodies before they sit in memory.
+ * `oversizedJsonResponse` uses Content-Length (cheap; no read).
+ * `readJsonBody` also counts bytes while reading so chunked requests
+ * and a lying/smaller Content-Length still 413.
+ * Multipart zip/voice/upload and large studio patches get a higher
+ * cap or are skipped — pass the same path cap map to both.
  */
 
 import { NextResponse } from "next/server";
@@ -21,6 +24,8 @@ export const JSON_BODY_LIMIT_DESIGN = 3 * 1024 * 1024;
 export const JSON_BODY_LIMIT_MEDIA = 36 * 1024 * 1024;
 
 export const JSON_BODY_TOO_LARGE = "Тело запроса слишком большое";
+
+export const JSON_BODY_INVALID = "Некорректный JSON в запросе";
 
 const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
 
@@ -96,8 +101,128 @@ export function oversizedJsonResponse(
   if (limit == null) return null;
   const length = contentLengthBytes(req.headers);
   if (length == null || length <= limit) return null;
+  return jsonBodyTooLargeResponse(limit);
+}
+
+export function jsonBodyTooLargeResponse(limitBytes: number): NextResponse {
   return NextResponse.json(
-    { error: jsonBodyTooLargeMessage(limit) },
+    { error: jsonBodyTooLargeMessage(limitBytes) },
     { status: 413 },
   );
+}
+
+export class JsonBodyTooLargeError extends Error {
+  readonly limitBytes: number;
+  constructor(limitBytes: number) {
+    super(jsonBodyTooLargeMessage(limitBytes));
+    this.name = "JsonBodyTooLargeError";
+    this.limitBytes = limitBytes;
+  }
+}
+
+export function isJsonBodyTooLarge(err: unknown): err is JsonBodyTooLargeError {
+  return err instanceof JsonBodyTooLargeError;
+}
+
+export type JsonBodyRead =
+  | { ok: true; value: unknown }
+  | { ok: false; response: NextResponse };
+
+function invalidJsonResponse(): NextResponse {
+  return NextResponse.json({ error: JSON_BODY_INVALID }, { status: 400 });
+}
+
+/**
+ * Read the request body as text, stopping at `maxBytes` + 1.
+ * Covers missing Content-Length (chunked) and a header smaller than
+ * the real body — those are not caught by `oversizedJsonResponse`.
+ */
+export async function readRequestTextCapped(
+  req: Request,
+  maxBytes: number,
+): Promise<string> {
+  const declared = contentLengthBytes(req.headers);
+  if (declared != null && declared > maxBytes) {
+    if (req.body) await req.body.cancel().catch(() => undefined);
+    throw new JsonBodyTooLargeError(maxBytes);
+  }
+
+  if (!req.body) {
+    const buf = await req.arrayBuffer().catch(() => new ArrayBuffer(0));
+    if (buf.byteLength > maxBytes) {
+      throw new JsonBodyTooLargeError(maxBytes);
+    }
+    return new TextDecoder("utf-8").decode(buf);
+  }
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new JsonBodyTooLargeError(maxBytes);
+      }
+      chunks.push(value);
+    }
+  } catch (err) {
+    if (err instanceof JsonBodyTooLargeError) throw err;
+    await reader.cancel().catch(() => undefined);
+    throw err;
+  }
+
+  if (chunks.length === 0) return "";
+  if (chunks.length === 1) {
+    return new TextDecoder("utf-8").decode(chunks[0]);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8").decode(out);
+}
+
+/**
+ * Wrap `req.json()` with the same path cap map as `oversizedJsonResponse`.
+ * Parse errors: 400, or `fallback` when provided (same as `.catch(() => …)`).
+ * Oversize: 413 even when Content-Length is missing or too small.
+ */
+export async function readJsonBody(
+  req: Request,
+  options?: { fallback?: unknown; pathname?: string },
+): Promise<JsonBodyRead> {
+  const pathname = options?.pathname ?? new URL(req.url).pathname;
+  const limit = jsonBodyLimitBytes(pathname, req.headers.get("content-type"));
+  const hasFallback = options != null && "fallback" in options;
+
+  if (limit == null) {
+    try {
+      return { ok: true, value: await req.json() };
+    } catch {
+      if (hasFallback) return { ok: true, value: options.fallback };
+      return { ok: false, response: invalidJsonResponse() };
+    }
+  }
+
+  try {
+    const text = await readRequestTextCapped(req, limit);
+    if (text.trim() === "") {
+      if (hasFallback) return { ok: true, value: options.fallback };
+      return { ok: false, response: invalidJsonResponse() };
+    }
+    return { ok: true, value: JSON.parse(text) as unknown };
+  } catch (err) {
+    if (err instanceof JsonBodyTooLargeError) {
+      return { ok: false, response: jsonBodyTooLargeResponse(err.limitBytes) };
+    }
+    if (hasFallback) return { ok: true, value: options.fallback };
+    return { ok: false, response: invalidJsonResponse() };
+  }
 }

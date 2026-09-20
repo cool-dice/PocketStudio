@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
@@ -27,7 +28,9 @@ export async function POST(
   const { id } = await ctx.params;
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
-  const body = bodySchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = bodySchema.safeParse(jsonRead.value);
 
   const project = await db.project.findFirst({
     where: { id, userId: check.userId },

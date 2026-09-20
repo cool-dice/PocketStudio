@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { requireAdmin } from "@/lib/admin";
 import { db } from "@/lib/db";
@@ -21,7 +22,9 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Модель не найдена" }, { status: 404 });
   }
 
-  const parsed = modelUpdateSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = modelUpdateSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },

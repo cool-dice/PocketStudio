@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
 import { consumeRateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -22,12 +23,9 @@ const loginSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
 
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {

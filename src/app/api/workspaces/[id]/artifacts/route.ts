@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import {
   ALBUM_ALREADY_HERE,
@@ -65,7 +66,9 @@ export async function POST(req: Request, { params }: Params) {
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
 
-  const body = await req.json().catch(() => ({}));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
   const copyParsed = copySchema.safeParse(body);
   if (copyParsed.success) {
     return copyFromLibrary(req, id, copyParsed.data.sourceId);

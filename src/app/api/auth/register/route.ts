@@ -10,6 +10,7 @@ import {
 import { ensureAdminSeed } from "@/lib/seed";
 import { inviteLifecycle, sanitizeInviteRole } from "@/lib/invite-status";
 import { consumeRateLimit } from "@/lib/rate-limit";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +32,9 @@ const registerSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
 
   const parsed = registerSchema.safeParse(body);
   if (!parsed.success) {

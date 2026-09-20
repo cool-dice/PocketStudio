@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { readJsonBody } from "@/lib/json-body-limit";
 import { saveGeneratedFile } from "@/lib/ai";
 import { compileFilmFfmpeg, whichFfmpeg } from "@/lib/ffmpeg-film";
 import {
@@ -36,7 +37,9 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
   }
 
-  const body = (await req.json().catch(() => ({}))) as {
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value as {
     clips?: { imageUrl?: string | null; durationSec?: number }[];
   };
   if (isExplicitEmptyCompileClips(body.clips)) {

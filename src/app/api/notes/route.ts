@@ -8,7 +8,7 @@ import { noteAnalysisFieldsForQueue } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 import { scheduleIndexNote } from "@/lib/rag";
 import { persistableTranscription } from "@/lib/voice-copy";
-import { oversizedJsonResponse } from "@/lib/json-body-limit";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -151,16 +151,13 @@ export async function POST(req: Request) {
   const blocked = oversizedJsonResponse(req);
   if (blocked) return blocked;
 
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
+
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
-  }
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
   }
 
   const parsed = createNoteSchema.safeParse(body);

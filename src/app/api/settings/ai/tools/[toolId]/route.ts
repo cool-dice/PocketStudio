@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
@@ -16,7 +17,9 @@ export async function PUT(req: Request, { params }: Params) {
   }
   const { toolId: rawToolId } = await params;
 
-  const parsed = userToolOverrideSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = userToolOverrideSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
