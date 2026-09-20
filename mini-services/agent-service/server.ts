@@ -96,6 +96,7 @@ import {
   parseMessageSend,
 } from "../../src/lib/message-send";
 import { AGENT_SOCKET_PATH } from "../../src/lib/agent-socket";
+import { THREAD_NOT_FOUND, threadLookupError } from "../../src/lib/thread-copy";
 
 const PORT = 3003;
 const HISTORY_LIMIT = 30; // last N message rows fed to the LLM (all roles)
@@ -1389,8 +1390,12 @@ io.on("connection", async (socket: Socket) => {
         return;
       }
       const thread = await db.thread.findUnique({ where: { id: threadId } });
-      if (!thread || thread.userId !== user.sub) {
-        socket.emit("error", { message: "Диалог не найден" });
+      const lookup = threadLookupError(
+        thread ? { userId: thread.userId } : null,
+        user.sub,
+      );
+      if (lookup) {
+        socket.emit("error", { message: lookup });
         return;
       }
       socket.join(`thread:${threadId}`);
@@ -1399,7 +1404,7 @@ io.on("connection", async (socket: Socket) => {
       }
     } catch (err) {
       console.error("[ws] thread:join failed:", err instanceof Error ? err.message : String(err));
-      socket.emit("error", { message: "Диалог не найден" });
+      socket.emit("error", { message: THREAD_NOT_FOUND });
     }
   });
 
@@ -1424,8 +1429,13 @@ io.on("connection", async (socket: Socket) => {
       const { threadId, text } = parsed;
 
       const thread = await db.thread.findUnique({ where: { id: threadId } });
-      if (!thread || thread.userId !== user.sub) {
-        socket.emit("error", { message: "Диалог не найден" });
+      const lookup = threadLookupError(
+        thread ? { userId: thread.userId, archived: thread.archived } : null,
+        user.sub,
+        { rejectArchived: true },
+      );
+      if (lookup || !thread) {
+        socket.emit("error", { message: lookup ?? THREAD_NOT_FOUND });
         return;
       }
 
@@ -1459,8 +1469,12 @@ io.on("connection", async (socket: Socket) => {
       return;
     }
     const thread = await db.thread.findUnique({ where: { id: threadId } });
-    if (!thread || thread.userId !== user.sub) {
-      socket.emit("error", { message: "Диалог не найден" });
+    const lookup = threadLookupError(
+      thread ? { userId: thread.userId } : null,
+      user.sub,
+    );
+    if (lookup) {
+      socket.emit("error", { message: lookup });
       return;
     }
     runningThreads.get(threadId)?.abort();

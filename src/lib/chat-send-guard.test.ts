@@ -52,4 +52,11 @@ describe("chat send guard", () => {
       isEmptyAssistantBubble({ role: "user", content: "" }),
     ).toBe(false);
   });
+
+  test("archived-send error does not keep the composer busy", () => {
+    expect(shouldKeepBusyOnSocketError("Диалог в архиве — верните его, чтобы писать")).toBe(
+      false,
+    );
+    expect(shouldKeepBusyOnSocketError("Диалог не найден")).toBe(false);
+  });
 });

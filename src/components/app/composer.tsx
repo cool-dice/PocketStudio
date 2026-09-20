@@ -56,6 +56,7 @@ import {
   COMPOSER_TEXTAREA_MAX_CHARS,
   composerSizeUi,
 } from "@/lib/message-send";
+import { THREAD_ARCHIVED_SEND } from "@/lib/thread-copy";
 
 const MAX_HEIGHT = 200;
 
@@ -101,6 +102,10 @@ export function Composer({
   useEffect(() => {
     const pending = pendingAutoSend.current;
     if (!pending || busy || locked || !activeThread) return;
+    if (activeThread.archived) {
+      pendingAutoSend.current = null;
+      return;
+    }
     const have = activeThread.projectId ?? null;
     if (pending.projectId !== have) return;
     const size = composerSizeUi(pending.text);
@@ -355,9 +360,12 @@ export function Composer({
   }, [value]);
 
   const blocked = busy || locked || !scoped;
+  const archived = Boolean(activeThread?.archived);
   const size = composerSizeUi(value, sendError);
+  const hintError = archived ? THREAD_ARCHIVED_SEND : size.error;
   const canSend =
     !blocked &&
+    !archived &&
     !isRecording &&
     value.trim().length > 0 &&
     !size.disableSend;
@@ -450,13 +458,15 @@ export function Composer({
             placeholder={
               isRecording
                 ? "Слушаем вас…"
-                : locked && !busy
-                  ? "Подключаем чат воркспейса…"
-                  : blocked
-                    ? "Студия печатает…"
-                    : "Напишите сообщение… или / для команд"
+                : archived
+                  ? THREAD_ARCHIVED_SEND
+                  : locked && !busy
+                    ? "Подключаем чат воркспейса…"
+                    : blocked
+                      ? "Студия печатает…"
+                      : "Напишите сообщение… или / для команд"
             }
-            disabled={blocked || isRecording}
+            disabled={blocked || isRecording || archived}
             maxLength={COMPOSER_TEXTAREA_MAX_CHARS}
             className="vf-scroll max-h-[200px] min-h-11 min-w-0 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
@@ -554,12 +564,12 @@ export function Composer({
           <p
             id="composer-hint"
             className={`min-w-0 flex-1 text-xs ${
-              size.error ? "text-destructive" : "text-muted-foreground"
+              hintError ? "text-destructive" : "text-muted-foreground"
             }`}
-            role={size.error ? "alert" : undefined}
+            role={hintError ? "alert" : undefined}
           >
-            {size.error
-              ? size.error
+            {hintError
+              ? hintError
               : isRecording
                 ? "Идёт запись голоса"
                 : voiceState === "processing"

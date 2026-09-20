@@ -10,7 +10,7 @@
  * summaryFromDto — сигнатуры швов не меняются.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
 
 import { NotesTab } from "@/components/workspaces/notes-tab";
@@ -24,6 +24,7 @@ import { WorkspaceTabContent } from "@/components/workspaces/workspace-tabs";
 import { summaryFromDto } from "@/components/workspaces/workspaces-data";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useThreads } from "@/hooks/use-threads";
 import { useWorkspace } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
 import { resolveWorkspaceTab } from "@/components/workspaces/overview-data";
@@ -34,6 +35,7 @@ import {
   WORKSPACE_SHELL_LOAD_ERROR_HINT,
   workspaceShellView,
 } from "@/lib/workspace-copy";
+import { workspaceThreadBindAction } from "@/lib/thread-copy";
 
 export function WorkspaceShell({
   onOpenMobileNav,
@@ -144,6 +146,10 @@ export function WorkspaceShell({
         aria-label={`Содержимое вкладки «${WORKSPACE_TAB_META[safeTab].label}»`}
         className="min-h-0 flex-1 overflow-hidden"
       >
+        <WorkspaceThreadBinder
+          workspaceId={workspace.id}
+          title={workspace.name}
+        />
         {safeTab === "overview" ? (
           <OverviewTab workspace={workspace} onUpdated={reload} />
         ) : safeTab === "notes" ? (
@@ -159,6 +165,51 @@ export function WorkspaceShell({
       </div>
     </div>
   );
+}
+
+/**
+ * Every workspace tab (including Видео) binds the scoped thread so a leftover
+ * global id cannot toast «Диалог не найден» while the module itself is fine.
+ */
+function WorkspaceThreadBinder({
+  workspaceId,
+  title,
+}: {
+  workspaceId: string;
+  title: string;
+}) {
+  const {
+    threads,
+    threadsLoading,
+    threadsError,
+    activeThread,
+    ensureWorkspaceThread,
+  } = useThreads();
+  const bindingRef = useRef(false);
+
+  useEffect(() => {
+    if (threadsLoading || threadsError || bindingRef.current) return;
+    const action = workspaceThreadBindAction(
+      workspaceId,
+      activeThread?.projectId,
+      threads,
+    );
+    if (action.action === "noop") return;
+    bindingRef.current = true;
+    void ensureWorkspaceThread(workspaceId, `Чат · ${title}`).finally(() => {
+      bindingRef.current = false;
+    });
+  }, [
+    threads,
+    threadsLoading,
+    threadsError,
+    activeThread?.projectId,
+    workspaceId,
+    title,
+    ensureWorkspaceThread,
+  ]);
+
+  return null;
 }
 
 /** Скелетон оболочки: крошки, иконка+название, бейджи, строка вкладок. */
