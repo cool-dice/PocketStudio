@@ -363,5 +363,7 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-20 | WS message:send cap | `parseMessageSend`: UTF-8 > 64 КБ → `error` RU, без хода агента. Пакет ≤ 96 КБ. Композер не эмитит oversized. |
 | 2026-09-20 | Composer oversize UI | Композер: RU из сокет `error`, send disabled, счётчик у капа. Без тоста успеха. |
 | 2026-09-20 | Tool-call args cap | `parseToolCall` / execute: JSON args 256 КБ; write_file/apply_patch 1 МБ. Сверх капа — RU в тред, без apply_patch/create_note. |
+| 2026-09-20 | Chapter tool JSON 1 МБ | `rewrite_section` / `append_section` / `create_document` на той же 1 МБ карте, что HTTP `/api/sections/[id]`. Диск агента 200 КБ не поднимали. |
+| 2026-09-20 | Section content 200k | `create_document` / `append_section` и PATCH `/api/sections/[id]` делят `MAX_SECTION_CONTENT_CHARS` (200_000). 50_001 символов проходит. Диск агента 200 КБ не поднимали. |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.
