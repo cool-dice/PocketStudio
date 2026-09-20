@@ -63,7 +63,12 @@ describe.skipIf(SKIP_PG)("studio persist: design / NLE / DAW", () => {
       role: "client",
     });
     const ws = await db.project.create({
-      data: { userId: user.id, name: "Студия persist", type: "universal" },
+      data: {
+        userId: user.id,
+        name: "Студия persist",
+        type: "universal",
+        origin: "workspace",
+      },
     });
     return { token, wsId: ws.id };
   }
