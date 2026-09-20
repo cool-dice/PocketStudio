@@ -162,3 +162,4 @@ describe.skipIf(SKIP_PG)("create_workspace / list_workspaces agent tools", () =>
     expect(listedIds).not.toContain(secret.id);
     expect(JSON.stringify(listed)).not.toContain("Секретная студия");
   });
+});
