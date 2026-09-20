@@ -1,0 +1,12 @@
+{
+  "name": "PocketStudio",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "web",
+      "command": "export PATH=\"$HOME/.bun/bin:/usr/lib/postgresql/16/bin:$PATH\" && bun run dev"
+    }
+  ]
+}
