@@ -15,6 +15,7 @@ import { snapshotSection } from "@/lib/section-revisions";
 import { ensureOwned } from "@/lib/workspace-api";
 import { sectionDto } from "@/lib/workspace-shapes";
 import { scheduleIndexSection } from "@/lib/rag";
+import { sectionContentFromModelOutput } from "@/lib/section-content";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -113,10 +114,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const nextContent =
-      action === "continue"
-        ? [section.content.trim(), generated].filter(Boolean).join("\n\n")
-        : generated;
+    const nextContent = sectionContentFromModelOutput(
+      action,
+      section.content,
+      generated,
+    );
 
     if (nextContent !== section.content) {
       try {

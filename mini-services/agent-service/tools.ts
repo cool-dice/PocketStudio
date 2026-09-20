@@ -406,7 +406,7 @@ const CHECKPOINT_MODE_ERROR =
   "Чекпоинты доступны только в режиме «Действовать» — переключите режим диалога";
 
 /** Agent-side file caps (tighter than the REST 256KB cap). */
-const MAX_AGENT_FILE_BYTES = 200 * 1024;
+export const MAX_AGENT_FILE_BYTES = 200 * 1024;
 /** Max entries returned to the LLM by list_files. */
 const MAX_LIST_FILES_ENTRIES = 400;
 

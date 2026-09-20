@@ -63,6 +63,10 @@ import {
   listWorkspaceTree,
   projectRoot,
 } from "../../src/lib/workspace";
+import {
+  sectionContentFromModelOutput,
+  sectionContentFromToolArg,
+} from "../../src/lib/section-content";
 import type { ToolContext, ToolDef } from "./tools";
 
 // ─────────────────────────── shared helpers ───────────────────────────
@@ -619,7 +623,7 @@ const createDocument: ToolDef = {
         ? kindRaw
         : null;
     const sectionTitle = optString(args.sectionTitle, 120) ?? "Глава 1";
-    const content = optString(args.content, 50_000) ?? "";
+    const content = sectionContentFromToolArg(args.content);
 
     const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
@@ -636,6 +640,7 @@ const createDocument: ToolDef = {
       include: { sections: { orderBy: { order: "asc" } } },
     });
     const first = document.sections[0];
+    if (first) scheduleIndexSection(db, first.id);
     return {
       message: `Документ создан: ${document.title}`,
       workspaceId: ws.id,
@@ -666,7 +671,7 @@ const appendSection: ToolDef = {
     }
     const sectionTitle = optString(args.title, 120);
     if (!sectionTitle) return { error: "Аргумент title обязателен (заголовок главы)" };
-    const content = optString(args.content, 50_000) ?? "";
+    const content = sectionContentFromToolArg(args.content);
 
     let documentId = pickString(args, ["documentId"]);
     if (!documentId) {
@@ -803,10 +808,11 @@ const rewriteSection: ToolDef = {
       ], { signal: ctx.signal });
       const generated = result.text.trim();
       if (!generated) return { error: "Модель вернула пустой текст" };
-      const nextContent =
-        action === "continue"
-          ? [section.content.trim(), generated].filter(Boolean).join("\n\n")
-          : generated;
+      const nextContent = sectionContentFromModelOutput(
+        action,
+        section.content,
+        generated,
+      );
       if (nextContent !== section.content) {
         await db.documentSectionRevision
           .create({
