@@ -33,7 +33,7 @@ export async function POST(
   const body = bodySchema.safeParse(jsonRead.value);
 
   const project = await db.project.findFirst({
-    where: { id, userId: check.userId },
+    where: { id, userId: check.userId, origin: "workspace" },
     select: { id: true, name: true, rootPath: true },
   });
   if (!project) {

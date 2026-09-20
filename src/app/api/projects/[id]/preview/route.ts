@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
-import { codeProjectWhere } from "@/lib/project-api";
+import { diskFilesWhere } from "@/lib/project-api";
 import { listWorkspaceTree, projectRoot, readWorkspaceFile } from "@/lib/workspace";
 import { injectPreviewInspect } from "@/lib/preview-inspect";
 import { PREVIEW_HTML_HINT, PREVIEW_LISTING_HINT } from "@/lib/studio-copy";
@@ -23,7 +23,7 @@ export async function GET(req: Request, { params }: Params) {
   }
   const { id } = await params;
   const project = await db.project.findFirst({
-    where: codeProjectWhere(id, session.sub),
+    where: diskFilesWhere(id, session.sub),
     select: { id: true, name: true },
   });
   if (!project) {

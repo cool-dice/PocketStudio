@@ -79,6 +79,7 @@ describe("TTS / audio honesty copy", () => {
     expect(DAW_EMPTY_TRACKS).not.toBe(DAW_LOAD_ERROR);
     expect(DAW_EMPTY_TRACKS_HINT).toMatch(/не ошибка загрузки/i);
     expect(DAW_LOAD_ERROR).toMatch(/не удалось загрузить/i);
+    expect(DAW_LOAD_ERROR).not.toMatch(/проект студии/i);
     expect(AUDIO_LIBRARY_EMPTY).toMatch(/[А-Яа-яЁё]/);
     expect(AUDIO_LIBRARY_LOAD_ERROR).toMatch(/[А-Яа-яЁё]/);
   });

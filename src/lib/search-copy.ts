@@ -13,7 +13,7 @@ export const SEARCH_TITLE = "Поиск по PocketStudio";
 export const SEARCH_DESCRIPTION =
   "Диалоги, заметки, воркспейсы, код-проекты, документы, сущности и артефакты";
 export const SEARCH_PLACEHOLDER_GLOBAL =
-  "Поиск по диалогам, заметкам, документам, сущностям и артефактам…";
+  "Поиск по диалогам, заметкам, воркспейсам, код-проектам, документам…";
 export const SEARCH_PLACEHOLDER_WORKSPACE = "Поиск в этом воркспейсе…";
 export const SEARCH_GROUP_WORKSPACES = "Воркспейсы";
 export const SEARCH_GROUP_CODE_PROJECTS = "Код-проекты";

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { promises as fsp } from "node:fs";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
-import { codeProjectWhere } from "@/lib/project-api";
+import { diskFilesWhere } from "@/lib/project-api";
 import { exportProjectZip, projectRoot, WorkspaceError } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ export async function GET(
   const { id } = await params;
 
   const project = await db.project.findFirst({
-    where: codeProjectWhere(id, session.sub),
+    where: diskFilesWhere(id, session.sub),
   });
   if (!project) {
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });

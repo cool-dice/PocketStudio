@@ -95,7 +95,7 @@ export function AudioScreen({
           >
             <p className="text-sm font-medium">Воркспейс аудио</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Озвучки, проект студии и аудиотека живут в воркспейсе — выберите,
+              Озвучки, дорожки студии и аудиотека живут в воркспейсе — выберите,
               с каким работать.
             </p>
             <WorkspacePickerStatus

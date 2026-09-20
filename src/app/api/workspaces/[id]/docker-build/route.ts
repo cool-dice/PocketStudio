@@ -30,7 +30,7 @@ export async function POST(req: Request, { params }: Params) {
   if (!check.ok) return check.response;
 
   const project = await db.project.findFirst({
-    where: { id, userId: check.userId },
+    where: { id, userId: check.userId, origin: "workspace" },
     select: { id: true, rootPath: true },
   });
   if (!project) {

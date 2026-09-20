@@ -72,6 +72,12 @@ import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
 import { PREVIEW_HTML_HINT, PREVIEW_LISTING_HINT } from "@/lib/studio-copy";
+import {
+  editorLoadError,
+  editorProjectFromWorkspace,
+  editorSectionLabel,
+  type EditorSurface,
+} from "@/lib/editor-project";
 import { pluralFiles, relativeTime } from "@/lib/format";
 import { languageFromPath, OriginBadge, fileDotStyle } from "@/lib/project-style";
 import { isDeletableRelPath } from "@/lib/rel-path";
@@ -82,6 +88,8 @@ import { cn } from "@/lib/utils";
 interface ProjectScreenProps {
   projectId: string;
   onOpenMobileNav: () => void;
+  /** App-studio Code tab: load /api/workspaces, never dump the user to «Проекты». */
+  surface?: EditorSurface;
 }
 
 /* ── Open-file buffer ── */
@@ -136,7 +144,12 @@ function buildTree(entries: FileEntry[]): TreeNode[] {
   return root.children;
 }
 
-export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps) {
+export function ProjectScreen({
+  projectId,
+  onOpenMobileNav,
+  surface = "project",
+}: ProjectScreenProps) {
+  const embedded = surface === "workspace";
   const { remove } = useProjects();
   const { startProjectThread } = useThreads();
 
@@ -265,17 +278,21 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
     const seq = ++projectSeqRef.current;
     setProjectLoading(true);
     try {
-      const loaded = await api.getProject(projectId);
+      const loaded = embedded
+        ? editorProjectFromWorkspace(await api.getWorkspace(projectId))
+        : await api.getProject(projectId);
       if (seq === projectSeqRef.current) setProject(loaded);
     } catch (err) {
       if (seq === projectSeqRef.current) {
-        toast.error(err instanceof ApiError ? err.message : "Не удалось загрузить проект");
-        closeProject();
+        toast.error(
+          err instanceof ApiError ? err.message : editorLoadError(surface),
+        );
+        if (!embedded) closeProject();
       }
     } finally {
       if (seq === projectSeqRef.current) setProjectLoading(false);
     }
-  }, [projectId, closeProject]);
+  }, [projectId, closeProject, embedded, surface]);
 
   const loadTree = useCallback(
     async (silent: boolean) => {
@@ -434,8 +451,15 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   const discuss = async () => {
     if (!project || discussing) return;
     setDiscussing(true);
-    setMainArea("chat");
-    await startProjectThread(project.id, `Проект «${project.name}»`);
+    if (embedded) {
+      useAppUi.getState().setWorkspaceTab("chat");
+    } else {
+      setMainArea("chat");
+    }
+    await startProjectThread(
+      project.id,
+      embedded ? `Воркспейс «${project.name}»` : `Проект «${project.name}»`,
+    );
     setDiscussing(false);
   };
 
@@ -495,7 +519,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
 
   return (
     <section
-      aria-label="Проект"
+      aria-label={editorSectionLabel(surface)}
       className="flex min-w-0 flex-1 flex-col bg-background"
     >
       {/* ── Header ── */}
@@ -509,15 +533,17 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
         >
           <Menu className="size-4" aria-hidden="true" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-9 shrink-0"
-          onClick={closeProject}
-          aria-label="Назад к проектам"
-        >
-          <ArrowLeft className="size-4" aria-hidden="true" />
-        </Button>
+        {!embedded ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0"
+            onClick={closeProject}
+            aria-label="Назад к проектам"
+          >
+            <ArrowLeft className="size-4" aria-hidden="true" />
+          </Button>
+        ) : null}
 
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <h1 className="truncate text-sm font-semibold sm:text-[15px]">
@@ -545,8 +571,12 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
             onClick={() => void exportZip()}
             disabled={!project || exporting}
-            aria-label="Скачать проект zip-архивом"
-            title="Скачать проект zip-архивом"
+            aria-label={
+              embedded ? "Скачать исходники zip-архивом" : "Скачать проект zip-архивом"
+            }
+            title={
+              embedded ? "Скачать исходники zip-архивом" : "Скачать проект zip-архивом"
+            }
           >
             {exporting ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -582,7 +612,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
             onClick={() => void discuss()}
             disabled={!project || discussing}
-            aria-label="Обсудить проект в чате"
+            aria-label={embedded ? "Обсудить воркспейс в чате" : "Обсудить проект в чате"}
           >
             {discussing ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -607,7 +637,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
                 variant="ghost"
                 size="icon"
                 className="size-9"
-                aria-label="Меню проекта"
+                aria-label={embedded ? "Меню кода воркспейса" : "Меню проекта"}
               >
                 <MoreHorizontal className="size-4" aria-hidden="true" />
               </Button>
@@ -617,14 +647,18 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
                 <Pencil className="size-4" aria-hidden="true" />
                 Переименовать
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="size-4" aria-hidden="true" />
-                Удалить проект
-              </DropdownMenuItem>
+              {!embedded ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                    Удалить проект
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -934,6 +968,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
         open={renameOpen}
         onOpenChange={setRenameOpen}
         project={project}
+        surface={surface}
         onRenamed={(updated) => setProject((prev) => ({ ...prev, ...updated }))}
       />
 
@@ -1055,7 +1090,7 @@ function FileTreeBody({
   if (nodes.length === 0) {
     return (
       <p className="px-3 pt-2 text-xs leading-relaxed text-muted-foreground">
-        В проекте пока нет файлов.
+        Файлов пока нет.
       </p>
     );
   }
@@ -1497,11 +1532,13 @@ function RenameDialog({
   open,
   onOpenChange,
   project,
+  surface = "project",
   onRenamed,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   project: Project | null;
+  surface?: EditorSurface;
   onRenamed: (updated: Project) => void;
 }) {
   const [name, setName] = useState("");
@@ -1523,16 +1560,33 @@ function RenameDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const updated = await api.updateProject(project.id, {
-        name: trimmed,
-        description: description.trim(),
-      });
+      const updated =
+        surface === "workspace"
+          ? editorProjectFromWorkspace(
+              await api.updateWorkspace(project.id, {
+                name: trimmed,
+                description: description.trim(),
+              }),
+            )
+          : await api.updateProject(project.id, {
+              name: trimmed,
+              description: description.trim(),
+            });
       onRenamed(updated);
       useAppUi.getState().bumpProjects();
+      if (surface === "workspace") useAppUi.getState().bumpWorkspace();
       onOpenChange(false);
-      toast.success("Проект обновлён");
+      toast.success(
+        surface === "workspace" ? "Воркспейс обновлён" : "Проект обновлён",
+      );
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось обновить проект");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : surface === "workspace"
+            ? "Не удалось обновить воркспейс"
+            : "Не удалось обновить проект",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1544,10 +1598,12 @@ function RenameDialog({
         <DialogHeader className="pb-3">
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Pencil className="size-4 text-primary" aria-hidden="true" />
-            Настройки проекта
+            {surface === "workspace" ? "Настройки воркспейса" : "Настройки проекта"}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Название и описание проекта
+            {surface === "workspace"
+              ? "Название и описание воркспейса"
+              : "Название и описание проекта"}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

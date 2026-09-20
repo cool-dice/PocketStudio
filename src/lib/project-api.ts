@@ -1,6 +1,7 @@
 /**
- * Owner check for code-app Project rows (origin template|github|zip).
- * Studios (origin=workspace) are /api/workspaces, never these routes.
+ * Owner checks for Project rows.
+ * GET/PATCH/DELETE /api/projects and Dockerfile stay code-origin only.
+ * Tree/file/git routes also serve app-type studios (disk on that /w/{id}).
  */
 
 import { NextResponse } from "next/server";
@@ -15,8 +16,24 @@ export function codeProjectWhere(id: string, userId: string) {
   return { id, userId, origin: { in: [...CODE_PROJECT_ORIGINS] } };
 }
 
+/** Next.js code apps, or an app-type studio with files on disk. */
+export function diskFilesWhere(id: string, userId: string) {
+  return {
+    id,
+    userId,
+    OR: [
+      { origin: { in: [...CODE_PROJECT_ORIGINS] } },
+      { origin: "workspace", type: "app" },
+    ],
+  };
+}
+
 export async function findOwnedCodeProject(id: string, userId: string) {
   return db.project.findFirst({ where: codeProjectWhere(id, userId) });
+}
+
+export async function findOwnedDiskProject(id: string, userId: string) {
+  return db.project.findFirst({ where: diskFilesWhere(id, userId) });
 }
 
 export async function ensureCodeProject(

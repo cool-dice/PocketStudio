@@ -178,7 +178,7 @@ export function Composer({
       {
         name: "поиск",
         label: "Поиск",
-        description: "Искать по диалогам, заметкам и проектам",
+        description: "Искать по диалогам, заметкам, воркспейсам и код-проектам",
         icon: SLASH_MISC_ICONS.search,
         run: () => setSearchOpen(true),
       },

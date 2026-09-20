@@ -7,6 +7,7 @@ import { projectRoot, removeProjectDir, writeWorkspaceFile } from "@/lib/workspa
 import { GET as getProject, DELETE as deleteProject } from "./route";
 import { POST as generateDockerfile } from "./dockerfile/route";
 import { GET as exportProject } from "./export/route";
+import { GET as getProjectTree } from "./tree/route";
 
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 const stamp = Date.now().toString(36);
@@ -64,6 +65,14 @@ describe.skipIf(SKIP_PG)("GET /api/projects/[id] is code-origin only", () => {
         origin: "workspace",
       },
     });
+    const appStudio = await db.project.create({
+      data: {
+        userId: user.id,
+        name: "Карман",
+        type: "app",
+        origin: "workspace",
+      },
+    });
     const code = await db.project.create({
       data: {
         userId: user.id,
@@ -72,7 +81,7 @@ describe.skipIf(SKIP_PG)("GET /api/projects/[id] is code-origin only", () => {
         origin: "template",
       },
     });
-    projectIds.push(code.id);
+    projectIds.push(code.id, appStudio.id);
     const root = projectRoot(code.id);
     await writeWorkspaceFile(root, "src/index.ts", "export {}\n");
     await db.project.update({
@@ -168,5 +177,72 @@ describe.skipIf(SKIP_PG)("GET /api/projects/[id] is code-origin only", () => {
     );
     expect(zip.status).toBe(200);
     expect(zip.headers.get("content-type")).toMatch(/zip/);
+
+    const appRoot = projectRoot(appStudio.id);
+    await writeWorkspaceFile(appRoot, "src/app.ts", "export const app = 1;\n");
+    await db.project.update({
+      where: { id: appStudio.id },
+      data: { rootPath: appRoot },
+    });
+
+    const appGet = await getProject(
+      jsonRequest(
+        `http://localhost/api/projects/${appStudio.id}`,
+        "GET",
+        undefined,
+        token,
+      ),
+      { params: Promise.resolve({ id: appStudio.id }) },
+    );
+    expect(appGet.status).toBe(404);
+
+    const appDf = await generateDockerfile(
+      jsonRequest(
+        `http://localhost/api/projects/${appStudio.id}/dockerfile`,
+        "POST",
+        { overwrite: true },
+        token,
+      ),
+      { params: Promise.resolve({ id: appStudio.id }) },
+    );
+    expect(appDf.status).toBe(404);
+
+    const appTree = await getProjectTree(
+      jsonRequest(
+        `http://localhost/api/projects/${appStudio.id}/tree`,
+        "GET",
+        undefined,
+        token,
+      ),
+      { params: Promise.resolve({ id: appStudio.id }) },
+    );
+    expect(appTree.status).toBe(200);
+    const appTreeJson = (await appTree.json()) as {
+      tree: { path: string; type: string }[];
+    };
+    expect(appTreeJson.tree.some((e) => e.path === "src/app.ts")).toBe(true);
+
+    const musicTree = await getProjectTree(
+      jsonRequest(
+        `http://localhost/api/projects/${studio.id}/tree`,
+        "GET",
+        undefined,
+        token,
+      ),
+      { params: Promise.resolve({ id: studio.id }) },
+    );
+    expect(musicTree.status).toBe(404);
+
+    const appZip = await exportProject(
+      jsonRequest(
+        `http://localhost/api/projects/${appStudio.id}/export`,
+        "GET",
+        undefined,
+        token,
+      ),
+      { params: Promise.resolve({ id: appStudio.id }) },
+    );
+    expect(appZip.status).toBe(200);
+    expect(appZip.headers.get("content-type")).toMatch(/zip/);
   });
 });

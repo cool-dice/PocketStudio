@@ -62,7 +62,7 @@ const TYPE_META: Record<
   project_created: {
     icon: FolderKanban,
     iconClass: "text-amber-600 dark:text-amber-400",
-    ariaLabel: "Создан проект",
+    ariaLabel: "Создан воркспейс или проект",
   },
   checkpoint: {
     icon: GitCommitHorizontal,
