@@ -36,6 +36,7 @@ describe("rewrite_section uses the shared 200k cap", () => {
 
 describe.skipIf(SKIP_PG)("create_document / append_section content cap", () => {
   afterAll(async () => {
+    await flushRagQueue().catch(() => {});
     for (const id of ids.reverse()) {
       await db.user.delete({ where: { id } }).catch(() => {});
     }
