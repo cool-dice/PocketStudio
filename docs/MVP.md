@@ -365,5 +365,6 @@ ROADMAP помечает визуальные волны ✅. По коду на
 | 2026-09-20 | Tool-call args cap | `parseToolCall` / execute: JSON args 256 КБ; write_file/apply_patch 1 МБ. Сверх капа — RU в тред, без apply_patch/create_note. |
 | 2026-09-20 | Chapter tool JSON 1 МБ | `rewrite_section` / `append_section` / `create_document` на той же 1 МБ карте, что HTTP `/api/sections/[id]`. Диск агента 200 КБ не поднимали. |
 | 2026-09-20 | Section content 200k | `create_document` / `append_section` и PATCH `/api/sections/[id]` делят `MAX_SECTION_CONTENT_CHARS` (200_000). 50_001 символов проходит. Диск агента 200 КБ не поднимали. |
+| 2026-09-20 | rewrite cap + create RAG | `rewrite_section` (агент + HTTP) пишет через `sectionContentFromModelOutput` (200k). `create_document` ставит первую главу в очередь RAG, как `append_section`. |
 
 Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

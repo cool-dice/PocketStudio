@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { MAX_AGENT_FILE_BYTES } from "../../mini-services/agent-service/tools";
 import {
   MAX_SECTION_CONTENT_CHARS,
+  sectionContentFromModelOutput,
   sectionContentFromToolArg,
   sectionContentSchema,
 } from "./section-content";
@@ -26,5 +27,23 @@ describe("shared section content cap", () => {
 
   test("disk write stays 200 KiB — chapter chars are not a disk raise", () => {
     expect(MAX_AGENT_FILE_BYTES).toBe(200 * 1024);
+  });
+
+  test("rewrite_section slices unbounded model output to 200k", () => {
+    const over = "я".repeat(MAX_SECTION_CONTENT_CHARS + 40);
+    const rewritten = sectionContentFromModelOutput("rewrite", "старый", over);
+    expect(rewritten.length).toBe(MAX_SECTION_CONTENT_CHARS);
+    expect(rewritten).toBe(over.slice(0, MAX_SECTION_CONTENT_CHARS));
+
+    const mid = "x".repeat(50_001);
+    expect(sectionContentFromModelOutput("write", "", mid).length).toBe(50_001);
+
+    const continued = sectionContentFromModelOutput(
+      "continue",
+      "преамбула",
+      over,
+    );
+    expect(continued.length).toBe(MAX_SECTION_CONTENT_CHARS);
+    expect(continued.startsWith("преамбула\n\n")).toBe(true);
   });
 });

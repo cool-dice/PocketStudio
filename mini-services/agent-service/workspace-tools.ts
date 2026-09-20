@@ -63,7 +63,10 @@ import {
   listWorkspaceTree,
   projectRoot,
 } from "../../src/lib/workspace";
-import { sectionContentFromToolArg } from "../../src/lib/section-content";
+import {
+  sectionContentFromModelOutput,
+  sectionContentFromToolArg,
+} from "../../src/lib/section-content";
 import type { ToolContext, ToolDef } from "./tools";
 
 // ─────────────────────────── shared helpers ───────────────────────────
@@ -637,6 +640,7 @@ const createDocument: ToolDef = {
       include: { sections: { orderBy: { order: "asc" } } },
     });
     const first = document.sections[0];
+    if (first) scheduleIndexSection(db, first.id);
     return {
       message: `Документ создан: ${document.title}`,
       workspaceId: ws.id,
@@ -804,10 +808,11 @@ const rewriteSection: ToolDef = {
       ], { signal: ctx.signal });
       const generated = result.text.trim();
       if (!generated) return { error: "Модель вернула пустой текст" };
-      const nextContent =
-        action === "continue"
-          ? [section.content.trim(), generated].filter(Boolean).join("\n\n")
-          : generated;
+      const nextContent = sectionContentFromModelOutput(
+        action,
+        section.content,
+        generated,
+      );
       if (nextContent !== section.content) {
         await db.documentSectionRevision
           .create({
