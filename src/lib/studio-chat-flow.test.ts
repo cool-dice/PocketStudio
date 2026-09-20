@@ -117,7 +117,7 @@ describe("boundThreadChip", () => {
       href: "/w/ws-luna",
     });
     expect(pathFor("workspace", "ws-luna", "chat")).toBe("/w/ws-luna");
-    expect(boundThreadChip({ name: "App", origin: "template" })).toEqual({
+    expect(boundThreadChip({ name: "App", origin: "template", id: "code-1" })).toEqual({
       label: "Проект: App",
       kind: "project",
       href: null,

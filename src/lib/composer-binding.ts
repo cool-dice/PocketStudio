@@ -1,6 +1,8 @@
 /**
  * Composer chip copy when a thread is bound to a code project vs a studio.
  * Music/book/film threads must not read as «Проект:».
+ * `/w/{id}` is the workspace shell only — code apps stay on openProject
+ * (mainArea "project"), not a fake studio URL.
  */
 
 import { pathFor } from "./app-url";
