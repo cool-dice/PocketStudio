@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   DOCUMENTS_LOAD_ERROR,
+  displayedSectionsCount,
   documentsAfterCreate,
   documentsListView,
 } from "./documents-list";
@@ -29,6 +30,17 @@ describe("documentsAfterCreate", () => {
       { id: "b" },
     );
     expect(next.map((d) => d.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("displayedSectionsCount", () => {
+  test("content-only list DTO still reports chapters", () => {
+    expect(displayedSectionsCount({ sections: [], sectionsCount: 4 })).toBe(4);
+    expect(displayedSectionsCount({ sectionsCount: 2 })).toBe(2);
+    expect(displayedSectionsCount({ sections: [{ id: "a" }, { id: "b" }] })).toBe(
+      2,
+    );
+    expect(displayedSectionsCount({ sections: [] })).toBe(0);
   });
 });
 

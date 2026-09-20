@@ -28,3 +28,12 @@ export function documentsAfterCreate<T extends { id: string }>(
 ): T[] {
   return [created, ...list.filter((doc) => doc.id !== created.id)];
 }
+
+/** Prefer live chapters; an empty `sections: []` from a list DTO is not 0. */
+export function displayedSectionsCount(doc: {
+  sections?: unknown[];
+  sectionsCount?: number;
+}): number {
+  const n = doc.sections?.length ?? 0;
+  return n > 0 ? n : (doc.sectionsCount ?? 0);
+}

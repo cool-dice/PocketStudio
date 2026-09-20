@@ -13,6 +13,7 @@ import type { RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { displayedSectionsCount } from "@/lib/documents-list";
 import { cn } from "@/lib/utils";
 import type { DocumentDto, DocumentSectionDto } from "@/lib/workspace-types";
 import type { SectionPatch } from "@/hooks/use-documents";
@@ -209,7 +210,7 @@ export function DocumentTitleRow({
           {kind.label}
         </BadgePill>
         <BadgePill className="border-primary/30 bg-primary/10 text-primary">
-          {formatNumber(doc.sections?.length ?? doc.sectionsCount ?? 0)}{" "}
+          {formatNumber(displayedSectionsCount(doc))}{" "}
           секц. · {progress}%
         </BadgePill>
       </div>
