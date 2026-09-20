@@ -28,11 +28,21 @@ export function agentSocketProxyRewrites(): {
   const dest = agentSocketProxyDestination();
   return [
     { source: AGENT_SOCKET_PATH, destination: dest },
+    { source: `${AGENT_SOCKET_PATH}/`, destination: `${dest}/` },
     {
       source: `${AGENT_SOCKET_PATH}/:path*`,
       destination: `${dest}/:path*`,
     },
   ];
+}
+
+/** socket.io-client options: no trailing slash so Next does not 308 the handshake. */
+export function agentSocketIoClientOptions() {
+  return {
+    path: AGENT_SOCKET_PATH,
+    addTrailingSlash: false as const,
+    transports: ["polling", "websocket"] as const,
+  };
 }
 
 /** True for `/socket.io` and `/socket.io/...` (query/hash ignored). */
@@ -51,7 +61,8 @@ export function isAgentSocketPath(pathname: string): boolean {
 /**
  * Next.js 16 `proxy` matcher. `/socket.io` is excluded so Engine.IO polling
  * POSTs and websocket upgrades are not turned into Next responses.
+ * The matcher string MUST be a compile-time literal in `src/proxy.ts`.
  */
 export const PROXY_MATCHER = [
   "/((?!_next/static|_next/image|favicon.ico|socket\\.io).*)",
-];
+] as const;

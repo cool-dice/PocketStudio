@@ -40,8 +40,8 @@ import {
   type AgentLinkStatus,
 } from "@/lib/agent-link";
 import {
-  AGENT_SOCKET_PATH,
   agentSocketClientUri,
+  agentSocketIoClientOptions,
 } from "@/lib/agent-socket";
 import { textPreview } from "@/lib/format";
 import { useNotifications } from "@/lib/notifications-store";
@@ -95,10 +95,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   // fresh ws-token on every connect attempt.
   const [socket] = useState<Socket>(() =>
     io(agentSocketClientUri(), {
-      path: AGENT_SOCKET_PATH,
-      // Polling first: Next :3000 rewrites HTTP reliably; websocket upgrades
-      // when the rewrite (or Caddy :81) supports them.
-      transports: ["polling", "websocket"],
+      ...agentSocketIoClientOptions(),
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,

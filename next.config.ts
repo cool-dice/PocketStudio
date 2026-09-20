@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  skipTrailingSlashRedirect: true,
   async rewrites() {
     return { beforeFiles: agentSocketProxyRewrites() };
   },

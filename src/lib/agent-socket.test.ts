@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
 import nextConfig from "../../next.config";
-import { PROXY_MATCHER, proxy } from "../proxy";
+import { config as proxyConfig, proxy } from "../proxy";
 import { NextRequest } from "next/server";
 
 import {
   AGENT_CADDY_PORT_QUERY,
   AGENT_SERVICE_PORT,
   AGENT_SOCKET_PATH,
+  PROXY_MATCHER,
   agentSocketClientUri,
+  agentSocketIoClientOptions,
   agentSocketProxyDestination,
   agentSocketProxyRewrites,
   isAgentSocketPath,
@@ -64,8 +66,16 @@ describe("agent socket path for Next without Caddy", () => {
     expect(isAgentSocketPath("/w/abc")).toBe(false);
   });
 
+  test("client options skip the trailing slash Next would 308", () => {
+    const opts = agentSocketIoClientOptions();
+    expect(opts.path).toBe(AGENT_SOCKET_PATH);
+    expect(opts.addTrailingSlash).toBe(false);
+    expect(opts.transports[0]).toBe("polling");
+  });
+
   test("proxy matcher skips socket.io so upgrades are not intercepted", () => {
     expect(PROXY_MATCHER.join(" ")).toContain("socket\\.io");
+    expect(proxyConfig.matcher).toEqual([...PROXY_MATCHER]);
     const res = proxy(
       new NextRequest("http://localhost/socket.io/?EIO=4&transport=polling"),
     );

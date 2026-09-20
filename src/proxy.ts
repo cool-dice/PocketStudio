@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { oversizedJsonResponse } from "@/lib/json-body-limit";
 import { applySecurityHeaders } from "@/lib/security-headers";
-import { isAgentSocketPath, PROXY_MATCHER } from "@/lib/agent-socket";
+import { isAgentSocketPath } from "@/lib/agent-socket";
 
 /**
  * Next.js 16 request proxy (formerly middleware). Stamps basic security
@@ -22,8 +22,7 @@ export function proxy(request: NextRequest): NextResponse {
   return response;
 }
 
-export { PROXY_MATCHER };
-
 export const config = {
-  matcher: PROXY_MATCHER,
+  // Compile-time literal required by Next.js; keep in sync with PROXY_MATCHER.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|socket\\.io).*)"],
 };
