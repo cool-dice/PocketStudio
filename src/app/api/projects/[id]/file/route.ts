@@ -12,6 +12,7 @@ import {
 import { isDeletableRelPath } from "@/lib/rel-path";
 import { removeFileChunks, scheduleIndexFile } from "@/lib/rag";
 import { shouldSkipPath } from "@/lib/rag/skip";
+import { oversizedJsonResponse } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,9 @@ export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });

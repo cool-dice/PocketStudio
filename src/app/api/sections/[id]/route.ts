@@ -7,6 +7,7 @@ import { ensureOwned } from "@/lib/workspace-api";
 import { snapshotSection } from "@/lib/section-revisions";
 import { sectionDto } from "@/lib/workspace-shapes";
 import { scheduleIndexEntity, scheduleIndexSection, scheduleRemove } from "@/lib/rag";
+import { oversizedJsonResponse } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,9 @@ const patchSchema = z.object({
 });
 
 export async function PATCH(req: Request, { params }: Params) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const { id } = await params;
   const section = await loadSection(id);
   if (!section) {

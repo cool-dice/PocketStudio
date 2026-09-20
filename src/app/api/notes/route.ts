@@ -8,6 +8,7 @@ import { noteAnalysisFieldsForQueue } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 import { scheduleIndexNote } from "@/lib/rag";
 import { persistableTranscription } from "@/lib/voice-copy";
+import { oversizedJsonResponse } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +148,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });

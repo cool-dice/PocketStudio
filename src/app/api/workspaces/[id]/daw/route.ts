@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { defaultDawState, normalizeDawState, type DawProjectDto } from "@/lib/daw-model";
 import { ensureWorkspace } from "@/lib/workspace-api";
+import { oversizedJsonResponse } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +76,9 @@ export async function GET(req: Request, { params }: Params) {
 /* ── PUT /api/workspaces/[id]/daw — сохранить состояние DAW ── */
 
 export async function PUT(req: Request, { params }: Params) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const { id } = await params;
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;

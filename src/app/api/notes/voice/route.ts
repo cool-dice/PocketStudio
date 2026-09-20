@@ -11,6 +11,7 @@ import {
 import { db } from "@/lib/db";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
 import { ASR_EMPTY, ASR_UNAVAILABLE, isUsableTranscript } from "@/lib/voice-copy";
+import { oversizedJsonResponse } from "@/lib/json-body-limit";
 
 /**
  * POST /api/notes/voice — transcribe only.
@@ -31,6 +32,9 @@ const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export async function POST(req: Request) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });

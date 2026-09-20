@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { emptyTimeline, parseTimeline, tryParseTimeline } from "@/lib/nle-model";
+import { oversizedJsonResponse } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,9 @@ const putSchema = z.object({
 });
 
 export async function PUT(req: Request, { params }: Params) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const { id } = await params;
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;

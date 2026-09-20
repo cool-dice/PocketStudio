@@ -14,6 +14,7 @@ import {
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { oversizedJsonResponse } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -99,6 +100,9 @@ export async function GET(req: Request) {
 /* ── POST /api/projects — create (template | github | zip) ── */
 
 export async function POST(req: Request) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });

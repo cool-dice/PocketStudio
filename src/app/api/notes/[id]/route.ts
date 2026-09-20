@@ -6,6 +6,7 @@ import { isToolUnconfigured } from "@/lib/ai/resolve";
 import { noteAnalysisFieldsForQueue } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
 import { scheduleIndexNote, scheduleRemove } from "@/lib/rag";
+import { oversizedJsonResponse } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,9 @@ export async function GET(req: Request, ctx: RouteContext) {
 }
 
 export async function PATCH(req: Request, ctx: RouteContext) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
