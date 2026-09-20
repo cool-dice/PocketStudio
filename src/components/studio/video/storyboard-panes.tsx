@@ -18,6 +18,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import {
+  VIDEO_STORYBOARD_EMPTY_HINT,
+  VIDEO_STORYBOARD_EMPTY_TITLE,
+  VIDEO_STORYBOARD_NO_SCENES,
+  VIDEO_STORYBOARD_NOTHING_TO_WATCH,
+} from "@/lib/video-copy";
 import type { DocumentDto } from "@/lib/workspace-types";
 
 /* ── Чипы сценариев раскадровки + «Добавить сцену» ── */
@@ -129,11 +135,10 @@ export function NoScriptCard({
         </span>
         <div>
           <h2 className="text-base font-semibold">
-            Создать сценарий раскадровки
+            {VIDEO_STORYBOARD_EMPTY_TITLE}
           </h2>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            Сценарий — это список сцен. В каждой сцене: текст для диктора,
-            сгенерированный кадр и озвучка. Из них плеер соберёт фильм.
+            {VIDEO_STORYBOARD_EMPTY_HINT}
           </p>
         </div>
         <Button onClick={onCreate} disabled={creating}>
@@ -161,7 +166,7 @@ export function NoScenesCard({
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed p-8 text-center">
       <p className="text-sm text-muted-foreground">
-        В сценарии пока нет ни одной сцены
+        {VIDEO_STORYBOARD_NO_SCENES}
       </p>
       <Button size="sm" variant="outline" onClick={onAdd} disabled={adding}>
         {adding ? (
@@ -185,7 +190,7 @@ export function NoPlayableCard() {
         aria-hidden="true"
       />
       <p className="text-xs text-muted-foreground">
-        Пока нечего смотреть — сгенерируйте кадр или озвучку любой сцены
+        {VIDEO_STORYBOARD_NOTHING_TO_WATCH}
       </p>
     </div>
   );

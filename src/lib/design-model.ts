@@ -202,3 +202,11 @@ export function parseDesignPayload(
 ): DesignPayload {
   return tryParseDesignPayload(raw) ?? (mode === "layout" ? emptyLayout() : emptyRaster());
 }
+
+/** Skip huge PNG data-URLs so PUT /design stays under the JSON cap. */
+export const DESIGN_PREVIEW_URL_MAX = 1_800_000;
+
+export function designPreviewUrl(dataUrl: string): string | null {
+  if (!dataUrl || dataUrl.length > DESIGN_PREVIEW_URL_MAX) return null;
+  return dataUrl;
+}

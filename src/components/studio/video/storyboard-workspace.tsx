@@ -46,6 +46,10 @@ import {
 } from "./storyboard-panes";
 import { StoryboardPlayer } from "./storyboard-player";
 import {
+  VIDEO_STORYBOARD_LOAD_ERROR,
+  storyboardListView,
+} from "@/lib/video-copy";
+import {
   SCENE_IMAGE_SIZE,
   buildScenes,
   sceneReady,
@@ -89,7 +93,7 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
       setScripts([]);
       setArtifacts([]);
       setLoadError(
-        err instanceof ApiError ? err.message : "Не удалось загрузить сценарии",
+        err instanceof ApiError ? err.message : VIDEO_STORYBOARD_LOAD_ERROR,
       );
     }
   }, [projectId]);
@@ -350,20 +354,29 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
     toast.success("Фильм собран и в библиотеке");
   }, []);
 
+  const listView = storyboardListView(scripts, loadError);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Сценарии раскадровки */}
-      <ScriptChipsBar
-        scripts={scripts}
-        scriptId={scriptId}
-        onSelect={selectScript}
-        onAddScene={() => void addScene()}
-        addingScene={addingScene}
-      />
+      {listView === "error" ? null : (
+        <ScriptChipsBar
+          scripts={scripts}
+          scriptId={scriptId}
+          onSelect={selectScript}
+          onAddScene={() => void addScene()}
+          addingScene={addingScene}
+        />
+      )}
 
-      {loadError ? (
-        <LoadErrorCard message={loadError} onRetry={() => void loadWorkspace()} />
-      ) : !scriptId ? (
+      {listView === "error" ? (
+        <LoadErrorCard message={loadError ?? VIDEO_STORYBOARD_LOAD_ERROR} onRetry={() => void loadWorkspace()} />
+      ) : listView === "loading" ? (
+        <main className="flex min-h-0 flex-1 flex-col gap-3 p-4 sm:p-6" aria-busy="true" aria-label="Загрузка раскадровки">
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="h-52 w-full rounded-xl" />
+        </main>
+      ) : listView === "empty" || !scriptId ? (
         <NoScriptCard
           creating={creatingScript}
           onCreate={() => void createScript()}

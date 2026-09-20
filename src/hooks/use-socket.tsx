@@ -33,6 +33,11 @@ import { io, type Socket } from "socket.io-client";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import {
+  agentLinkStatus,
+  requestAgentStart,
+  type AgentLinkStatus,
+} from "@/lib/agent-link";
 import { textPreview } from "@/lib/format";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
@@ -56,6 +61,7 @@ type NoteEventListener = (event: NoteEvent) => void;
 interface SocketContextValue {
   socket: Socket | null;
   connected: boolean;
+  linkStatus: AgentLinkStatus;
   /** Make sure the socket is connected. Resolves false on timeout. */
   ensureConnected: () => Promise<boolean>;
   /**
@@ -69,6 +75,7 @@ interface SocketContextValue {
 const SocketContext = createContext<SocketContextValue>({
   socket: null,
   connected: false,
+  linkStatus: "reconnecting",
   ensureConnected: async () => false,
   onNoteEvent: () => () => {},
 });
@@ -100,6 +107,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   );
 
   const [connected, setConnected] = useState(false);
+  const [healthUp, setHealthUp] = useState<boolean | null>(null);
   const authRetryRef = useRef(false);
   const disposedRef = useRef(false);
 
@@ -121,6 +129,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     const handleConnect = () => {
       authRetryRef.current = false;
       setConnected(true);
+      setHealthUp(true);
       // Reconnect resync: if the socket dropped while the open note was
       // mid-analysis (e.g. the service was reaped and self-healed), a
       // terminal event may have been missed — refetch the open note so it
@@ -171,21 +180,21 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     };
 
     // Debounced self-heal: at most one POST per 30s per provider lifetime.
+    // Boot always POSTs once so the composer is not stuck reconnecting
+    // until the first connect_error.
     const healRef = { last: 0 };
-    async function healAgentService() {
+    async function healAgentService(force = false) {
       if (disposedRef.current) return;
       const now = Date.now();
-      if (now - healRef.last < 30000) return;
+      if (!force && now - healRef.last < 30000) return;
       healRef.last = now;
-      try {
-        await fetch("/api/health/agent-service", {
-          method: "POST",
-          credentials: "same-origin",
-        });
-      } catch {
-        // Next app unreachable — nothing we can do from here
-      }
+      const result = await requestAgentStart();
+      if (disposedRef.current) return;
+      setHealthUp(result.up);
+      if (result.up && !s.connected) s.connect();
     }
+
+    void healAgentService(true);
 
     /* ── Note analysis pipeline (Stage 2) ── */
 
@@ -348,9 +357,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
   }, [socket]);
 
+  const linkStatus = agentLinkStatus({
+    socketConnected: connected,
+    healthUp,
+  });
+
   return (
     <SocketContext.Provider
-      value={{ socket, connected, ensureConnected, onNoteEvent }}
+      value={{ socket, connected, linkStatus, ensureConnected, onNoteEvent }}
     >
       {children}
     </SocketContext.Provider>

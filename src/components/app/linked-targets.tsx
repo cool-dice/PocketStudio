@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import {
   boundThreadChip,
   LINKED_TARGETS_EMPTY,
+  LINKED_TARGETS_LOAD_ERROR,
   LINKED_TARGETS_TITLE,
   LINKED_UNLINK_ERROR,
   linkedTargetAria,
@@ -26,14 +27,17 @@ export function LinkedTargets({ noteId }: { noteId: string }) {
   const openWorkspace = useAppUi((s) => s.openWorkspace);
   const projectsVersion = useAppUi((s) => s.projectsVersion);
   const [links, setLinks] = useState<NoteProjectLink[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
   const loadLinks = useCallback(async () => {
     try {
       const list = await api.listNoteLinks(noteId);
       setLinks(list);
+      setLoadError(false);
     } catch {
       setLinks([]);
+      setLoadError(true);
     }
   }, [noteId]);
 
@@ -76,6 +80,19 @@ export function LinkedTargets({ noteId }: { noteId: string }) {
       {links === null ? (
         <div className="mt-2 px-1">
           <Skeleton className="h-6 w-40 rounded-full" />
+        </div>
+      ) : loadError ? (
+        <div className="mt-1.5 px-1">
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {LINKED_TARGETS_LOAD_ERROR}
+          </p>
+          <button
+            type="button"
+            onClick={() => void loadLinks()}
+            className="mt-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+          >
+            Повторить
+          </button>
         </div>
       ) : links.length === 0 ? (
         <p className="mt-1.5 px-1 text-xs leading-relaxed text-muted-foreground">

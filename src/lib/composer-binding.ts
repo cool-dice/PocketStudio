@@ -31,9 +31,10 @@ export function studioKindPrefix(type?: string | null): string {
   return TYPE_PREFIX[type ?? ""] ?? "Воркспейс";
 }
 
-export const LINKED_TARGETS_TITLE = "Связанные студии и проекты";
+export const LINKED_TARGETS_TITLE = "Связанные воркспейсы и код-проекты";
 export const LINKED_TARGETS_EMPTY =
-  "Пока нет связанных студий или проектов.";
+  "Пока нет связанных воркспейсов, треков или код-проектов.";
+export const LINKED_TARGETS_LOAD_ERROR = "Не удалось загрузить связи";
 export const LINKED_UNLINK_ERROR = "Не удалось отвязать";
 
 export function linkedTargetAria(

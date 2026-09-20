@@ -70,6 +70,11 @@ import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
 import { useAppUi, type MainArea } from "@/lib/store";
 import {
+  isSidebarChatActive,
+  sidebarChatLocation,
+} from "@/lib/app-url";
+import { agentLinkLabel } from "@/lib/agent-link";
+import {
   THREADS_ARCHIVE_ACTION,
   THREADS_HIDE_ARCHIVE,
   THREADS_LOAD_ERROR,
@@ -98,6 +103,7 @@ function StudioNavItem({
   mainArea,
   onOpen,
   dense,
+  active: activeOverride,
 }: {
   icon: LucideIcon;
   label: string;
@@ -105,8 +111,9 @@ function StudioNavItem({
   mainArea: MainArea;
   onOpen: (area: MainArea) => void;
   dense?: boolean;
+  active?: boolean;
 }) {
-  const active = mainArea === area;
+  const active = activeOverride ?? mainArea === area;
   return (
     <li>
       <button
@@ -137,7 +144,7 @@ function StudioNavItem({
 
 export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const { user, logout } = useAuth();
-  const { connected } = useSocket();
+  const { linkStatus } = useSocket();
   const { total: notesTotal } = useNotes();
   const {
     threads,
@@ -155,6 +162,10 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   } = useThreads();
   const mainArea = useAppUi((s) => s.mainArea);
   const setMainArea = useAppUi((s) => s.setMainArea);
+  const activeWorkspaceId = useAppUi((s) => s.activeWorkspaceId);
+  const workspaceTab = useAppUi((s) => s.workspaceTab);
+  const workspaceDocId = useAppUi((s) => s.workspaceDocId);
+  const setWorkspaceTab = useAppUi((s) => s.setWorkspaceTab);
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
 
@@ -208,6 +219,28 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
     onNavigate?.();
     setMainArea(area);
   };
+
+  const handleOpenChat = () => {
+    onNavigate?.();
+    const next = sidebarChatLocation({
+      mainArea,
+      workspaceId: activeWorkspaceId,
+      workspaceTab,
+      workspaceDocId,
+    });
+    if (next.mainArea === "workspace") {
+      setWorkspaceTab("chat");
+      return;
+    }
+    setMainArea("chat");
+  };
+
+  const chatActive = isSidebarChatActive({
+    mainArea,
+    workspaceId: activeWorkspaceId,
+    workspaceTab,
+    workspaceDocId,
+  });
 
   const startRename = (thread: ThreadListItem) => {
     setRenamingId(thread.id);
@@ -495,7 +528,8 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             label="Чат"
             area="chat"
             mainArea={mainArea}
-            onOpen={handleOpenStudio}
+            active={chatActive}
+            onOpen={() => handleOpenChat()}
           />
           <StudioNavItem
             icon={House}
@@ -602,7 +636,11 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
                   aria-hidden="true"
                   className={cn(
                     "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-sidebar",
-                    connected ? "bg-emerald-500" : "vf-status-pulse bg-amber-500",
+                    linkStatus === "connected"
+                      ? "bg-emerald-500"
+                      : linkStatus === "unavailable"
+                        ? "bg-rose-500"
+                        : "vf-status-pulse bg-amber-500",
                   )}
                 />
               </span>
@@ -611,7 +649,7 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
                   {user?.name}
                 </span>
                 <span className="block truncate text-xs text-muted-foreground">
-                  {connected ? "на связи" : "переподключение…"}
+                  {agentLinkLabel(linkStatus)}
                 </span>
               </span>
             </button>

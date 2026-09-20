@@ -108,3 +108,34 @@ export function pathFor(
   if (area === "chat" || area === "home") return "/";
   return `/?area=${area}`;
 }
+
+export function hrefFromLocation(loc: AppLocation): string {
+  return pathFor(loc.mainArea, loc.workspaceId, loc.workspaceTab, loc.workspaceDocId);
+}
+
+/**
+ * Sidebar «Чат»: inside a workspace stay on the scoped thread
+ * (`/w/{id}` chat tab). From Home and other studio areas open the
+ * unbound orchestrator (`/`).
+ */
+export function sidebarChatLocation(state: AppLocation): AppLocation {
+  if (state.mainArea === "workspace" && state.workspaceId) {
+    return {
+      mainArea: "workspace",
+      workspaceId: state.workspaceId,
+      workspaceTab: "chat",
+      workspaceDocId: null,
+    };
+  }
+  return {
+    mainArea: "chat",
+    workspaceId: null,
+    workspaceTab: "chat",
+    workspaceDocId: null,
+  };
+}
+
+export function isSidebarChatActive(state: AppLocation): boolean {
+  if (state.mainArea === "chat") return true;
+  return state.mainArea === "workspace" && state.workspaceTab === "chat";
+}

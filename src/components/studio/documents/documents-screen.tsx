@@ -33,7 +33,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared/module-header";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import {
   readLastWorkspaceDoc,
@@ -205,8 +205,10 @@ export function DocumentsScreen({
       toast.success("Документ создан", {
         description: `«${created.title}» — первая глава уже внутри.`,
       });
-    } catch {
-      toast.error("Не удалось создать документ");
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось создать документ",
+      );
     }
   }
 

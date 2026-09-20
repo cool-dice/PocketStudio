@@ -7,7 +7,7 @@ import {
 import { notesWhereForScope, workspaceNoteIsOutOfScope } from "./note-scope";
 import { validateWorkspaceCreate } from "./create-typed-workspace";
 import { parseWorkspaceKind } from "./workspace-kind";
-import { boundChipFromLists, boundThreadChip, notificationOpensWorkspace, LINKED_TARGETS_TITLE, LINKED_TARGETS_EMPTY, linkedTargetAria, isStudioOrigin } from "./composer-binding";
+import { boundChipFromLists, boundThreadChip, notificationOpensWorkspace, LINKED_TARGETS_TITLE, LINKED_TARGETS_EMPTY, LINKED_TARGETS_LOAD_ERROR, linkedTargetAria, isStudioOrigin } from "./composer-binding";
 import {
   CODE_PROJECT_SLASH,
   slashOpensWorkspaceType,
@@ -152,10 +152,16 @@ describe("boundThreadChip", () => {
 
 describe("notebook linked targets", () => {
   test("copy does not call a studio a project", () => {
-    expect(LINKED_TARGETS_TITLE).toMatch(/студи/i);
-    expect(LINKED_TARGETS_TITLE).toMatch(/проект/i);
-    expect(LINKED_TARGETS_EMPTY).toMatch(/студи/i);
+    expect(LINKED_TARGETS_TITLE).toMatch(/воркспейс/i);
+    expect(LINKED_TARGETS_TITLE).toMatch(/код-проект/i);
+    expect(LINKED_TARGETS_TITLE).not.toBe("Связанные проекты");
+    expect(LINKED_TARGETS_TITLE).not.toMatch(/связанные студии и проекты/i);
+    expect(LINKED_TARGETS_EMPTY).toMatch(/воркспейс/i);
+    expect(LINKED_TARGETS_EMPTY).toMatch(/трек/i);
+    expect(LINKED_TARGETS_EMPTY).toMatch(/код-проект/i);
     expect(LINKED_TARGETS_EMPTY).not.toBe("Пока нет связанных проектов.");
+    expect(LINKED_TARGETS_LOAD_ERROR).toMatch(/не удалось загрузить/i);
+    expect(LINKED_TARGETS_LOAD_ERROR).not.toBe(LINKED_TARGETS_EMPTY);
     expect(isStudioOrigin("workspace")).toBe(true);
     expect(isStudioOrigin("template")).toBe(false);
     expect(linkedTargetAria("workspace", "Луна", "open")).toMatch(/воркспейс/i);
