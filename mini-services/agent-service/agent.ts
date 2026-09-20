@@ -8,7 +8,8 @@
 //     {"tool":"<name>","args":{...}} when it wants a tool, and parseToolCall
 //     below detects that shape. Partial JSON is never executed — wait until
 //     a complete object is parseable. Payloads over 256 KiB (1 MiB for
-//     write_file/apply_patch) are rejected with a Russian error — no execute.
+//     write_file/apply_patch/rewrite_section/append_section/create_document)
+//     are rejected with a Russian error — no execute. Disk write stays 200 KiB.
 //     The tool-calling loop lives in server.ts.
 
 import { sleepAbortable } from "../../src/lib/abort-flag";

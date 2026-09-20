@@ -1,7 +1,12 @@
 /**
  * Cap parsed tool-call JSON so a model dumping a megabyte into
  * `{"tool","args"}` never reaches apply_patch / create_note / the DB.
- * Mirrors JSON body limits: 256 KiB default, 1 MiB for file writes.
+ * Mirrors JSON body limits: 256 KiB default, 1 MiB for file writes
+ * and chapter bodies (HTTP `/api/sections/[id]` is also 1 MiB).
+ *
+ * Disk write is a separate cap: `MAX_AGENT_FILE_BYTES` in tools.ts
+ * stays 200 KiB. A 1 MiB JSON envelope is not permission to write a
+ * megabyte to disk.
  */
 
 import { formatJsonBodyLimit } from "../../src/lib/json-body-limit";
@@ -9,10 +14,17 @@ import { formatJsonBodyLimit } from "../../src/lib/json-body-limit";
 /** Default parsed tool JSON — notes, search, RAG, most tools. */
 export const TOOL_ARGS_LIMIT = 256 * 1024;
 
-/** write_file / apply_patch may carry a file body. */
+/** write_file / apply_patch / chapter tools may carry a file or chapter body. */
 export const TOOL_ARGS_LIMIT_LARGE = 1024 * 1024;
 
-const LARGE_ARG_TOOLS = new Set(["write_file", "apply_patch"]);
+/** Same 1 MiB map as HTTP file + section JSON. */
+export const LARGE_ARG_TOOLS = new Set([
+  "write_file",
+  "apply_patch",
+  "rewrite_section",
+  "append_section",
+  "create_document",
+]);
 
 export const TOOL_ARGS_TOO_LARGE = "Аргументы инструмента слишком большие";
 

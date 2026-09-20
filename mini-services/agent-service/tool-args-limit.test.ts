@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  LARGE_ARG_TOOLS,
   TOOL_ARGS_LIMIT,
   TOOL_ARGS_LIMIT_LARGE,
   TOOL_ARGS_TOO_LARGE,
@@ -13,14 +14,26 @@ import {
 } from "./tool-args-limit";
 
 describe("tool args limits", () => {
-  test("default tools cap at 256 KiB; write_file/apply_patch at 1 MiB", () => {
+  test("default tools cap at 256 KiB; file + chapter tools at 1 MiB", () => {
     expect(toolArgsLimitBytes("create_note")).toBe(TOOL_ARGS_LIMIT);
     expect(toolArgsLimitBytes("search_notes")).toBe(TOOL_ARGS_LIMIT);
     expect(toolArgsLimitBytes("retrieve_canon")).toBe(TOOL_ARGS_LIMIT);
     expect(toolArgsLimitBytes("write_file")).toBe(TOOL_ARGS_LIMIT_LARGE);
     expect(toolArgsLimitBytes("apply_patch")).toBe(TOOL_ARGS_LIMIT_LARGE);
+    expect(toolArgsLimitBytes("rewrite_section")).toBe(TOOL_ARGS_LIMIT_LARGE);
+    expect(toolArgsLimitBytes("append_section")).toBe(TOOL_ARGS_LIMIT_LARGE);
+    expect(toolArgsLimitBytes("create_document")).toBe(TOOL_ARGS_LIMIT_LARGE);
     expect(TOOL_ARGS_LIMIT).toBe(256 * 1024);
     expect(TOOL_ARGS_LIMIT_LARGE).toBe(1024 * 1024);
+    expect([...LARGE_ARG_TOOLS].sort()).toEqual(
+      [
+        "append_section",
+        "apply_patch",
+        "create_document",
+        "rewrite_section",
+        "write_file",
+      ].sort(),
+    );
   });
 
   test("Russian error names the tool and the cap", () => {
@@ -56,6 +69,16 @@ describe("tool args limits", () => {
   test("candidateOverLimit allows a 256 KiB+ write_file dump under 1 MiB", () => {
     const raw = `{"tool":"write_file","args":{"path":"a.ts","content":"${"x".repeat(TOOL_ARGS_LIMIT + 8)}"}}`;
     expect(candidateOverLimit(raw, "write_file")).toBeNull();
+  });
+
+  test("candidateOverLimit allows a 256 KiB+ rewrite_section dump under 1 MiB", () => {
+    const body = "x".repeat(TOOL_ARGS_LIMIT + 8);
+    const rewrite = `{"tool":"rewrite_section","args":{"instruction":"${body}"}}`;
+    expect(candidateOverLimit(rewrite, "rewrite_section")).toBeNull();
+    const append = `{"tool":"append_section","args":{"title":"Глава","content":"${body}"}}`;
+    expect(candidateOverLimit(append, "append_section")).toBeNull();
+    const create = `{"tool":"create_document","args":{"title":"Черновик","content":"${body}"}}`;
+    expect(candidateOverLimit(create, "create_document")).toBeNull();
   });
 });
 
@@ -98,6 +121,28 @@ describe("gateToolPayload / prepareToolExecution (execute wrapper)", () => {
     );
   });
 
+  test("chapter tools between 256 KiB and 1 MiB still execute", () => {
+    const content = "x".repeat(TOOL_ARGS_LIMIT + 8);
+    expect(
+      gateToolPayload({
+        tool: "rewrite_section",
+        args: { action: "custom", instruction: content },
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      gateToolPayload({
+        tool: "append_section",
+        args: { title: "Глава", content },
+      }).ok,
+    ).toBe(true);
+    expect(
+      gateToolPayload({
+        tool: "create_document",
+        args: { title: "Черновик", content },
+      }).ok,
+    ).toBe(true);
+  });
+
   test("rejects write_file / apply_patch over 1 MiB", () => {
     const args = { path: "a.ts", content: "x".repeat(TOOL_ARGS_LIMIT_LARGE + 8) };
     const write = gateToolPayload({ tool: "write_file", args });
@@ -111,6 +156,31 @@ describe("gateToolPayload / prepareToolExecution (execute wrapper)", () => {
       args: { path: "a.ts", newText: args.content },
     });
     expect(patch.ok).toBe(false);
+  });
+
+  test("rejects rewrite_section / chapter tools over 1 MiB", () => {
+    const content = "x".repeat(TOOL_ARGS_LIMIT_LARGE + 8);
+    const rewrite = gateToolPayload({
+      tool: "rewrite_section",
+      args: { instruction: content },
+    });
+    expect(rewrite.ok).toBe(false);
+    if (rewrite.ok) throw new Error("expected reject");
+    expect(rewrite.error).toContain("1 МБ");
+    expect(rewrite.error).toContain("rewrite_section");
+
+    expect(
+      gateToolPayload({
+        tool: "append_section",
+        args: { title: "Глава", content },
+      }).ok,
+    ).toBe(false);
+    expect(
+      gateToolPayload({
+        tool: "create_document",
+        args: { title: "Черновик", content },
+      }).ok,
+    ).toBe(false);
   });
 
   test("alreadyRejected skips execute and does not persist the dump", () => {

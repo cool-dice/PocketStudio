@@ -6,7 +6,7 @@ import {
   TOOL_ARGS_LIMIT_LARGE,
   TOOL_ARGS_TOO_LARGE,
 } from "./tool-args-limit";
-import { TOOLS } from "./tools";
+import { MAX_AGENT_FILE_BYTES, TOOLS } from "./tools";
 
 describe("parseToolCall", () => {
   test("reads a bare JSON tool object", () => {
@@ -126,6 +126,34 @@ describe("parseToolCall", () => {
     expect(Date.now() - started).toBeLessThan(500);
   });
 
+  test("rewrite_section / chapter tools share the 1 MiB JSON cap", () => {
+    const mid = JSON.stringify({
+      tool: "rewrite_section",
+      args: { action: "custom", instruction: "x".repeat(TOOL_ARGS_LIMIT + 8) },
+    });
+    expect(parseToolCall(mid)?.tool).toBe("rewrite_section");
+    expect(parseToolCallResult(mid).status).toBe("call");
+
+    const appendMid = JSON.stringify({
+      tool: "append_section",
+      args: { title: "Глава", content: "x".repeat(TOOL_ARGS_LIMIT + 8) },
+    });
+    expect(parseToolCall(appendMid)?.tool).toBe("append_section");
+
+    const started = Date.now();
+    const huge = JSON.stringify({
+      tool: "create_document",
+      args: { title: "Черновик", content: "x".repeat(TOOL_ARGS_LIMIT_LARGE + 8) },
+    });
+    expect(parseToolCall(huge)).toBeNull();
+    const parsed = parseToolCallResult(huge);
+    expect(parsed.status).toBe("oversized");
+    if (parsed.status !== "oversized") throw new Error("expected oversized");
+    expect(parsed.tool).toBe("create_document");
+    expect(parsed.error).toContain("1 МБ");
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
   test("oversized fenced create_note is not a text answer", () => {
     const raw = `\`\`\`json\n${JSON.stringify({
       tool: "create_note",
@@ -176,5 +204,11 @@ describe("agent tool registry", () => {
     ]) {
       expect(names).toContain(name);
     }
+  });
+
+  test("disk write stays 200 KiB — JSON 1 MiB is not a disk raise", () => {
+    expect(MAX_AGENT_FILE_BYTES).toBe(200 * 1024);
+    expect(MAX_AGENT_FILE_BYTES).toBeLessThan(TOOL_ARGS_LIMIT_LARGE);
+    expect(TOOL_ARGS_LIMIT_LARGE).toBe(1024 * 1024);
   });
 });

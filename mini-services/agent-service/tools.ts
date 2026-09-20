@@ -405,8 +405,14 @@ const ACT_MODE_ERROR =
 const CHECKPOINT_MODE_ERROR =
   "Чекпоинты доступны только в режиме «Действовать» — переключите режим диалога";
 
-/** Agent-side file caps (tighter than the REST 256KB cap). */
-const MAX_AGENT_FILE_BYTES = 200 * 1024;
+/**
+ * Agent disk read/write. Tighter than REST `MAX_FILE_BYTES` (256 KiB chars)
+ * and than tool-call JSON `TOOL_ARGS_LIMIT_LARGE` (1 MiB for write_file /
+ * apply_patch). Do not silently raise this to match the JSON envelope —
+ * a 1 MiB parse cap is not a 1 MiB disk write. If it ever must match
+ * apply_patch JSON, cap at 1 MiB and test.
+ */
+export const MAX_AGENT_FILE_BYTES = 200 * 1024;
 /** Max entries returned to the LLM by list_files. */
 const MAX_LIST_FILES_ENTRIES = 400;
 
