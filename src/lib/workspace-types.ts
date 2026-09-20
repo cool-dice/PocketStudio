@@ -23,6 +23,8 @@ export interface WorkspaceDto {
   stage: string | null;
   stageIndex: number | null;
   progress: number;
+  favorite: boolean;
+  archived: boolean;
   counts: WorkspaceCounts;
   createdAt: string;
   updatedAt: string;
@@ -84,7 +86,25 @@ export interface EntityAttribute {
 
 export interface EntityRefs {
   kind: "chapter" | "section";
+  /** Section ids (live links) or leftover captions like «1» / «SRS-2». */
   items: string[];
+}
+
+/** Resolved mention for UI: live chapter vs saved caption. */
+export interface EntityMentionDto {
+  id: string;
+  title: string;
+  documentTitle: string | null;
+  /** linked = DocumentSection in this workspace; label = saved caption. */
+  source: "linked" | "label";
+}
+
+export interface MentionSectionOption {
+  id: string;
+  title: string;
+  documentId: string;
+  documentTitle: string;
+  order: number;
 }
 
 export interface EntityPortrait {
@@ -105,6 +125,8 @@ export interface EntityDto {
   attributes: EntityAttribute[];
   tags: string[];
   refs: EntityRefs;
+  /** Derived from refs.items + live sections (never a fake graph). */
+  mentions: EntityMentionDto[];
   portrait: EntityPortrait | null;
   /** URL персистентного сгенерированного портрета/иллюстрации (PS-6). */
   image: string | null;
@@ -139,6 +161,8 @@ export interface ArtifactDto {
   meta: Record<string, unknown> | null;
   favorite: boolean;
   createdAt: string;
+  /** DB has /gen/… but the blob is gone — UI must not render a 404 link. */
+  fileMissing?: boolean;
 }
 
 export type FindingType = "contradiction" | "omission" | "inconsistency";
@@ -197,4 +221,6 @@ export interface McpServerDto {
   own: boolean;
   config: Record<string, unknown>;
   createdAt: string;
+  /** Honest runtime: ready | off | config_saved | cli_missing */
+  runtimeStatus?: "ready" | "off" | "config_saved" | "cli_missing";
 }

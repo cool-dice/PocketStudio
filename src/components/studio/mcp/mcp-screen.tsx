@@ -4,7 +4,7 @@
  * McpScreen — экран «Интеграции» (Фаза D): РЕАЛЬНЫЙ реестр MCP-серверов.
  *
  * Данные: GET /api/mcp (каталог лениво засеивается на первого входа).
- * Действия: подключить/отключить (PATCH), редактировать конфиг (PATCH),
+ * Действия: включить/отключить (PATCH), редактировать конфиг (PATCH),
  * добавить свой сервер (POST → диалог), удалить свой (DELETE).
  * builtin-адаптеры (fetch/filesystem/browser) дают оркестратору живые
  * инструменты в чате; внешние — честно помечены «конфиг на будущее».
@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { mcpToggleCopy } from "@/lib/mcp-copy";
 import type { McpServerDto } from "@/lib/workspace-types";
 import { AddServerDialog } from "./add-server-dialog";
 import { ConfigPreviewCard } from "./config-preview-card";
@@ -118,24 +119,21 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
       setBusyId(id);
       setServers((prev) =>
         prev
-          ? prev.map((s) => (s.id === id ? { ...s, enabled: next } : s))
+          ? prev.map((s) =>
+              s.id === id
+                ? { ...s, enabled: next, runtimeStatus: next ? s.runtimeStatus : "off" }
+                : s,
+            )
           : prev,
       );
       try {
-        await api.updateMcpServer(id, { enabled: next });
+        const updated = await api.updateMcpServer(id, { enabled: next });
         bumpConfig();
-        toast.success(
-          next
-            ? `Сервер «${target.name}» подключён`
-            : `Сервер «${target.name}» отключён`,
-          {
-            description: next
-              ? target.external
-                ? "Конфиг сохранён; инструменты заработают в полной версии"
-                : "Инструменты доступны оркестратору в чате"
-              : "Инструменты сервера скрыты из диалогов",
-          },
+        setServers((prev) =>
+          prev ? prev.map((s) => (s.id === id ? updated : s)) : prev,
         );
+        const copy = mcpToggleCopy(updated, next);
+        toast.success(copy.title, { description: copy.description });
       } catch (err) {
         setServers((prev) =>
           prev
@@ -149,7 +147,7 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
         setBusyId(null);
       }
     },
-    [servers],
+    [servers, bumpConfig],
   );
 
   /* Сохранение конфига из карточки. */
@@ -329,7 +327,7 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
             ) : visible.length === 0 ? (
               <div className="rounded-2xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
                 {filter === "connected"
-                  ? "Ничего не включено — подключите сервер из каталога"
+                  ? "Ничего не включено — включите сервер из каталога"
                   : "В этой категории серверов нет"}
               </div>
             ) : (

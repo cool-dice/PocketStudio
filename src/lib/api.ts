@@ -1,16 +1,20 @@
 /**
- * Typed fetch wrappers for the VibeFlow REST API (Next.js :3000).
+ * Typed fetch wrappers for the PocketStudio REST API (Next.js :3000).
  * Auth uses a hybrid scheme:
  *   1. `Authorization: Bearer <jwt>` from localStorage (primary — works inside
  *      sandbox preview iframes where third-party cookies are blocked);
- *   2. `vf_session` cookie (fallback for same-origin contexts, e.g. zip export).
+ *   2. `ps_session` cookie (legacy `vf_session` still accepted server-side).
  */
 
 import type {
   AdminStats,
   AdminUserListItem,
-  AuditLogEntry,
+  AiModelDto,
+  AiProviderDto,
+  AiToolDefaultDto,
+  AuditLogPage,
   Category,
+  Tag,
   CheckpointResult,
   CommitDiff,
   CommitInfo,
@@ -29,6 +33,7 @@ import type {
   ThreadListItem,
   ThreadMode,
   User,
+  UserAiSettingsDto,
 } from "@/lib/types";
 import type { StylePalette } from "@/lib/palette";
 import type { DawProjectDto, DawState } from "@/lib/daw-model";
@@ -44,16 +49,19 @@ import type {
   FindingDto,
   FindingStatus,
   McpServerDto,
+  MentionSectionOption,
   SectionRevisionDto,
   WorkspaceDto,
   WorkspaceKind,
 } from "@/lib/workspace-types";
 
-const TOKEN_STORAGE_KEY = "vf_token";
+const TOKEN_STORAGE_KEY = "ps_token";
+const LEGACY_TOKEN_STORAGE_KEY = "vf_token";
 
 export function setAuthToken(token: string): void {
   try {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    window.localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
   } catch {
     // localStorage unavailable (private mode) — cookie fallback still applies.
   }
@@ -62,6 +70,7 @@ export function setAuthToken(token: string): void {
 export function clearAuthToken(): void {
   try {
     window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
   } catch {
     // ignore
   }
@@ -69,7 +78,16 @@ export function clearAuthToken(): void {
 
 function getAuthToken(): string | null {
   try {
-    return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    const current = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (current) return current;
+    const legacy = window.localStorage.getItem(LEGACY_TOKEN_STORAGE_KEY);
+    if (legacy) {
+      // Migrate once so DevTools and future requests show PocketStudio keys.
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, legacy);
+      window.localStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+      return legacy;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -109,20 +127,47 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
+  const timeoutMs = init?.timeoutMs;
+  const rest = { ...(init ?? {}) } as RequestInit & { timeoutMs?: number };
+  delete rest.timeoutMs;
+
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer =
+    timeoutMs && controller
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+  if (controller && rest.signal) {
+    if (rest.signal.aborted) controller.abort();
+    else {
+      rest.signal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
+    }
+  }
+
   let res: Response;
   try {
     res = await fetch(path, {
       credentials: "same-origin",
-      ...init,
+      ...rest,
       headers: {
         "content-type": "application/json",
         ...authHeaders(),
-        ...init?.headers,
+        ...rest.headers,
       },
+      signal: controller?.signal ?? rest.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new ApiError("Провайдер не ответил вовремя", 504);
+    }
     throw new ApiError("Нет соединения с сервером", 0);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const data: unknown = await res.json().catch(() => ({}));
@@ -187,6 +232,34 @@ export const api = {
     return request<{ user: User }>("/api/auth/me").then((r) => r.user);
   },
 
+  updateMe(body: { name: string }): Promise<User> {
+    return request<{ user: User; token?: string }>("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }).then((r) => {
+      if (r.token) setAuthToken(r.token);
+      return r.user;
+    });
+  },
+
+  changePassword(body: {
+    currentPassword: string;
+    newPassword: string;
+    confirmPassword: string;
+  }): Promise<User> {
+    return request<{ user: User; token?: string }>("/api/me/password", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }).then((r) => {
+      if (r.token) setAuthToken(r.token);
+      return r.user;
+    });
+  },
+
+  authBootstrap(): Promise<{ firstUserBecomesAdmin: boolean }> {
+    return request<{ firstUserBecomesAdmin: boolean }>("/api/auth/bootstrap");
+  },
+
   login(email: string, password: string): Promise<User> {
     return request<{ user: User; token?: string }>("/api/auth/login", {
       method: "POST",
@@ -197,10 +270,20 @@ export const api = {
     });
   },
 
-  register(name: string, email: string, password: string): Promise<User> {
+  register(
+    name: string,
+    email: string,
+    password: string,
+    invite?: string,
+  ): Promise<User> {
     return request<{ user: User; token?: string }>("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({
+        name,
+        email,
+        password,
+        ...(invite ? { invite } : {}),
+      }),
     }).then((r) => {
       if (r.token) setAuthToken(r.token);
       return r.user;
@@ -215,12 +298,18 @@ export const api = {
     }
   },
 
+  async logoutAll(): Promise<void> {
+    await request<{ ok: boolean }>("/api/auth/logout-all", { method: "POST" });
+    clearAuthToken();
+  },
+
   wsToken(): Promise<{ token: string; expiresIn: number }> {
     return request<{ token: string; expiresIn: number }>("/api/auth/ws-token");
   },
 
-  listThreads(): Promise<ThreadListItem[]> {
-    return request<{ threads: ThreadListItem[] }>("/api/threads").then(
+  listThreads(opts?: { archived?: boolean }): Promise<ThreadListItem[]> {
+    const qs = opts?.archived ? "?archived=1" : "";
+    return request<{ threads: ThreadListItem[] }>(`/api/threads${qs}`).then(
       (r) => r.threads,
     );
   },
@@ -273,21 +362,35 @@ export const api = {
   listNotes(params?: {
     categoryId?: string;
     favorite?: boolean;
+    reminders?: boolean;
+    due?: boolean;
+    tagId?: string;
     q?: string;
     page?: number;
     limit?: number;
+    projectId?: string;
   }): Promise<{ notes: Note[]; total: number; hasMore: boolean }> {
     const qs = new URLSearchParams();
     if (params?.categoryId) qs.set("categoryId", params.categoryId);
     if (params?.favorite) qs.set("favorite", "1");
+    if (params?.reminders) qs.set("reminders", "1");
+    if (params?.due) qs.set("due", "1");
+    if (params?.tagId) qs.set("tagId", params.tagId);
     if (params?.q) qs.set("q", params.q);
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.projectId) qs.set("projectId", params.projectId);
     const query = qs.toString();
     return request(`/api/notes${query ? `?${query}` : ""}`);
   },
 
-  createNote(data: { text: string; categoryId?: string }): Promise<Note> {
+  createNote(data: {
+    text: string;
+    /** Original ASR transcript; omit on typed notes. */
+    transcription?: string;
+    categoryId?: string;
+    projectId?: string;
+  }): Promise<Note> {
     return request<{ note: Note }>("/api/notes", {
       method: "POST",
       body: JSON.stringify(data),
@@ -302,7 +405,13 @@ export const api = {
 
   updateNote(
     id: string,
-    patch: { favorite?: boolean; categoryId?: string | null; rawText?: string },
+    patch: {
+      favorite?: boolean;
+      categoryId?: string | null;
+      rawText?: string;
+      remindAt?: string | null;
+      tags?: string[];
+    },
   ): Promise<Note> {
     return request<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -324,21 +433,100 @@ export const api = {
     ).then((r) => r.note);
   },
 
-  /** Voice capture: audio (WAV base64) → ASR → new note (Stage 2). */
-  createVoiceNote(data: {
+  /**
+   * Voice capture: audio (WAV base64) → ASR transcript.
+   * Does not create a note — the caller confirms, then POSTs /api/notes once.
+   */
+  transcribeVoice(data: {
     audioBase64: string;
     mime: string;
-  }): Promise<Note> {
-    return request<{ note: Note }>("/api/notes/voice", {
+  }): Promise<string> {
+    return request<{ text: string }>("/api/notes/voice", {
       method: "POST",
       body: JSON.stringify(data),
-    }).then((r) => r.note);
+      // Slightly above server ASR timeout so the gateway 504 wins when it can.
+      timeoutMs: 95_000,
+    }).then((r) => r.text);
   },
 
   listCategories(): Promise<Category[]> {
     return request<{ categories: Category[] }>("/api/categories").then(
       (r) => r.categories,
     );
+  },
+
+  createCategory(data: {
+    name: string;
+    color?: string;
+    icon?: string;
+  }): Promise<Category> {
+    return request<{ category: Category }>("/api/categories", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => r.category);
+  },
+
+  updateCategory(
+    id: string,
+    patch: { name?: string; color?: string; icon?: string },
+  ): Promise<Category> {
+    return request<{ category: Category }>(
+      `/api/categories/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ).then((r) => r.category);
+  },
+
+  async deleteCategory(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/categories/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  listTags(): Promise<Tag[]> {
+    return request<{ tags: Tag[] }>("/api/tags").then((r) => r.tags);
+  },
+
+  createTag(data: { name: string; color?: string }): Promise<Tag> {
+    return request<{ tag: Tag }>("/api/tags", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then((r) => r.tag);
+  },
+
+  updateTag(
+    id: string,
+    patch: { name?: string; color?: string },
+  ): Promise<Tag> {
+    return request<{ tag: Tag }>(`/api/tags/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }).then((r) => r.tag);
+  },
+
+  async deleteTag(id: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/tags/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+
+  notesStats(): Promise<{
+    days: { date: string; total: number; processed: number }[];
+    dueReminders: number;
+    total14d: number;
+  }> {
+    return request("/api/notes/stats");
+  },
+
+  fireDueReminders(): Promise<{
+    fired: number;
+    notes: {
+      id: string;
+      preview: string;
+      notification?: Notification;
+    }[];
+  }> {
+    return request("/api/notes/reminders/fire", { method: "POST" });
   },
 
   /* ── Projects & workspace files (Stage 3) ── */
@@ -429,6 +617,17 @@ export const api = {
     });
   },
 
+  deleteProjectFile(
+    id: string,
+    path: string,
+  ): Promise<{ deleted: true; path: string }> {
+    const qs = new URLSearchParams({ path });
+    return request(
+      `/api/projects/${encodeURIComponent(id)}/file?${qs.toString()}`,
+      { method: "DELETE" },
+    );
+  },
+
   listProjectCommits(id: string, limit = 50): Promise<CommitInfo[]> {
     return request<{ commits: CommitInfo[] }>(
       `/api/projects/${encodeURIComponent(id)}/commits?limit=${limit}`,
@@ -448,6 +647,22 @@ export const api = {
     ).then((r) => r.checkpoint);
   },
 
+  /** Reset this project's working tree to a commit that belongs to it. */
+  restoreProjectCheckpoint(
+    id: string,
+    commit: string,
+  ): Promise<{
+    commit: CommitInfo;
+    discardedUncommitted: boolean;
+  }> {
+    return request<{
+      restored: { commit: CommitInfo; discardedUncommitted: boolean };
+    }>(`/api/projects/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+      body: JSON.stringify({ commit }),
+    }).then((r) => r.restored);
+  },
+
   /** Diff of one checkpoint (Stage 4). */
   getProjectDiff(id: string, commit: string): Promise<CommitDiff> {
     const qs = new URLSearchParams({ commit });
@@ -463,8 +678,9 @@ export const api = {
 
   /* ── Global search (Stage 4) ── */
 
-  search(q: string): Promise<SearchResults> {
+  search(q: string, workspaceId?: string | null): Promise<SearchResults> {
     const qs = new URLSearchParams({ q });
+    if (workspaceId) qs.set("workspaceId", workspaceId);
     return request<SearchResults>(`/api/search?${qs.toString()}`);
   },
 
@@ -551,13 +767,22 @@ export const api = {
 
   /** Role change — returns the plain user; the caller patches its local list. */
   adminUpdateUserRole(id: string, role: Role): Promise<{ id: string; role: Role }> {
-    return request<{ id: string; role: Role }>(
+    return request<{ user: { id: string; role: Role } }>(
       `/api/admin/users/${encodeURIComponent(id)}`,
       {
         method: "PATCH",
         body: JSON.stringify({ role }),
       },
-    );
+    ).then((r) => {
+      const user = r.user;
+      if (
+        !user?.id ||
+        (user.role !== "admin" && user.role !== "client")
+      ) {
+        throw new ApiError("Не удалось изменить роль", 500);
+      }
+      return { id: user.id, role: user.role };
+    });
   },
 
   async adminDeleteUser(id: string): Promise<void> {
@@ -567,16 +792,158 @@ export const api = {
     );
   },
 
-  adminAudit(limit = 50): Promise<AuditLogEntry[]> {
-    return request<{ entries: AuditLogEntry[] }>(
-      `/api/admin/audit?limit=${limit}`,
-    ).then((r) => r.entries);
+  adminAudit(limit = 50, offset = 0): Promise<AuditLogPage> {
+    const qs = new URLSearchParams();
+    qs.set("limit", String(limit));
+    if (offset > 0) qs.set("offset", String(offset));
+    return request<AuditLogPage>(`/api/admin/audit?${qs.toString()}`);
+  },
+
+  adminAiProviders(): Promise<AiProviderDto[]> {
+    return request<{ providers: AiProviderDto[] }>("/api/admin/ai/providers").then(
+      (r) => r.providers,
+    );
+  },
+
+  adminCreateAiProvider(body: Record<string, unknown>): Promise<AiProviderDto> {
+    return request<{ provider: AiProviderDto }>("/api/admin/ai/providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.provider);
+  },
+
+  adminUpdateAiProvider(
+    id: string,
+    body: Record<string, unknown>,
+  ): Promise<AiProviderDto> {
+    return request<{ provider: AiProviderDto }>(
+      `/api/admin/ai/providers/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.provider);
+  },
+
+  async adminDeleteAiProvider(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/admin/ai/providers/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  adminTestAiProvider(id: string): Promise<{ ok: true; detail: string }> {
+    return request<{ ok: true; detail: string }>(
+      `/api/admin/ai/providers/${encodeURIComponent(id)}/test`,
+      { method: "POST", timeoutMs: 25_000 },
+    );
+  },
+
+  adminCreateAiModel(
+    providerId: string,
+    body: Record<string, unknown>,
+  ): Promise<AiModelDto> {
+    return request<{ model: AiModelDto }>(
+      `/api/admin/ai/providers/${encodeURIComponent(providerId)}/models`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.model);
+  },
+
+  adminUpdateAiModel(id: string, body: Record<string, unknown>): Promise<AiModelDto> {
+    return request<{ model: AiModelDto }>(
+      `/api/admin/ai/models/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.model);
+  },
+
+  async adminDeleteAiModel(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/admin/ai/models/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  adminAiDefaults(): Promise<AiToolDefaultDto[]> {
+    return request<{ defaults: AiToolDefaultDto[] }>("/api/admin/ai/defaults").then(
+      (r) => r.defaults,
+    );
+  },
+
+  adminSetAiDefault(toolId: string, modelId: string): Promise<void> {
+    return request<{ ok: boolean }>("/api/admin/ai/defaults", {
+      method: "PUT",
+      body: JSON.stringify({ toolId, modelId }),
+    }).then(() => undefined);
+  },
+
+  userAiSettings(): Promise<UserAiSettingsDto> {
+    return request<UserAiSettingsDto>("/api/settings/ai");
+  },
+
+  userCreateAiProvider(body: Record<string, unknown>): Promise<AiProviderDto> {
+    return request<{ provider: AiProviderDto }>("/api/settings/ai/providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.provider);
+  },
+
+  userUpdateAiProvider(
+    id: string,
+    body: Record<string, unknown>,
+  ): Promise<AiProviderDto> {
+    return request<{ provider: AiProviderDto }>(
+      `/api/settings/ai/providers/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.provider);
+  },
+
+  async userDeleteAiProvider(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/settings/ai/providers/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  userTestAiProvider(id: string): Promise<{ ok: true; detail: string }> {
+    return request<{ ok: true; detail: string }>(
+      `/api/settings/ai/providers/${encodeURIComponent(id)}/test`,
+      { method: "POST", timeoutMs: 25_000 },
+    );
+  },
+
+  userCreateAiModel(
+    providerId: string,
+    body: Record<string, unknown>,
+  ): Promise<AiModelDto> {
+    return request<{ model: AiModelDto }>(
+      `/api/settings/ai/providers/${encodeURIComponent(providerId)}/models`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.model);
+  },
+
+  userUpdateAiModel(id: string, body: Record<string, unknown>): Promise<AiModelDto> {
+    return request<{ model: AiModelDto }>(
+      `/api/settings/ai/models/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.model);
+  },
+
+  async userDeleteAiModel(id: string): Promise<void> {
+    await request<{ ok: boolean }>(
+      `/api/settings/ai/models/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  userSetToolModel(toolId: string, modelId: string | null): Promise<void> {
+    return request<{ ok: boolean }>(
+      `/api/settings/ai/tools/${encodeURIComponent(toolId)}`,
+      { method: "PUT", body: JSON.stringify({ modelId }) },
+    ).then(() => undefined);
   },
 
   /* ── Workspaces / Documents / Entities / Artifacts / AI (Фаза A) ── */
 
-  listWorkspaces(): Promise<WorkspaceDto[]> {
-    return request<{ workspaces: WorkspaceDto[] }>("/api/workspaces").then(
+  listWorkspaces(opts?: { archived?: boolean }): Promise<WorkspaceDto[]> {
+    const qs = opts?.archived ? "?archived=1" : "";
+    return request<{ workspaces: WorkspaceDto[] }>(`/api/workspaces${qs}`).then(
       (r) => r.workspaces,
     );
   },
@@ -600,11 +967,23 @@ export const api = {
 
   updateWorkspace(
     id: string,
-    body: Partial<Pick<WorkspaceDto, "name" | "description" | "stage" | "stageIndex" | "progress">>,
+    body: Partial<
+      Pick<
+        WorkspaceDto,
+        "name" | "description" | "stage" | "stageIndex" | "progress" | "favorite" | "archived"
+      >
+    >,
   ): Promise<WorkspaceDto> {
     return request<{ workspace: WorkspaceDto }>(
       `/api/workspaces/${encodeURIComponent(id)}`,
       { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.workspace);
+  },
+
+  duplicateWorkspace(id: string): Promise<WorkspaceDto> {
+    return request<{ workspace: WorkspaceDto }>(
+      `/api/workspaces/${encodeURIComponent(id)}/duplicate`,
+      { method: "POST" },
     ).then((r) => r.workspace);
   },
 
@@ -684,7 +1063,7 @@ export const api = {
     return request<{ config: string; count: number }>("/api/mcp/config");
   },
 
-  /** Dockerfile-генератор (Фаза D): пишет файлы в проект, возвращает текст. */
+  /** Dockerfile-генератор: пишет файлы в проект. Образ не публикуется. */
   generateDockerfile(
     projectId: string,
     overwrite = false,
@@ -693,6 +1072,11 @@ export const api = {
     dockerfile: string;
     dockerignore: string;
     workspace: { id: string; name: string };
+    published: false;
+    imageTag: null;
+    status: string;
+    empty: boolean;
+    hint: string;
   }> {
     return request(`/api/workspaces/${encodeURIComponent(projectId)}/dockerfile`, {
       method: "POST",
@@ -750,6 +1134,12 @@ export const api = {
     return request<{ documents: DocumentDto[] }>(
       `/api/workspaces/${encodeURIComponent(projectId)}/documents`,
     ).then((r) => r.documents);
+  },
+
+  listWorkspaceSections(projectId: string): Promise<MentionSectionOption[]> {
+    return request<{ sections: MentionSectionOption[] }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/sections`,
+    ).then((r) => r.sections);
   },
 
   createDocument(
@@ -852,7 +1242,15 @@ export const api = {
     body: Partial<
       Pick<
         EntityDto,
-        "name" | "short" | "description" | "attributes" | "tags" | "portrait" | "favorite"
+        | "name"
+        | "short"
+        | "description"
+        | "attributes"
+        | "tags"
+        | "related"
+        | "portrait"
+        | "favorite"
+        | "refs"
       >
     >,
   ): Promise<EntityDto> {
@@ -866,6 +1264,29 @@ export const api = {
     await request<{ ok: boolean }>(`/api/entities/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
+  },
+
+  listSectionMentions(sectionId: string): Promise<{
+    linked: { id: string; name: string; kind: string }[];
+    foundInText: { id: string; name: string; kind: string }[];
+  }> {
+    return request(
+      `/api/sections/${encodeURIComponent(sectionId)}/mentions`,
+    );
+  },
+
+  addSectionMention(sectionId: string, entityId: string): Promise<EntityDto> {
+    return request<{ entity: EntityDto }>(
+      `/api/sections/${encodeURIComponent(sectionId)}/mentions`,
+      { method: "POST", body: JSON.stringify({ entityId }) },
+    ).then((r) => r.entity);
+  },
+
+  async removeSectionMention(sectionId: string, entityId: string): Promise<EntityDto> {
+    return request<{ entity: EntityDto }>(
+      `/api/sections/${encodeURIComponent(sectionId)}/mentions/${encodeURIComponent(entityId)}`,
+      { method: "DELETE" },
+    ).then((r) => r.entity);
   },
 
   listArtifacts(projectId: string, type?: string): Promise<ArtifactDto[]> {
@@ -937,6 +1358,13 @@ export const api = {
     return request<DashboardDto>("/api/dashboard");
   },
 
+  addAlbumFromLibrary(projectId: string, sourceId: string): Promise<ArtifactDto> {
+    return request<{ artifact: ArtifactDto }>(
+      `/api/workspaces/${encodeURIComponent(projectId)}/artifacts`,
+      { method: "POST", body: JSON.stringify({ sourceId }) },
+    ).then((r) => r.artifact);
+  },
+
   aiGenerateImage(body: {
     projectId: string;
     prompt: string;
@@ -944,6 +1372,7 @@ export const api = {
     entityId?: string;
     stage?: string;
     size?: string;
+    albumKind?: "portrait" | "illustration" | "concept";
   }): Promise<ArtifactDto> {
     return request<{ artifact: ArtifactDto }>("/api/ai/image", {
       method: "POST",
@@ -979,6 +1408,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ entityId }),
     });
+  },
+
+  /** ИИ: переписать / продолжить / править главу по инструкции. */
+  aiRewriteSection(body: {
+    sectionId: string;
+    action: "write" | "rewrite" | "continue" | "custom";
+    instruction?: string;
+  }): Promise<DocumentSectionDto> {
+    return request<{ section: DocumentSectionDto }>("/api/ai/section", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.section);
   },
 
   /** Сгенерировать персистентный портрет сущности (PS-6): image в БД + артефакт. */
@@ -1026,4 +1467,369 @@ export const api = {
       },
     );
   },
+
+  listSkills(): Promise<{
+    skills: import("@/lib/skill-shapes").SkillDto[];
+    store: import("@/lib/skill-shapes").StoreSkillDto[];
+  }> {
+    return request("/api/skills");
+  },
+
+  createSkill(body: {
+    name: string;
+    description?: string;
+    skillMd: string;
+    triggers?: string[];
+    icon?: string;
+  }): Promise<import("@/lib/skill-shapes").SkillDto> {
+    return request<{ skill: import("@/lib/skill-shapes").SkillDto }>(
+      "/api/skills",
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.skill);
+  },
+
+  updateSkill(
+    id: string,
+    body: { enabled?: boolean; name?: string; skillMd?: string; triggers?: string[] },
+  ): Promise<import("@/lib/skill-shapes").SkillDto> {
+    return request<{ skill: import("@/lib/skill-shapes").SkillDto }>(
+      `/api/skills/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ).then((r) => r.skill);
+  },
+
+  duplicateSkill(id: string): Promise<import("@/lib/skill-shapes").SkillDto> {
+    return request<{ skill: import("@/lib/skill-shapes").SkillDto }>(
+      `/api/skills/${encodeURIComponent(id)}`,
+      { method: "POST" },
+    ).then((r) => r.skill);
+  },
+
+  async deleteSkill(id: string): Promise<void> {
+    await request(`/api/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  importSkill(body: {
+    catalogKey?: string;
+    url?: string;
+    skillMd?: string;
+    name?: string;
+  }): Promise<import("@/lib/skill-shapes").SkillDto> {
+    return request<{ skill: import("@/lib/skill-shapes").SkillDto }>(
+      "/api/skills/import",
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.skill);
+  },
+
+  listEnabledSkills(): Promise<{
+    skills: import("@/lib/skill-shapes").SkillDto[];
+    promptBlock: string;
+  }> {
+    return request("/api/skills/enabled");
+  },
+
+  getDesign(
+    workspaceId: string,
+    mode: "raster" | "layout",
+  ): Promise<{
+    design: {
+      id: string;
+      mode: string;
+      payload: unknown;
+      previewUrl: string | null;
+      title: string;
+    };
+  }> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/design?mode=${mode}`,
+    );
+  },
+
+  saveDesign(
+    workspaceId: string,
+    body: {
+      mode: "raster" | "layout";
+      payload: unknown;
+      previewUrl?: string | null;
+      title?: string;
+    },
+  ): Promise<unknown> {
+    return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/design`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  getTimeline(workspaceId: string): Promise<{
+    timeline: import("@/lib/nle-model").NleTimeline;
+    fps: number;
+  }> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/timeline`,
+    );
+  },
+
+  saveTimeline(
+    workspaceId: string,
+    body: { timeline: import("@/lib/nle-model").NleTimeline; fps?: number },
+  ): Promise<unknown> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/timeline`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  listOffers(projectId?: string): Promise<
+    {
+      id: string;
+      projectId: string;
+      title: string;
+      description: string | null;
+      priceCents: number;
+      currency: string;
+      status: string;
+      paymentMode: string;
+      paidAt: string | null;
+      createdAt: string;
+    }[]
+  > {
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    return request<{ offers: Array<{
+      id: string;
+      projectId: string;
+      title: string;
+      description: string | null;
+      priceCents: number;
+      currency: string;
+      status: string;
+      paymentMode: string;
+      paidAt: string | null;
+      createdAt: string;
+    }> }>(`/api/offers${qs}`).then((r) => r.offers);
+  },
+
+  createOffer(body: {
+    projectId: string;
+    title: string;
+    description?: string;
+    priceCents: number;
+    paymentMode?: "simulated" | "live";
+  }): Promise<{ id: string; status: string; title: string; priceCents: number; currency: string; paymentMode: string; paidAt: string | null }> {
+    return request<{ offer: { id: string; status: string; title: string; priceCents: number; currency: string; paymentMode: string; paidAt: string | null } }>(
+      "/api/offers",
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.offer);
+  },
+
+  checkoutOffer(id: string): Promise<unknown> {
+    return request(`/api/offers/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ checkout: true }),
+    });
+  },
+
+  peekInvite(token: string): Promise<{
+    status: "ok" | "used" | "expired" | "invalid";
+    role?: "admin" | "client";
+    email?: string;
+  }> {
+    return request(`/api/invites/${encodeURIComponent(token)}`);
+  },
+
+  listPayouts(): Promise<{
+    payouts: Array<{
+      id: string;
+      amountCents: number;
+      currency: string;
+      status: string;
+      note: string | null;
+      createdAt: string;
+    }>;
+    totalPendingCents: number;
+    totalPaidCents: number;
+  }> {
+    return request("/api/payouts");
+  },
+
+  paymentsStatus(): Promise<{
+    defaultMode: string;
+    liveKeyConfigured: boolean;
+    modes: { id: string; label: string; hint: string }[];
+  }> {
+    return request("/api/payments/status");
+  },
+
+  dockerBuild(workspaceId: string): Promise<{
+    status: string;
+    log: string;
+    imageTag: string | null;
+    published: false;
+  }> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/docker-build`,
+      { method: "POST" },
+    );
+  },
+
+  compileFilmFfmpeg(
+    workspaceId: string,
+    body?: { clips?: { imageUrl?: string | null; durationSec?: number }[] },
+  ): Promise<{
+    status: string;
+    log: string;
+    url: string | null;
+  }> {
+    return request(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/compile-film`,
+      {
+        method: "POST",
+        body: JSON.stringify(body ?? {}),
+      },
+    );
+  },
+
+  projectPreview(projectId: string): Promise<{
+    kind: string;
+    running?: boolean;
+    file: string | null;
+    src: string | null;
+    files?: string[];
+    hint?: string;
+  }> {
+    return request(`/api/projects/${encodeURIComponent(projectId)}/preview`);
+  },
+
+  getOnboarding(): Promise<{ onboardingDone: boolean }> {
+    return request("/api/me/onboarding");
+  },
+
+  setOnboardingDone(done: boolean): Promise<void> {
+    return request("/api/me/onboarding", {
+      method: "PATCH",
+      body: JSON.stringify({ onboardingDone: done }),
+    }).then(() => undefined);
+  },
+
+  registerWithInvite(
+    name: string,
+    email: string,
+    password: string,
+    invite?: string,
+  ): Promise<User> {
+    return this.register(name, email, password, invite);
+  },
+
+  listAdminOffers(): Promise<
+    Array<{
+      id: string;
+      title: string;
+      priceCents: number;
+      currency: string;
+      status: string;
+      paymentMode: string;
+      userEmail: string;
+      userName: string;
+      workspaceName: string;
+    }>
+  > {
+    return request<{ offers: Array<{
+      id: string;
+      title: string;
+      priceCents: number;
+      currency: string;
+      status: string;
+      paymentMode: string;
+      userEmail: string;
+      userName: string;
+      workspaceName: string;
+    }> }>("/api/admin/offers").then((r) => r.offers);
+  },
+
+  markOfferPaid(id: string): Promise<unknown> {
+    return request(`/api/admin/offers/${encodeURIComponent(id)}/paid`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  listAdminPayouts(): Promise<
+    Array<{
+      id: string;
+      amountCents: number;
+      currency: string;
+      status: string;
+      note: string | null;
+      userEmail: string;
+      userName: string;
+      createdAt: string;
+    }>
+  > {
+    return request<{
+      payouts: Array<{
+        id: string;
+        amountCents: number;
+        currency: string;
+        status: string;
+        note: string | null;
+        userEmail: string;
+        userName: string;
+        createdAt: string;
+      }>;
+    }>("/api/admin/payouts").then((r) => r.payouts);
+  },
+
+  patchPayout(
+    id: string,
+    status: "paid" | "failed",
+  ): Promise<{ payout: { id: string; status: string; amountCents: number } }> {
+    return request("/api/payouts", {
+      method: "PATCH",
+      body: JSON.stringify({ id, status }),
+    });
+  },
+
+  listInvites(): Promise<
+    Array<{
+      id: string;
+      email: string;
+      role: string;
+      token: string;
+      usedAt: string | null;
+      expiresAt: string | null;
+      createdAt: string;
+    }>
+  > {
+    return request<{ invites: Array<{
+      id: string;
+      email: string;
+      role: string;
+      token: string;
+      usedAt: string | null;
+      expiresAt: string | null;
+      createdAt: string;
+    }> }>("/api/admin/invites").then((r) => r.invites);
+  },
+
+  createInvite(email: string, role: "client" | "admin" = "client"): Promise<{
+    token: string;
+    email: string;
+    role: string;
+  }> {
+    return request<{ invite: { token: string; email: string; role: string } }>(
+      "/api/admin/invites",
+      { method: "POST", body: JSON.stringify({ email, role }) },
+    ).then((r) => r.invite);
+  },
+
+  reindexRag(body: { projectId?: string; all?: boolean } = {}): Promise<{
+    ok: true;
+    message?: string;
+    report?: Record<string, number>;
+  }> {
+    return request("/api/rag/reindex", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
 };
+

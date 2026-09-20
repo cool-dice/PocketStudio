@@ -3,7 +3,12 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { isToolUnconfigured } from "@/lib/ai/resolve";
+import { noteAnalysisFieldsForQueue } from "@/lib/note-analysis";
 import { noteWithCategory } from "@/lib/note-utils";
+import { scheduleIndexNote } from "@/lib/rag";
+import { persistableTranscription } from "@/lib/voice-copy";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +18,14 @@ const createNoteSchema = z.object({
     .trim()
     .min(1, "Текст заметки не может быть пустым")
     .max(5000, "Текст заметки не может превышать 5000 символов"),
+  /** Исходная ASR-расшифровка (голос). Typed notes omit this → null. */
+  transcription: z
+    .string()
+    .max(5000, "Расшифровка не может превышать 5000 символов")
+    .nullish(),
   categoryId: z.string().trim().min(1).optional(),
+  /** Привязать к воркспейсу (NoteLink kind=context). */
+  projectId: z.string().trim().min(1).optional(),
 });
 
 export async function GET(req: Request) {
@@ -25,6 +37,10 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const categoryId = url.searchParams.get("categoryId")?.trim() || null;
   const favorite = url.searchParams.get("favorite") === "1";
+  const reminders = url.searchParams.get("reminders") === "1";
+  const due = url.searchParams.get("due") === "1";
+  const tagId = url.searchParams.get("tagId")?.trim() || null;
+  const projectId = url.searchParams.get("projectId")?.trim() || null;
   // Case-insensitive substring search on rawText.
   const q = url.searchParams.get("q")?.trim().toLowerCase() || null;
 
@@ -54,12 +70,51 @@ export async function GET(req: Request) {
   }
 
   const where: Prisma.NoteWhereInput = { userId: session.sub };
-  if (categoryId) where.categoryId = categoryId;
+  if (categoryId) {
+    const category = await db.category.findFirst({
+      where: { id: categoryId, userId: session.sub },
+      select: { id: true },
+    });
+    if (!category) {
+      return NextResponse.json({ error: "Категория не найдена" }, { status: 404 });
+    }
+    where.categoryId = categoryId;
+  }
   if (favorite) where.favorite = true;
+  if (due) where.remindAt = { not: null, lte: new Date() };
+  else if (reminders) where.remindAt = { not: null };
+  if (tagId) {
+    const tag = await db.tag.findFirst({
+      where: { id: tagId, userId: session.sub },
+      select: { id: true },
+    });
+    if (!tag) {
+      return NextResponse.json({ error: "Тег не найден" }, { status: 404 });
+    }
+    where.tags = { some: { tagId } };
+  }
+
+  if (projectId) {
+    const owned = await db.project.findFirst({
+      where: { id: projectId, userId: session.sub },
+      select: { id: true },
+    });
+    if (!owned) {
+      return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
+    }
+    const links = await db.noteLink.findMany({
+      where: { projectId },
+      select: { noteId: true },
+    });
+    if (links.length === 0) {
+      return NextResponse.json({ notes: [], total: 0, hasMore: false });
+    }
+    where.id = { in: links.map((l) => l.noteId) };
+  }
 
   if (q) {
-    // Unicode-safe case-insensitive matching: SQLite LIKE/lower() are
-    // ASCII-only, so filter candidates in JS (covers Cyrillic too).
+    // Unicode-safe case-insensitive matching in JS (covers Cyrillic;
+    // Postgres ILIKE depends on the cluster locale).
     const candidates = await db.note.findMany({
       where,
       select: { id: true, rawText: true },
@@ -79,7 +134,7 @@ export async function GET(req: Request) {
     db.note.findMany({
       where,
       orderBy: { createdAt: "desc" },
-      include: { category: true },
+      include: { category: true, tags: { include: { tag: true } } },
       skip: (page - 1) * limit,
       take: limit,
     }),
@@ -93,16 +148,16 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
+
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
-  }
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
   }
 
   const parsed = createNoteSchema.safeParse(body);
@@ -127,14 +182,38 @@ export async function POST(req: Request) {
     }
   }
 
+  let projectId: string | null = null;
+  if (parsed.data.projectId) {
+    const project = await db.project.findFirst({
+      where: { id: parsed.data.projectId, userId: session.sub },
+      select: { id: true },
+    });
+    if (!project) {
+      return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
+    }
+    projectId = project.id;
+  }
+
+  const analysis = noteAnalysisFieldsForQueue(
+    await isToolUnconfigured(db, session.sub, "notes"),
+  );
   const note = await db.note.create({
     data: {
       userId: session.sub,
       rawText: parsed.data.text,
-      status: "pending",
+      transcription: persistableTranscription(parsed.data.transcription),
       categoryId: category?.id ?? undefined,
+      ...analysis,
     },
   });
+
+  if (projectId) {
+    await db.noteLink.create({
+      data: { noteId: note.id, projectId, kind: "context" },
+    });
+  }
+
+  scheduleIndexNote(db, note.id);
 
   return NextResponse.json(
     { note: noteWithCategory({ ...note, category }) },

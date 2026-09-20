@@ -7,8 +7,9 @@
  * a jump straight to the notebook.
  *
  * Voice (Stage 2): the mic button records via useVoiceRecorder, the
- * backend transcribes (POST /api/notes/voice) and the text lands in the
- * textarea for review — the user still saves with the regular flow.
+ * backend transcribes (POST /api/notes/voice → { text }) and the text lands
+ * in the textarea. A notebook row is created only when the user saves
+ * (POST /api/notes with rawText + transcription) — one utterance = one note.
  *
  * The form lives in an inner component: Radix unmounts dialog content on
  * close, so the draft state resets naturally without reset effects.
@@ -35,6 +36,12 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import { MAX_NOTE_LENGTH } from "@/lib/types";
+import {
+  ASR_GENERIC,
+  MIC_START_FAILED,
+  isTranscriptAlreadySaved,
+  voiceReviewCopy,
+} from "@/lib/voice-copy";
 
 /** ~12 rows of text-sm/leading-relaxed before the inner scrollbar kicks in. */
 const MAX_TEXTAREA_HEIGHT = 288;
@@ -49,6 +56,13 @@ export function CaptureDialog() {
       onOpenChange={(next) => {
         // Allow closing mid-save too: the request completes in the background
         // and its toast still fires.
+        if (!next) {
+          try {
+            sessionStorage.removeItem("pocketstudio-quest");
+          } catch {
+            /* ignore */
+          }
+        }
         setCaptureOpen(next);
       }}
     >
@@ -77,6 +91,9 @@ function CaptureForm() {
 
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [savedText, setSavedText] = useState<string | null>(null);
+  /** Original ASR text(s) — persisted as Note.transcription, even if edited. */
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
@@ -87,28 +104,34 @@ function CaptureForm() {
     finalizingRef.current = true;
     try {
       const clip = clipArg ?? (await recorder.stop());
-      const note = await api.createVoiceNote({
+      const text = await api.transcribeVoice({
         audioBase64: clip.audioBase64,
         mime: clip.mime,
       });
-      const text = (note.rawText ?? note.transcription ?? "").trim();
-      if (!text) {
-        toast.error("Не удалось распознать речь — попробуйте записать ещё раз");
+      const result = voiceReviewCopy(text);
+      if (!result.ok) {
+        toast.error(result.error);
       } else {
-        // Text goes INTO the textarea — the user reviews and saves manually.
+        // Text goes INTO the textarea — the user reviews and saves once.
+        // Keep the raw ASR separately so save can write Note.transcription.
+        setVoiceTranscript((prev) => {
+          const piece = result.text;
+          if (!prev) return piece;
+          return `${prev}\n${piece}`.slice(0, MAX_NOTE_LENGTH);
+        });
         setValue((prev) => {
           const base = prev.trim();
-          const merged = base ? `${base}\n${text}` : text;
+          const merged = base ? `${base}\n${result.text}` : result.text;
           return merged.slice(0, MAX_NOTE_LENGTH);
         });
         taRef.current?.focus();
-        toast.success("Голос распознан — проверьте текст");
+        toast.success(result.toast);
       }
     } catch (err) {
       toast.error(
         err instanceof ApiError || err instanceof Error
           ? err.message
-          : "Не удалось распознать голос",
+          : ASR_GENERIC,
       );
     } finally {
       finalizingRef.current = false;
@@ -119,14 +142,14 @@ function CaptureForm() {
   const recorder = useVoiceRecorder({
     onAutoStop: (clip) => void finalizeRecording(clip),
   });
-  const { state: voiceState, elapsedMs, level, supported } = recorder;
+  const { state: voiceState, elapsedMs, level, supported, error: voiceError } = recorder;
   const isRecording = voiceState === "recording";
 
   const startRecording = async () => {
     try {
       await recorder.start();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось начать запись");
+      toast.error(err instanceof Error ? err.message : MIC_START_FAILED);
     }
   };
 
@@ -139,22 +162,46 @@ function CaptureForm() {
   }, [value]);
 
   const trimmed = value.trim();
+  const alreadySaved = isTranscriptAlreadySaved(trimmed, savedText);
   const canSubmit =
-    !submitting && voiceState === "idle" && trimmed.length > 0;
+    !submitting &&
+    voiceState === "idle" &&
+    trimmed.length > 0 &&
+    !alreadySaved;
 
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      await api.createNote({ text: trimmed });
+      const note = await api.createNote({
+        text: trimmed,
+        ...(voiceTranscript ? { transcription: voiceTranscript } : {}),
+      });
+      setSavedText(trimmed);
       bumpNotes();
       setCaptureOpen(false);
-      toast.success("Мысль сохранена ✓", {
-        action: {
-          label: "Открыть блокнот",
-          onClick: () => useAppUi.getState().setMainArea("notebook"),
-        },
-      });
+      let quest = false;
+      try {
+        quest = sessionStorage.getItem("pocketstudio-quest") === "1";
+        if (quest) sessionStorage.removeItem("pocketstudio-quest");
+      } catch {
+        quest = false;
+      }
+      if (quest) {
+        useAppUi.getState().openNote(note, { auto: true });
+        useAppUi.getState().setMainArea("chat");
+        useAppUi.getState().setComposerDraft(
+          `Quest: помоги разобраться с первой мыслью: «${trimmed.slice(0, 120)}»`,
+        );
+        toast.success("Quest начат — штурман ждёт вашу мысль в чате");
+      } else {
+        toast.success("Мысль сохранена ✓", {
+          action: {
+            label: "Открыть блокнот",
+            onClick: () => useAppUi.getState().setMainArea("notebook"),
+          },
+        });
+      }
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : "Не удалось сохранить мысль",
@@ -277,8 +324,15 @@ function CaptureForm() {
             </Button>
           )}
           {!isRecording && (
-            <p className="truncate text-[11px] leading-snug text-muted-foreground">
-              Enter — сохранить · Shift+Enter — перенос · Esc — отмена
+            <p
+              className={`truncate text-[11px] leading-snug ${
+                voiceError ? "text-destructive" : "text-muted-foreground"
+              }`}
+              role={voiceError ? "alert" : undefined}
+            >
+              {voiceError
+                ? voiceError
+                : "Enter — сохранить · Shift+Enter — перенос · Esc — отмена"}
             </p>
           )}
         </div>
@@ -297,12 +351,17 @@ function CaptureForm() {
         type="submit"
         className="h-10 w-full gap-2 rounded-xl"
         disabled={!canSubmit}
-        aria-label="Сохранить мысль"
+        aria-label={alreadySaved ? "Мысль уже сохранена" : "Сохранить мысль"}
       >
         {submitting ? (
           <>
             <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             Сохраняем…
+          </>
+        ) : alreadySaved ? (
+          <>
+            <PenLine className="size-4" aria-hidden="true" />
+            Сохранено
           </>
         ) : (
           <>

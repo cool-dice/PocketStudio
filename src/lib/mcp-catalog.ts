@@ -9,7 +9,7 @@
  *
  * builtin-адаптеры разложены по ключам agent-service:
  *  - filesystem → list_files/read_file/write_file/delete_file/checkpoint
- *  - fetch      → fetch_url/web_search (z-ai-web-dev-sdk page_reader/search)
+ *  - fetch      → fetch_url/web_search (HTTP + DuckDuckGo)
  *  - browser    → browser_read (agent-browser CLI)
  */
 

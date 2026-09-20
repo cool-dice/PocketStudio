@@ -87,6 +87,8 @@ export type NoteShape = {
   analyzedAt?: Date | null;
   errorMessage?: string | null;
   category: CategoryShape | null;
+  tags?: { id: string; name: string; color: string }[];
+  remindAt?: Date | null;
 };
 
 /** DB note row (subset) accepted by noteWithCategory. */
@@ -106,6 +108,8 @@ export type NoteRow = {
   analyzedAt?: Date | null;
   errorMessage?: string | null;
   category: CategoryShape | null;
+  tags?: { tag: { id: string; name: string; color: string } }[];
+  remindAt?: Date | null;
 };
 
 /**
@@ -139,5 +143,11 @@ export function noteWithCategory(note: NoteRow): NoteShape {
           icon: note.category.icon,
         }
       : null,
+    tags: (note.tags ?? []).map((t) => ({
+      id: t.tag.id,
+      name: t.tag.name,
+      color: t.tag.color,
+    })),
+    ...(note.remindAt !== undefined ? { remindAt: note.remindAt } : {}),
   };
 }

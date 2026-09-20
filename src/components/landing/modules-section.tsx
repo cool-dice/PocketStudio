@@ -20,6 +20,16 @@ import {
 } from "lucide-react";
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
+import {
+  LANDING_DEPLOY_BLURB,
+  LANDING_MCP_BLURB,
+  LANDING_MONETIZE_BLURB,
+} from "@/lib/landing-copy";
+import {
+  AUDIO_LANDING_BLURB,
+  DESIGN_LANDING_BLURB,
+  VIDEO_LANDING_BLURB,
+} from "@/lib/studio-copy";
 
 const MODULES: {
   icon: LucideIcon;
@@ -39,27 +49,27 @@ const MODULES: {
   {
     icon: PenTool,
     title: "Дизайн",
-    description: "Редактор: растр, макеты и правки интерфейса руками.",
+    description: DESIGN_LANDING_BLURB,
   },
   {
     icon: AudioWaveform,
     title: "Аудио",
-    description: "Озвучка, музыка и подкасты голосами студии.",
+    description: AUDIO_LANDING_BLURB,
   },
   {
     icon: Clapperboard,
     title: "Видео",
-    description: "Карманная киностудия: сценарий, раскадровка, монтаж.",
+    description: VIDEO_LANDING_BLURB,
   },
   {
     icon: Rocket,
     title: "Деплой",
-    description: "Docker-образ собирается и уезжает на ваш хост.",
+    description: LANDING_DEPLOY_BLURB,
   },
   {
     icon: Blocks,
     title: "Интеграции",
-    description: "MCP-серверы: GitHub, Playwright, базы данных.",
+    description: LANDING_MCP_BLURB,
   },
   {
     icon: Wand2,
@@ -69,7 +79,7 @@ const MODULES: {
   {
     icon: Coins,
     title: "Монетизация",
-    description: "Публикации, тарифы и доход в одном окне.",
+    description: LANDING_MONETIZE_BLURB,
   },
 ];
 

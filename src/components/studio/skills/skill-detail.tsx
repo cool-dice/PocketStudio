@@ -21,6 +21,9 @@ function SkillMdBlock({ code }: { code: string }) {
           size="icon"
           className="size-7 rounded-md text-stone-400 hover:bg-stone-800 hover:text-stone-200"
           aria-label="Скопировать SKILL.md"
+          onClick={() => {
+            void navigator.clipboard.writeText(code);
+          }}
         >
           <Copy className="size-3.5" aria-hidden="true" />
         </Button>
@@ -41,11 +44,13 @@ export function SkillDetail({
   onClose,
   onDuplicate,
   onDelete,
+  onEdit,
 }: {
   skill: MySkill;
   onClose: () => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
+  onEdit?: () => void;
 }) {
   const source = SOURCE_META[skill.source];
   const Icon = skill.icon;
@@ -117,7 +122,7 @@ export function SkillDetail({
           <SkillMdBlock code={skill.skillMd} />
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => onEdit?.()}>
               <Pencil className="size-3.5" aria-hidden="true" />
               Изменить
             </Button>

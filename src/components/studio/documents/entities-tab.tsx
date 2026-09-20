@@ -8,7 +8,7 @@
  * «+ Сущность» — диалог создания (домен → вид → название).
  */
 
-import { ArrowUpDown, Check, Plus, Search, X } from "lucide-react";
+import { ArrowUpDown, Check, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -21,8 +21,26 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
-import type { EntityDto } from "@/lib/workspace-types";
+import { api, ApiError } from "@/lib/api";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import {
+  ENTITY_DELETE_CONFIRM_LEAD,
+  ENTITY_DELETE_FAILED,
+  ENTITY_DELETED,
+  ENTITY_DESCRIBE_FAILED,
+  ENTITY_DESCRIBE_FAILED_HINT,
+  ENTITY_DESCRIBE_UNCONFIGURED_HINT,
+  ENTITY_PORTRAIT_FAILED,
+  ENTITY_PORTRAIT_FAILED_HINT,
+  ENTITY_PORTRAIT_UNCONFIGURED_HINT,
+  ENTITY_TAB_EMPTY,
+  ENTITY_TAB_EMPTY_HINT,
+  ENTITY_TAB_FILTER_EMPTY,
+  ENTITY_TAB_FILTER_EMPTY_HINT,
+  ENTITY_TAB_LOAD_ERROR,
+  ENTITY_TAB_LOAD_ERROR_HINT,
+} from "@/lib/entity-copy";
+import type { EntityDto, MentionSectionOption } from "@/lib/workspace-types";
 import { CharacterSheet } from "./character-sheet";
 import { EntityCard } from "./entity-card";
 import { EntitySheet, type EntityDraftPatch } from "./entity-sheet";
@@ -48,6 +66,7 @@ export function EntitiesTab({
   onCountChange?: (count: number) => void;
 }) {
   const [entities, setEntities] = useState<EntityDto[]>([]);
+  const [sections, setSections] = useState<MentionSectionOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [setId, setSetId] = useState<string | null>(null);
@@ -58,33 +77,35 @@ export function EntitiesTab({
   const [createOpen, setCreateOpen] = useState(false);
   const [describingId, setDescribingId] = useState<string | null>(null);
   const [portraitGenId, setPortraitGenId] = useState<string | null>(null);
+  const [portraitError, setPortraitError] = useState<string | null>(null);
 
-  /* ── Загрузка ── */
-  useEffect(() => {
+  const loadEntities = useCallback(async () => {
     if (!workspaceId) {
       setEntities([]);
+      setSections([]);
       setLoading(false);
+      setLoadError(false);
       return;
     }
-    let cancelled = false;
     setLoading(true);
-    api
-      .listEntities(workspaceId)
-      .then((list) => {
-        if (cancelled) return;
-        setEntities(list);
-        setLoadError(false);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const [list, chapterList] = await Promise.all([
+        api.listEntities(workspaceId),
+        api.listWorkspaceSections(workspaceId).catch(() => [] as MentionSectionOption[]),
+      ]);
+      setEntities(list);
+      setSections(chapterList);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }, [workspaceId]);
+
+  useEffect(() => {
+    void loadEntities();
+  }, [loadEntities]);
 
   const sets = useMemo(() => entitySetsOf(entities), [entities]);
   const activeSet = sets.find((set) => set.id === setId) ?? sets[0] ?? null;
@@ -132,12 +153,26 @@ export function EntitiesTab({
 
   const openEntity = openId ? entities.find((entity) => entity.id === openId) ?? null : null;
 
+  useEffect(() => {
+    setPortraitError(null);
+  }, [openId]);
+
   /* ── Мутации и AI ── */
 
   const handleSave = useCallback(async (id: string, patch: EntityDraftPatch) => {
     try {
       const updated = await api.updateEntity(id, patch);
-      setEntities((prev) => prev.map((entity) => (entity.id === id ? updated : entity)));
+      setEntities((prev) => {
+        const linked = new Set(updated.related ?? []);
+        return prev.map((entity) => {
+          if (entity.id === id) return updated;
+          const had = (entity.related ?? []).includes(id);
+          const has = linked.has(entity.id);
+          if (had === has) return entity;
+          const rest = (entity.related ?? []).filter((r) => r !== id);
+          return { ...entity, related: has ? [...rest, id] : rest };
+        });
+      });
       toast.success("Сохранено", {
         description: `Карточка «${updated.name}» обновлена.`,
       });
@@ -159,9 +194,13 @@ export function EntitiesTab({
       toast.success("Описание готово", {
         description: `Студия вписала текст в карточку «${entity.name}».`,
       });
-    } catch {
-      toast.error("Не удалось сгенерировать описание", {
-        description: "Попробуйте ещё раз через минуту.",
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : ENTITY_DESCRIBE_FAILED;
+      toast.error(message, {
+        description:
+          message === UNCONFIGURED_TOOL_MESSAGE
+            ? ENTITY_DESCRIBE_UNCONFIGURED_HINT
+            : ENTITY_DESCRIBE_FAILED_HINT,
       });
     } finally {
       setDescribingId(null);
@@ -172,6 +211,7 @@ export function EntitiesTab({
     async (entity: EntityDto) => {
       if (portraitGenId) return;
       setPortraitGenId(entity.id);
+      setPortraitError(null);
       try {
         const { entity: updated } = await api.generateEntityPortrait(entity.id);
         setEntities((prev) =>
@@ -180,9 +220,14 @@ export function EntitiesTab({
         toast.success("Портрет готов", {
           description: "Карточка сохранена с картинкой — тайл появился в Альбоме.",
         });
-      } catch {
-        toast.error("Не удалось сгенерировать портрет", {
-          description: "Попробуйте ещё раз — генерация занимает до минуты.",
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : ENTITY_PORTRAIT_FAILED;
+        setPortraitError(message);
+        toast.error(message, {
+          description:
+            message === UNCONFIGURED_TOOL_MESSAGE
+              ? ENTITY_PORTRAIT_UNCONFIGURED_HINT
+              : ENTITY_PORTRAIT_FAILED_HINT,
         });
       } finally {
         setPortraitGenId(null);
@@ -223,6 +268,18 @@ export function EntitiesTab({
     [workspaceId],
   );
 
+  const handleDelete = useCallback(async (entity: EntityDto) => {
+    if (!window.confirm(`${ENTITY_DELETE_CONFIRM_LEAD} «${entity.name}»?`)) return;
+    try {
+      await api.deleteEntity(entity.id);
+      setEntities((prev) => prev.filter((candidate) => candidate.id !== entity.id));
+      setOpenId(null);
+      toast.success(ENTITY_DELETED);
+    } catch {
+      toast.error(ENTITY_DELETE_FAILED);
+    }
+  }, []);
+
   function switchSet(nextId: string) {
     if (nextId === setId) return;
     setSetId(nextId);
@@ -245,9 +302,13 @@ export function EntitiesTab({
 
   if (loadError) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
-        <p className="text-sm font-medium">Сущности не загрузились</p>
-        <p className="text-xs text-muted-foreground">Проверьте соединение и обновите вкладку.</p>
+      <div role="alert" className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
+        <p className="text-sm font-medium">{ENTITY_TAB_LOAD_ERROR}</p>
+        <p className="max-w-sm text-xs text-muted-foreground">{ENTITY_TAB_LOAD_ERROR_HINT}</p>
+        <Button type="button" size="sm" variant="outline" onClick={() => void loadEntities()}>
+          <RefreshCw className="size-3.5" aria-hidden="true" />
+          Повторить
+        </Button>
       </div>
     );
   }
@@ -370,10 +431,9 @@ export function EntitiesTab({
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
         {entities.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-            <p className="text-sm font-medium">Сущностей пока нет</p>
+            <p className="text-sm font-medium">{ENTITY_TAB_EMPTY}</p>
             <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
-              Создайте первую запись: для книги это персонажи и локации, для документации —
-              пользователи, роли и требования.
+              {ENTITY_TAB_EMPTY_HINT}
             </p>
             <Button type="button" size="sm" className="mt-1" onClick={() => setCreateOpen(true)}>
               <Plus className="size-3.5" aria-hidden="true" />
@@ -382,8 +442,8 @@ export function EntitiesTab({
           </div>
         ) : visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-            <p className="text-sm font-medium">Сущностей не нашлось</p>
-            <p className="text-xs text-muted-foreground">Попробуйте другой вид или очистите поиск.</p>
+            <p className="text-sm font-medium">{ENTITY_TAB_FILTER_EMPTY}</p>
+            <p className="text-xs text-muted-foreground">{ENTITY_TAB_FILTER_EMPTY_HINT}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -407,6 +467,7 @@ export function EntitiesTab({
           key={openEntity.id}
           entity={openEntity}
           entities={entities}
+          sections={sections}
           onClose={() => setOpenId(null)}
           onOpenEntity={(id) => setOpenId(id)}
           onSave={handleSave}
@@ -416,12 +477,15 @@ export function EntitiesTab({
           onClearPortrait={handleClearPortrait}
           portraitGenerating={portraitGenId === openEntity.id}
           portraitUrl={openEntity.image}
+          portraitError={portraitError}
+          onDelete={handleDelete}
         />
       ) : (
         <EntitySheet
           key={openEntity?.id ?? "none"}
           entity={openEntity}
           entities={entities}
+          sections={sections}
           onClose={() => setOpenId(null)}
           onOpenEntity={(id) => setOpenId(id)}
           onSave={handleSave}
@@ -430,6 +494,8 @@ export function EntitiesTab({
           onGeneratePortrait={handleGeneratePortrait}
           onClearPortrait={handleClearPortrait}
           portraitGenerating={openEntity ? portraitGenId === openEntity.id : false}
+          portraitError={portraitError}
+          onDelete={handleDelete}
         />
       )}
 

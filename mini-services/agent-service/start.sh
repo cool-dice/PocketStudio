@@ -1,6 +1,6 @@
 #!/bin/sh
 # agent-service supervisor — keeps the mini-service alive.
-# Usage (detached):  setsid nohup sh /home/z/my-project/mini-services/agent-service/start.sh >/dev/null 2>&1 &
+# Usage (detached):  setsid nohup sh "$(dirname "$0")/start.sh" >/dev/null 2>&1 &
 # Stop:              pkill -f "agent-service/start.sh"; pkill -f "bun --hot index.ts"
 
 cd "$(dirname "$0")"

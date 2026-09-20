@@ -2,20 +2,19 @@ import { Check, Download, Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { StoreSkillDto } from "@/lib/skill-shapes";
+import { skillIcon } from "./icon-map";
 
-import { STORE_SKILLS, type StoreSkill } from "./data";
-
-/** One store card: icon, name, description, rating and an import toggle. */
 function StoreCard({
   skill,
   imported,
   onImport,
 }: {
-  skill: StoreSkill;
+  skill: StoreSkillDto;
   imported: boolean;
   onImport: (id: string) => void;
 }) {
-  const Icon = skill.icon;
+  const Icon = skillIcon(skill.icon);
 
   return (
     <li
@@ -61,7 +60,7 @@ function StoreCard({
             variant="outline"
             size="sm"
             className="w-full"
-            onClick={() => onImport(skill.id)}
+            onClick={() => onImport(skill.key)}
           >
             <Download className="size-3.5" aria-hidden="true" />
             Импортировать
@@ -72,24 +71,31 @@ function StoreCard({
   );
 }
 
-/** Horizontal, snap-scrolling row of skills available for import. */
 export function StoreSection({
   importedIds,
   onImport,
+  items,
 }: {
   importedIds: Set<string>;
   onImport: (id: string) => void;
+  items?: StoreSkillDto[];
 }) {
+  const list = items;
+  if (!list || list.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">Каталог пуст.</p>
+    );
+  }
   return (
     <ul
       aria-label="Доступные для импорта скиллы"
       className="vf-scroll-x flex snap-x gap-3 overflow-x-auto pb-2"
     >
-      {STORE_SKILLS.map((skill) => (
+      {list.map((skill) => (
         <StoreCard
-          key={skill.id}
+          key={skill.key}
           skill={skill}
-          imported={importedIds.has(skill.id)}
+          imported={importedIds.has(skill.key)}
           onImport={onImport}
         />
       ))}

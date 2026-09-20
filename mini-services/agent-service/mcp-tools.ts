@@ -1,9 +1,9 @@
 // PocketStudio MCP tools (Фаза D) — builtin-адаптеры реестра интеграций.
 //
 // Три инструмента, которые включает/выключает пользователь на экране
-// «Интеграции» (строки McpServer в общей SQLite):
-//   fetch      → fetch_url  (page_reader через z-ai-web-dev-sdk)
-//              → web_search (web_search через SDK)
+// «Интеграции» (строки McpServer в Postgres):
+//   fetch      → fetch_url  (обычный HTTP + HTML→текст)
+//              → web_search (DuckDuckGo HTML)
 //   browser    → browser_read (agent-browser CLI: open + read + close)
 //   filesystem → list_files/read_file/write_file/delete_file/checkpoint
 //                (определены в tools.ts и тегированы mcpAdapter)
@@ -14,8 +14,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { getZai } from "./agent";
-import type { ToolDef } from "./tools";
+import {
+  abortedToolResult,
+  isAbortFlag,
+  mergeAbortSignals,
+} from "../../src/lib/abort-flag";
+import type { ToolContext, ToolDef } from "./tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -88,7 +92,7 @@ const fetchUrl: ToolDef = {
   argsSchema: {
     url: "адрес страницы http(s)://… (обязательно)",
   },
-  async execute(args: any) {
+  async execute(args: any, _userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -100,10 +104,21 @@ const fetchUrl: ToolDef = {
     }
 
     try {
-      const zai = await getZai();
-      const page = await zai.functions.invoke("page_reader", { url });
-      const html = page?.data?.html ?? "";
-      const title = (page?.data?.title ?? url).toString().slice(0, 200);
+      const res = await fetch(url, {
+        redirect: "follow",
+        headers: {
+          "user-agent":
+            "PocketStudio/1.0 (+https://pocketstudio.local; fetch_url)",
+          accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
+        },
+        signal: mergeAbortSignals([AbortSignal.timeout(20_000), ctx?.signal]),
+      });
+      if (!res.ok) {
+        return { error: `Страница недоступна (HTTP ${res.status})` };
+      }
+      const html = await res.text();
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const title = (titleMatch?.[1] ? htmlToText(titleMatch[1]) : url).slice(0, 200);
       const text = htmlToText(html).slice(0, MAX_PAGE_TEXT);
       if (!text) {
         return { error: "Страница пустая или недоступна для чтения" };
@@ -111,11 +126,12 @@ const fetchUrl: ToolDef = {
       return {
         message: `Страница прочитана: ${title} (${text.length} симв.)`,
         title,
-        url: page?.data?.url ?? url,
-        publishedTime: page?.data?.publishedTime ?? null,
+        url: res.url || url,
+        publishedTime: null,
         text,
       };
     } catch (err) {
+      if (isAbortFlag(err) || ctx?.signal?.aborted) return abortedToolResult();
       return {
         error:
           "Не удалось прочитать страницу: " +
@@ -136,7 +152,7 @@ const webSearch: ToolDef = {
     query: "поисковый запрос (обязательно, 2–200 символов)",
     num: "сколько результатов: 1–10 (по умолчанию 5)",
   },
-  async execute(args: any) {
+  async execute(args: any, _userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -153,20 +169,50 @@ const webSearch: ToolDef = {
     }
 
     try {
-      const zai = await getZai();
-      const items = await zai.functions.invoke("web_search", {
-        query,
-        num,
+      const searchUrl =
+        "https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query);
+      const res = await fetch(searchUrl, {
+        headers: {
+          "user-agent":
+            "PocketStudio/1.0 (+https://pocketstudio.local; web_search)",
+          accept: "text/html",
+        },
+        signal: mergeAbortSignals([AbortSignal.timeout(15_000), ctx?.signal]),
       });
-      const results = (Array.isArray(items) ? items : [])
-        .filter((r): r is NonNullable<typeof items[number]> => typeof r === "object" && r !== null)
-        .map((r) => ({
-          title: String(r.name ?? "").slice(0, 200),
-          url: String(r.url ?? ""),
-          snippet: String(r.snippet ?? "").slice(0, 400),
-          host: String(r.host_name ?? ""),
-        }))
-        .filter((r) => r.url);
+      if (!res.ok) {
+        return { error: `Поиск недоступен (HTTP ${res.status})` };
+      }
+      const html = await res.text();
+      const results: Array<{
+        title: string;
+        url: string;
+        snippet: string;
+        host: string;
+      }> = [];
+      const re =
+        /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>|<td[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/td>)/gi;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(html)) && results.length < num) {
+        const href = match[1] ?? "";
+        const title = htmlToText(match[2] ?? "").slice(0, 200);
+        const snippet = htmlToText(match[3] || match[4] || "").slice(0, 400);
+        let resolved = href;
+        try {
+          const u = new URL(href, "https://duckduckgo.com");
+          const uddg = u.searchParams.get("uddg");
+          resolved = uddg ? decodeURIComponent(uddg) : u.toString();
+        } catch {
+          continue;
+        }
+        if (!resolved.startsWith("http")) continue;
+        let host = "";
+        try {
+          host = new URL(resolved).host;
+        } catch {
+          host = "";
+        }
+        results.push({ title: title || resolved, url: resolved, snippet, host });
+      }
       if (results.length === 0) {
         return { error: `По запросу «${query}» ничего не нашлось` };
       }
@@ -175,6 +221,7 @@ const webSearch: ToolDef = {
         results,
       };
     } catch (err) {
+      if (isAbortFlag(err) || ctx?.signal?.aborted) return abortedToolResult();
       return {
         error:
           "Поиск не удался: " +
@@ -196,10 +243,14 @@ const AGENT_BROWSER_SESSION = "pocketstudio-agent";
 async function runBrowserCli(
   args: string[],
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   const { stdout } = await execFileAsync("agent-browser", args, {
     timeout: timeoutMs,
     maxBuffer: 4 * 1024 * 1024,
+    signal: signal
+      ? mergeAbortSignals([AbortSignal.timeout(timeoutMs), signal])
+      : AbortSignal.timeout(timeoutMs),
     env: {
       ...process.env,
       AGENT_BROWSER_SESSION,
@@ -216,7 +267,7 @@ const browserRead: ToolDef = {
   argsSchema: {
     url: "адрес страницы http(s)://… (обязательно)",
   },
-  async execute(args: any) {
+  async execute(args: any, _userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -229,11 +280,11 @@ const browserRead: ToolDef = {
 
     try {
       // open → read → close (браузерная сессия не должна течь).
-      await runBrowserCli(["open", url], 45_000);
+      await runBrowserCli(["open", url], 45_000, ctx?.signal);
       let text = "";
       let title = url;
       try {
-        const out = await runBrowserCli(["read"], 30_000);
+        const out = await runBrowserCli(["read"], 30_000, ctx?.signal);
         text = out.trim();
         const firstLine = out.split("\n").find((l) => l.trim() !== "") ?? "";
         if (firstLine.startsWith("✓ ")) title = firstLine.slice(2).trim();
@@ -241,7 +292,7 @@ const browserRead: ToolDef = {
         try {
           await runBrowserCli(["close"], 10_000);
         } catch {
-          // close — best effort
+          // close — best effort, even after abort so we don't leak a session
         }
       }
       if (!text) {
@@ -254,10 +305,22 @@ const browserRead: ToolDef = {
         text: text.slice(0, MAX_BROWSER_TEXT),
       };
     } catch (err) {
+      if (isAbortFlag(err) || ctx?.signal?.aborted) {
+        try {
+          await runBrowserCli(["close"], 10_000);
+        } catch {
+          /* ignore */
+        }
+        return abortedToolResult();
+      }
+      const missing =
+        err instanceof Error &&
+        (err.message.includes("ENOENT") || /not found|не найден/i.test(err.message));
       return {
-        error:
-          "Не удалось открыть страницу в браузере: " +
-          (err instanceof Error ? err.message : String(err)),
+        error: missing
+          ? "agent-browser не найден в PATH. Builtin fetch_url работает без CLI — включите Fetch в Интеграциях или установите agent-browser."
+          : "Не удалось открыть страницу в браузере: " +
+            (err instanceof Error ? err.message : String(err)),
       };
     }
   },

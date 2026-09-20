@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { defaultDawState, normalizeDawState, type DawProjectDto } from "@/lib/daw-model";
 import { ensureWorkspace } from "@/lib/workspace-api";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,14 @@ type DawRow = {
   updatedAt: Date;
 };
 
+function parseTracksJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw || "[]");
+  } catch {
+    return [];
+  }
+}
+
 function rowToDto(row: DawRow): DawProjectDto {
   const state = normalizeDawState({
     bpm: row.bpm,
@@ -27,7 +36,7 @@ function rowToDto(row: DawRow): DawProjectDto {
     masterVolume: row.masterVolume,
     transpose: row.transpose,
     metronome: row.metronome,
-    tracks: JSON.parse(row.tracks || "[]"),
+    tracks: parseTracksJson(row.tracks),
   });
   return {
     id: row.id,
@@ -67,11 +76,16 @@ export async function GET(req: Request, { params }: Params) {
 /* ── PUT /api/workspaces/[id]/daw — сохранить состояние DAW ── */
 
 export async function PUT(req: Request, { params }: Params) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const { id } = await params;
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
 
-  const state = normalizeDawState(await req.json().catch(() => null));
+  const jsonRead = await readJsonBody(req, { fallback: null });
+  if (!jsonRead.ok) return jsonRead.response;
+  const state = normalizeDawState(jsonRead.value);
   if (!state) {
     return NextResponse.json(
       { error: "Некорректное состояние студии" },

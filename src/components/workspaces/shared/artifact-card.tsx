@@ -6,23 +6,17 @@
  * живёт в Обзоре воркспейса, в Библиотеке и в результатах чата.
  */
 
-import { useState } from "react";
-import { Star } from "lucide-react";
-
 import {
   ARTIFACT_KIND_META,
   type ArtifactItem,
 } from "@/components/workspaces/shared/artifacts-data";
 import { Badge } from "@/components/ui/badge";
-import { findWorkspace, WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import { cn } from "@/lib/utils";
 
 export interface ArtifactCardProps {
   artifact: ArtifactItem;
   /** Клик по карточке (открыть артефакт). */
   onOpen?: (artifact: ArtifactItem) => void;
-  /** Показывать чип воркспейса (Библиотека, чат). */
-  showWorkspace?: boolean;
   /** Компактный режим (внутри стадий Обзора). */
   dense?: boolean;
   className?: string;
@@ -31,15 +25,11 @@ export interface ArtifactCardProps {
 export function ArtifactCard({
   artifact,
   onOpen,
-  showWorkspace = false,
   dense = false,
   className,
 }: ArtifactCardProps) {
-  const [favorite, setFavorite] = useState(false);
   const kind = ARTIFACT_KIND_META[artifact.kind];
   const Icon = kind.icon;
-  const workspace = findWorkspace(artifact.workspaceId);
-  const wsMeta = workspace ? WORKSPACE_TYPE_META[workspace.type] : null;
 
   return (
     <button
@@ -82,39 +72,14 @@ export function ArtifactCard({
           {artifact.meta}
         </span>
         <span className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground/80">
-          {showWorkspace && workspace && wsMeta ? (
-            <span className="inline-flex min-w-0 items-center gap-1">
-              <wsMeta.icon className="size-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{workspace.title}</span>
-            </span>
-          ) : (
+          {artifact.stage ? (
             <span className="truncate">{artifact.stage}</span>
+          ) : (
+            <span className="truncate">{ARTIFACT_KIND_META[artifact.kind].label}</span>
           )}
           <span aria-hidden="true">·</span>
           <span className="shrink-0">{artifact.createdAgo}</span>
         </span>
-      </span>
-      <span
-        role="button"
-        tabIndex={-1}
-        aria-label={favorite ? "Убрать из избранного" : "В избранное"}
-        onClick={(e) => {
-          e.stopPropagation();
-          setFavorite((v) => !v);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            e.stopPropagation();
-            setFavorite((v) => !v);
-          }
-        }}
-        className="absolute right-2 top-2 shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 outline-none transition-opacity duration-150 hover:text-amber-500 focus-visible:opacity-100 group-hover:opacity-100"
-      >
-        <Star
-          className={cn("size-3.5", favorite && "fill-amber-400 text-amber-400")}
-          aria-hidden="true"
-        />
       </span>
     </button>
   );

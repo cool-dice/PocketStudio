@@ -1,17 +1,12 @@
 "use client";
 
 /**
- * Универсальная панель сущности (Фаза A, данные из REST API): вид и набор,
- * правка name/short/description (кнопка «Сохранить» + автосейв при
- * закрытии), «Сгенерировать описание» — живой LLM (~15–20 с, «Студия
- * пишет…»), блок персистентного изображения (PS-6: генерация по kind,
- * сохраняется в БД, живёт и после перезагрузки), атрибуты, теги, связи-чипы
- * и упоминания. Экспортирует хелпер useEntityDraft — общий для панелей
- * сущности и персонажа.
+ * Универсальная панель сущности: правка name/short/description,
+ * атрибутов, тегов и связей (PATCH), «Сгенерировать описание»,
+ * персистентное изображение. Хук драфта — entity-draft.
  */
 
-import { BookOpenText, Check, FileText, ImagePlus, Link2, Loader2, MapPin, Save, Sparkles, X } from "lucide-react";
-import { useState } from "react";
+import { BookOpenText, Check, ImagePlus, Loader2, Save, Sparkles, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,56 +18,30 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { EntityDto } from "@/lib/workspace-types";
-import { MiniChip } from "./narrative-chip";
-import { ENTITY_KIND_META, refsLabel } from "./entities-data";
+import {
+  ENTITY_SHEET_OPEN_ERROR,
+  ENTITY_SHEET_OPEN_ERROR_HINT,
+} from "@/lib/entity-copy";
+import type { EntityDto, MentionSectionOption } from "@/lib/workspace-types";
+import { ENTITY_KIND_META } from "./entities-data";
+import {
+  buildEntitySavePatch,
+  useEntityDraft,
+  type EntityDraftPatch,
+} from "./entity-draft";
+import { AttributesEditor, LinksEditor, TagsEditor } from "./entity-meta-editors";
+import { MentionsEditor } from "./mentions-editor";
 import { agoFromISO } from "./types";
 
-export type EntityDraftPatch = {
-  name?: string;
-  short?: string | null;
-  description?: string;
-};
-
-/** Драфт правок сущности: незагрязнённые поля следуют за entity (обновления
- *  из aiDescribe подхватываются сразу), правки пользователя — приоритет. */
-export function useEntityDraft(entity: EntityDto | null) {
-  const [raw, setRaw] = useState({ name: "", short: "", description: "" });
-  const [dirty, setDirty] = useState({ name: false, short: false, description: false });
-
-  const draft = {
-    name: dirty.name ? raw.name : (entity?.name ?? ""),
-    short: dirty.short ? raw.short : (entity?.short ?? ""),
-    description: dirty.description ? raw.description : (entity?.description ?? ""),
-  };
-
-  function update(patch: Partial<{ name: string; short: string; description: string }>) {
-    setDirty((prev) => ({
-      ...prev,
-      ...Object.fromEntries(Object.keys(patch).map((key) => [key, true])),
-    }));
-    setRaw((prev) => ({ ...prev, ...patch }));
-  }
-
-  const isDirty =
-    Boolean(entity) &&
-    (dirty.name || dirty.short || dirty.description) &&
-    Boolean(
-      entity &&
-        (draft.name !== entity.name ||
-          draft.short !== (entity.short ?? "") ||
-          draft.description !== entity.description),
-    );
-
-  return { draft, update, isDirty };
-}
+export type { EntityDraftPatch };
+export { useEntityDraft };
 
 export function EntitySheet({
   entity,
   entities,
+  sections,
   onClose,
   onOpenEntity,
   onSave,
@@ -81,10 +50,12 @@ export function EntitySheet({
   onGeneratePortrait,
   onClearPortrait,
   portraitGenerating,
+  portraitError,
+  onDelete,
 }: {
   entity: EntityDto | null;
-  /** Сущности набора — для имён связей. */
   entities: EntityDto[];
+  sections: MentionSectionOption[];
   onClose: () => void;
   onOpenEntity: (id: string) => void;
   onSave: (id: string, patch: EntityDraftPatch) => void;
@@ -93,29 +64,28 @@ export function EntitySheet({
   onGeneratePortrait: (entity: EntityDto) => void;
   onClearPortrait: (entity: EntityDto) => void;
   portraitGenerating: boolean;
+  portraitError: string | null;
+  onDelete: (entity: EntityDto) => void;
 }) {
   const { draft, update, isDirty } = useEntityDraft(entity);
   const meta = entity ? ENTITY_KIND_META[entity.kind] : null;
   const KindIcon = meta?.icon;
   const isNarrative = entity?.domain === "narrative";
-  const refs = entity ? refsLabel(entity.domain) : null;
+
+  function persist() {
+    if (!entity) return;
+    onSave(entity.id, buildEntitySavePatch(draft, entity));
+  }
 
   function handleClose() {
-    // Автосейв при закрытии: если были правки — сохраняем до закрытия.
-    if (entity && isDirty) {
-      onSave(entity.id, {
-        name: draft.name.trim() || entity.name,
-        short: draft.short.trim() || null,
-        description: draft.description,
-      });
-    }
+    if (entity && isDirty) persist();
     onClose();
   }
 
   return (
     <Sheet open={Boolean(entity)} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-md">
-        {entity && meta && KindIcon && refs ? (
+        {entity && meta && KindIcon ? (
           <>
             <SheetHeader className="shrink-0 space-y-2 border-b px-5 pb-4">
               <div className="flex items-center gap-2">
@@ -153,7 +123,6 @@ export function EntitySheet({
             </SheetHeader>
 
             <div className="vf-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
-              {/* Изображение (PS-6): персистентная генерация по kind */}
               {isNarrative ? (
                 <div className="relative">
                   {entity.image ? (
@@ -169,10 +138,15 @@ export function EntitySheet({
                     <div className="flex aspect-[16/10] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed bg-muted/40 text-center">
                       <ImagePlus className="size-5 text-muted-foreground" aria-hidden="true" />
                       <p className="text-xs text-muted-foreground">
-                        Студия может нарисовать {meta.label.toLowerCase()} по описанию
+                        Студия может нарисовать {meta.label.toLowerCase()} по описанию этой карточки
                       </p>
                     </div>
                   )}
+                  {portraitError ? (
+                    <p role="alert" className="mt-2 text-xs text-destructive">
+                      {portraitError}
+                    </p>
+                  ) : null}
                   {portraitGenerating ? (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl bg-background/70 backdrop-blur-sm">
                       <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
@@ -217,107 +191,39 @@ export function EntitySheet({
               </section>
 
               <Separator />
-
-              {/* Атрибуты */}
-              <section aria-label="Атрибуты">
-                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Атрибуты
-                </h4>
-                <dl className="mt-2 grid grid-cols-1 gap-1.5">
-                  {entity.attributes.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Атрибутов пока нет.</p>
-                  ) : (
-                    entity.attributes.map((attribute) => (
-                      <div
-                        key={attribute.label}
-                        className="flex items-baseline justify-between gap-3 rounded-lg border bg-background px-3 py-2"
-                      >
-                        <dt className="shrink-0 text-xs text-muted-foreground">{attribute.label}</dt>
-                        <dd className="min-w-0 truncate text-right text-xs font-medium">
-                          {attribute.value}
-                        </dd>
-                      </div>
-                    ))
-                  )}
-                </dl>
-              </section>
-
+              <AttributesEditor
+                attributes={draft.attributes}
+                onChange={(attributes) => update({ attributes })}
+              />
+              <Separator />
+              <LinksEditor
+                relatedIds={draft.related}
+                entityId={entity.id}
+                entities={entities}
+                onChange={(related) => update({ related })}
+                onOpen={onOpenEntity}
+              />
               <Separator />
 
-              {/* Связи */}
-              <section aria-label="Связанные сущности">
-                <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <Link2 className="size-3.5" aria-hidden="true" />
-                  Связи
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.related && entity.related.length > 0 ? (
-                    entity.related.map((relatedId) => {
-                      const related = entities.find((candidate) => candidate.id === relatedId);
-                      if (!related) return null;
-                      const RelatedIcon = ENTITY_KIND_META[related.kind].icon;
-                      return (
-                        <MiniChip
-                          key={relatedId}
-                          onClick={() => onOpenEntity(relatedId)}
-                          title={`Открыть «${related.name}»`}
-                        >
-                          <RelatedIcon className="size-3" aria-hidden="true" />
-                          {related.name}
-                        </MiniChip>
-                      );
-                    })
-                  ) : (
-                    <p className="text-xs text-muted-foreground">Связей пока нет.</p>
-                  )}
-                </div>
-              </section>
+              <MentionsEditor
+                items={draft.refsItems}
+                domain={entity.domain}
+                sections={sections}
+                onChange={(refsItems) => update({ refsItems })}
+              />
+              <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <BookOpenText className="size-3.5 shrink-0" aria-hidden="true" />
+                {entity.setName} · обновлена {agoFromISO(entity.updatedAt)}
+              </p>
 
-              <Separator />
-
-              {/* Упоминания: главы или разделы документации */}
-              <section aria-label={isNarrative ? "Упоминания в главах" : "Разделы документации"}>
-                <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  {isNarrative ? (
-                    <MapPin className="size-3.5" aria-hidden="true" />
-                  ) : (
-                    <FileText className="size-3.5" aria-hidden="true" />
-                  )}
-                  {isNarrative ? "Упомянута в главах" : "Разделы документации"}
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.refs.items.length > 0 ? (
-                    entity.refs.items.map((ref) => (
-                      <MiniChip key={ref} className="font-mono">
-                        {refs.format(ref)}
-                      </MiniChip>
-                    ))
-                  ) : (
-                    <p className="text-xs text-muted-foreground">Упоминаний пока нет.</p>
-                  )}
-                </div>
-                <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <BookOpenText className="size-3.5 shrink-0" aria-hidden="true" />
-                  {entity.setName} · обновлена {agoFromISO(entity.updatedAt)}
-                </p>
-              </section>
-
-              {/* Теги */}
-              <section aria-label="Теги сущности">
-                <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Теги
-                </h4>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {entity.tags.length > 0 ? (
-                    entity.tags.map((tag) => <MiniChip key={tag}>#{tag}</MiniChip>)
-                  ) : (
-                    <p className="text-xs text-muted-foreground">Тегов пока нет.</p>
-                  )}
-                </div>
-              </section>
+              <TagsEditor
+                tags={draft.tags}
+                input={draft.tagDraft}
+                onChange={(tags) => update({ tags })}
+                onInputChange={(tagDraft) => update({ tagDraft })}
+              />
             </div>
 
-            {/* Действия */}
             <div className="shrink-0 space-y-2 border-t px-5 py-3">
               {isNarrative ? (
                 <Button
@@ -363,13 +269,7 @@ export function EntitySheet({
                 variant="outline"
                 className="w-full"
                 disabled={!isDirty}
-                onClick={() =>
-                  onSave(entity.id, {
-                    name: draft.name.trim() || entity.name,
-                    short: draft.short.trim() || null,
-                    description: draft.description,
-                  })
-                }
+                onClick={persist}
               >
                 {isDirty ? (
                   <>
@@ -383,13 +283,22 @@ export function EntitySheet({
                   </>
                 )}
               </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full text-destructive hover:text-destructive"
+                disabled={describing || portraitGenerating}
+                onClick={() => onDelete(entity)}
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+                Удалить карточку
+              </Button>
             </div>
           </>
         ) : entity === null ? null : (
-          <div className="space-y-4 px-5 py-6">
-            <Skeleton className="h-6 w-2/3" />
-            <Skeleton className="h-4 w-1/2" />
-            <Skeleton className="h-24 w-full" />
+          <div role="alert" className="space-y-2 px-5 py-6">
+            <p className="text-sm font-medium">{ENTITY_SHEET_OPEN_ERROR}</p>
+            <p className="text-xs text-muted-foreground">{ENTITY_SHEET_OPEN_ERROR_HINT}</p>
           </div>
         )}
       </SheetContent>

@@ -10,7 +10,7 @@
  * summaryFromDto — сигнатуры швов не меняются.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { RotateCcw } from "lucide-react";
 
 import { NotesTab } from "@/components/workspaces/notes-tab";
@@ -26,10 +26,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useWorkspace } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
-import {
-  WORKSPACE_TAB_META,
-  type WorkspaceTab,
-} from "@/lib/workspace-data";
+import { resolveWorkspaceTab } from "@/components/workspaces/overview-data";
+import { WORKSPACE_TAB_META, type WorkspaceTab } from "@/lib/workspace-data";
 
 export function WorkspaceShell({
   onOpenMobileNav,
@@ -45,6 +43,15 @@ export function WorkspaceShell({
 
   /** Локальный диалог оболочки («Настроить»): гаснет при смене вкладки. */
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const safeTab: WorkspaceTab = workspace
+    ? resolveWorkspaceTab(workspace, workspaceTab)
+    : workspaceTab;
+
+  useEffect(() => {
+    if (!workspace) return;
+    if (safeTab !== workspaceTab) setWorkspaceTab(safeTab);
+  }, [workspace, safeTab, workspaceTab, setWorkspaceTab]);
 
   /** Легаси-объект для вкладок-швов (notes-tab, модули студии). */
   const summary = useMemo(
@@ -97,19 +104,21 @@ export function WorkspaceShell({
       {/* ── Хедер воркспейса (WorkspaceDto: live counts/stage/progress) ── */}
       <WorkspaceHeader
         workspace={workspace}
-        tab={workspaceTab}
+        tab={safeTab}
         onOpenMobileNav={onOpenMobileNav}
         onBack={closeWorkspace}
         settingsOpen={settingsOpen}
         onOpenSettings={() => setSettingsOpen(true)}
         onCloseSettings={() => setSettingsOpen(false)}
+        onUpdated={reload}
+        onDeleted={closeWorkspace}
       />
 
       {/* ── Единая строка вкладок ── */}
       <div className="shrink-0 border-b">
         <WorkspaceTabsBar
           workspace={summary}
-          activeTab={workspaceTab}
+          activeTab={safeTab}
           onTabChange={handleTabChange}
         />
       </div>
@@ -118,18 +127,18 @@ export function WorkspaceShell({
       <div
         id={WORKSPACE_TABPANEL_ID}
         role="tabpanel"
-        aria-label={`Содержимое вкладки «${WORKSPACE_TAB_META[workspaceTab].label}»`}
+        aria-label={`Содержимое вкладки «${WORKSPACE_TAB_META[safeTab].label}»`}
         className="min-h-0 flex-1 overflow-hidden"
       >
-        {workspaceTab === "overview" ? (
-          <OverviewTab workspace={workspace} />
-        ) : workspaceTab === "notes" ? (
+        {safeTab === "overview" ? (
+          <OverviewTab workspace={workspace} onUpdated={reload} />
+        ) : safeTab === "notes" ? (
           <NotesTab workspace={summary} />
         ) : (
           /* Шов для модулей студии: легаси WorkspaceSummary. */
           <WorkspaceTabContent
             workspace={summary}
-            tab={workspaceTab}
+            tab={safeTab}
             onOpenMobileNav={onOpenMobileNav}
           />
         )}

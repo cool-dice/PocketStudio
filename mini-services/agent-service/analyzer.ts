@@ -1,8 +1,12 @@
 // PocketStudio analyzer — Stage 2 honest analysis pipeline.
 //
-// Every new note (from ⌘K capture, the chat agent's create_note tool, or voice
-// capture) is created with status "pending". This worker polls the shared
-// SQLite every ANALYSIS_POLL_MS, picks the oldest pending notes (up to
+// Every new note (from ⌘K capture after the user confirms a transcript, the
+// chat agent's create_note tool, or a typed save) is queued as status
+// "pending" when the `notes` tool has a model. If the tool is unconfigured,
+// create/queue paths set status=error immediately (same UNCONFIGURED
+// message) — this worker must not be the first place that surfaces that.
+// This worker polls Postgres
+// every ANALYSIS_POLL_MS, picks the oldest pending notes (up to
 // BATCH_PER_TICK, processed sequentially) and runs the 4-block LLM analysis:
 //
 //   positive (сильные стороны) / negative (риски) / final (синтез) /
@@ -20,40 +24,25 @@
 import type { Server } from "socket.io";
 import { db } from "./db-client";
 import { generateLLMResponse } from "./agent";
+import { NOTES_ANALYSIS_SYSTEM } from "../../src/lib/ai/prompts";
+import { scheduleIndexNote } from "../../src/lib/rag/hooks";
 import { createNotification } from "./notifications";
 import {
-  CATEGORY_COLORS,
-  CATEGORY_ICONS,
-} from "./tools";
+  ANALYSIS_UNREADABLE_MESSAGE,
+  EMPTY_NOTE_ANALYSIS_MESSAGE,
+  analysisErrorMessage,
+  failedNoteAnalysisData,
+  isUnconfiguredAnalysisError,
+  isUsableNoteText,
+  parseNoteAnalysis,
+  processedNoteAnalysisData,
+  type ParsedNoteAnalysis,
+} from "../../src/lib/note-analysis";
 
 const ANALYSIS_POLL_MS = 5000;
 const BATCH_PER_TICK = 2;
 const MAX_NOTE_TEXT_CHARS = 5000;
-const MAX_BLOCK_CHARS = 4000;
-const MAX_RECOMMENDATIONS = 8;
-const MAX_RECOMMENDATION_CHARS = 300;
-const MAX_CATEGORY_NAME = 40;
 const LLM_ATTEMPTS = 2;
-
-const ANALYSIS_SYSTEM_PROMPT = `Ты — вдумчивый аналитик личного блокнота. Пользователь записал сырую мысль, а ты раскладываешь её по полочкам: честно, без воды и ложного оптимизма.
-
-Проанализируй мысль и верни СТРОГО один JSON-объект без markdown-обёртки и без пояснений:
-{
-  "positive": "Сильные стороны, потенциал и что уже хорошо (60–120 слов, конкретно).",
-  "negative": "Риски, слабые места, подводные камни и честные возражения (60–120 слов).",
-  "final": "Взвешенный синтез — главный вывод из этой мысли (50–100 слов).",
-  "recommendations": ["Короткое конкретное действие", "...", "..."],
-  "category_name": "Название категории (1–2 слова)",
-  "category_color": "emerald",
-  "category_icon": "lightbulb"
-}
-
-Требования:
-- "recommendations": 3–6 пунктов, каждый — конкретное действие от первого лица, до 20 слов.
-- "category_color" — одно из: emerald, amber, rose, sky, violet, stone, teal, orange, pink, cyan.
-- "category_icon" — одно из: lightbulb, briefcase, shopping-cart, heart, brain, zap, star, book, code, rocket, wallet, coffee.
-- Если заметке уже назначена категория — верни её название в "category_name" без изменений.
-- Пиши по-русски, живым и точным языком. Не выдумывай фактов, которых нет в мысли.`;
 
 // ─────────────────────────── payload ───────────────────────────
 
@@ -111,84 +100,6 @@ function notePayload(note: NoteRowFull, category: { id: string; name: string; co
 
 // ─────────────────────────── helpers ───────────────────────────
 
-function stripFences(text: string): string {
-  const m = text.match(/^```[a-zA-Z0-9_-]*\s*([\s\S]*?)\s*```\s*$/);
-  return m ? m[1] : text;
-}
-
-interface AnalysisResult {
-  positive: string;
-  negative: string;
-  final: string;
-  recommendations: string[];
-  categoryName: string | null;
-  categoryColor: string;
-  categoryIcon: string;
-}
-
-/** Robust JSON extraction: fences → outermost {...} → type validation. */
-function parseAnalysisResult(raw: string): AnalysisResult | null {
-  const trimmed = stripFences(raw.trim());
-  if (!trimmed) return null;
-
-  const candidates: string[] = [trimmed];
-  const first = trimmed.indexOf("{");
-  const last = trimmed.lastIndexOf("}");
-  if (first !== -1 && last > first && (first > 0 || last < trimmed.length - 1)) {
-    candidates.push(trimmed.slice(first, last + 1));
-  }
-
-  for (const candidate of candidates) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(candidate);
-    } catch {
-      continue;
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
-
-    const obj = parsed as Record<string, unknown>;
-    const positive = typeof obj.positive === "string" ? obj.positive.trim() : "";
-    const negative = typeof obj.negative === "string" ? obj.negative.trim() : "";
-    const final = typeof obj.final === "string" ? obj.final.trim() : "";
-    if (!positive || !negative || !final) continue;
-
-    const recommendations = Array.isArray(obj.recommendations)
-      ? obj.recommendations
-          .filter((r): r is string => typeof r === "string" && r.trim().length > 0)
-          .map((r) => r.trim().slice(0, MAX_RECOMMENDATION_CHARS))
-          .slice(0, MAX_RECOMMENDATIONS)
-      : [];
-    if (recommendations.length === 0) continue;
-
-    const categoryName =
-      typeof obj.category_name === "string" && obj.category_name.trim()
-        ? obj.category_name.trim().slice(0, MAX_CATEGORY_NAME)
-        : null;
-    const categoryColor =
-      typeof obj.category_color === "string" &&
-      (CATEGORY_COLORS as readonly string[]).includes(obj.category_color)
-        ? obj.category_color
-        : "stone";
-    const categoryIcon =
-      typeof obj.category_icon === "string" &&
-      (CATEGORY_ICONS as readonly string[]).includes(obj.category_icon)
-        ? obj.category_icon
-        : "lightbulb";
-
-    return {
-      positive: positive.slice(0, MAX_BLOCK_CHARS),
-      negative: negative.slice(0, MAX_BLOCK_CHARS),
-      final: final.slice(0, MAX_BLOCK_CHARS),
-      recommendations,
-      categoryName,
-      categoryColor,
-      categoryIcon,
-    };
-  }
-  return null;
-}
-
 /** Find the user's category by exact name, case-insensitive. */
 async function findCategoryByName(userId: string, name: string) {
   const lower = name.toLowerCase();
@@ -196,7 +107,14 @@ async function findCategoryByName(userId: string, name: string) {
   return categories.find((c) => c.name.toLowerCase() === lower) ?? null;
 }
 
+// ─────────────────────────── worker ───────────────────────────
+
+let io: Server | undefined;
+let timer: ReturnType<typeof setInterval> | null = null;
+let ticking = false;
+
 async function emitNote(noteId: string): Promise<void> {
+  if (!io) return;
   const note = await db.note.findUnique({
     where: { id: noteId },
     include: { category: { select: { id: true, name: true, color: true, icon: true } } },
@@ -208,19 +126,47 @@ async function emitNote(noteId: string): Promise<void> {
   );
 }
 
-// ─────────────────────────── worker ───────────────────────────
+async function notifyAnalysisFailed(
+  userId: string,
+  noteId: string,
+  message: string,
+): Promise<void> {
+  if (!io) return;
+  await createNotification(
+    io,
+    userId,
+    "analysis_ready",
+    "Анализ заметки не удался",
+    message,
+    noteId,
+  );
+}
 
-let io: Server;
-let timer: ReturnType<typeof setInterval> | null = null;
-let ticking = false;
+type GenerateFn = typeof generateLLMResponse;
 
 /** Analyze a single note: pending → processing → processed | error. */
-async function analyzeNote(noteId: string): Promise<void> {
+export async function analyzeNote(
+  noteId: string,
+  generate: GenerateFn = generateLLMResponse,
+): Promise<void> {
   const note = await db.note.findUnique({
     where: { id: noteId },
     include: { category: { select: { id: true, name: true } } },
   });
   if (!note || note.status !== "pending") return;
+
+  const edited = (note.rawText ?? "").trim();
+  const asr = (note.transcription ?? "").trim();
+  const text = edited.slice(0, MAX_NOTE_TEXT_CHARS);
+  if (!isUsableNoteText(text)) {
+    await db.note.update({
+      where: { id: noteId },
+      data: failedNoteAnalysisData(EMPTY_NOTE_ANALYSIS_MESSAGE),
+    });
+    await notifyAnalysisFailed(note.userId, noteId, EMPTY_NOTE_ANALYSIS_MESSAGE);
+    await emitNote(noteId);
+    return;
+  }
 
   // → processing
   console.log(`[analyzer] note ${noteId.slice(-6)} → processing`);
@@ -228,9 +174,7 @@ async function analyzeNote(noteId: string): Promise<void> {
     where: { id: noteId },
     data: { status: "processing", errorMessage: null, updatedAt: new Date() },
   });
-  io.to(`user:${note.userId}`).emit("note:analyzing", { noteId });
-
-  const text = (note.rawText ?? "").trim().slice(0, MAX_NOTE_TEXT_CHARS);
+  io?.to(`user:${note.userId}`).emit("note:analyzing", { noteId });
 
   // Build the user message: existing categories context (for reuse).
   const categories = await db.category.findMany({
@@ -242,43 +186,35 @@ async function analyzeNote(noteId: string): Promise<void> {
   const hasCategoryNote = note.category
     ? `Заметке уже назначена категория «${note.category.name}» — верни её же в category_name.`
     : `У заметки пока нет категории. Подбери подходящую из существующих (${categoryList || "пока никаких"}) или придумай новую (1–2 слова).`;
-  const userMessage = `Мысль пользователя:\n"""\n${text}\n"""\n\n${hasCategoryNote}`;
+  const thoughtBlock =
+    asr && asr !== edited
+      ? `Отредактированный текст:\n"""\n${text}\n"""\n\nИсходная расшифровка:\n"""\n${asr.slice(0, MAX_NOTE_TEXT_CHARS)}\n"""`
+      : `Мысль пользователя:\n"""\n${text}\n"""`;
+  const userMessage = `${thoughtBlock}\n\n${hasCategoryNote}`;
 
-  let analysis: AnalysisResult | null = null;
+  let analysis: ParsedNoteAnalysis | null = null;
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= LLM_ATTEMPTS && !analysis; attempt++) {
     try {
-      const raw = await generateLLMResponse(ANALYSIS_SYSTEM_PROMPT, [
+      const raw = await generate(NOTES_ANALYSIS_SYSTEM, [
         { role: "user", content: userMessage },
-      ]);
-      analysis = parseAnalysisResult(raw);
+      ], { userId: note.userId, toolId: "notes", jsonMode: true });
+      analysis = parseNoteAnalysis(raw);
+      if (!analysis) lastError = new Error(ANALYSIS_UNREADABLE_MESSAGE);
     } catch (err) {
       lastError = err;
+      if (isUnconfiguredAnalysisError(err)) break;
     }
   }
 
   if (!analysis) {
-    const message =
-      lastError instanceof Error
-        ? lastError.message
-        : "LLM вернул нечитаемый ответ";
+    const message = analysisErrorMessage(lastError);
     console.warn(`[analyzer] note ${noteId.slice(-6)} → error: ${message}`);
     await db.note.update({
       where: { id: noteId },
-      data: {
-        status: "error",
-        errorMessage: `Анализ не удался: ${message}`.slice(0, 500),
-        updatedAt: new Date(),
-      },
+      data: failedNoteAnalysisData(message),
     });
-    await createNotification(
-      io,
-      note.userId,
-      "analysis_ready",
-      "Анализ заметки не удался",
-      (note.rawText ?? "").trim() || "Посмотрите заметку в блокноте",
-      noteId,
-    );
+    await notifyAnalysisFailed(note.userId, noteId, message);
     await emitNote(noteId);
     return;
   }
@@ -310,27 +246,22 @@ async function analyzeNote(noteId: string): Promise<void> {
   await db.note.update({
     where: { id: noteId },
     data: {
-      status: "processed",
-      positiveBlock: analysis.positive,
-      negativeBlock: analysis.negative,
-      finalBlock: analysis.final,
-      recommendations: JSON.stringify(analysis.recommendations),
-      analysisRaw: null,
-      analyzedAt: new Date(),
-      errorMessage: null,
+      ...processedNoteAnalysisData(analysis),
       ...(categoryId ? { categoryId } : {}),
-      updatedAt: new Date(),
     },
   });
+  scheduleIndexNote(db, noteId);
   console.log(`[analyzer] note ${noteId.slice(-6)} → processed (cat: ${categoryId ? analysis.categoryName : "kept"})`);
-  await createNotification(
-    io,
-    note.userId,
-    "analysis_ready",
-    "Анализ заметки готов",
-    (note.rawText ?? "").trim() || undefined,
-    noteId,
-  );
+  if (io) {
+    await createNotification(
+      io,
+      note.userId,
+      "analysis_ready",
+      "Анализ заметки готов",
+      (note.rawText ?? "").trim() || undefined,
+      noteId,
+    );
+  }
   await emitNote(noteId);
 }
 
@@ -355,11 +286,7 @@ async function tick(): Promise<void> {
         try {
           await db.note.update({
             where: { id },
-            data: {
-              status: "error",
-              errorMessage: "Анализ не удался (внутренняя ошибка)".slice(0, 500),
-              updatedAt: new Date(),
-            },
+            data: failedNoteAnalysisData("Анализ не удался (внутренняя ошибка)"),
           });
           await emitNote(id);
         } catch {

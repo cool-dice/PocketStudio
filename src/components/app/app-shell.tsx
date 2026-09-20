@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 
 import { CaptureDialog } from "@/components/app/capture-dialog";
 import { AdminScreen } from "@/components/app/admin-screen";
+import { AiSettingsScreen } from "@/components/app/ai-settings-screen";
 import { ChatArea } from "@/components/app/chat-area";
 import { ContextPanel } from "@/components/app/context-panel";
 import { CreateProjectDialog } from "@/components/app/create-project-dialog";
@@ -51,7 +52,8 @@ export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Global ⌘K / Ctrl+K → quick capture (works in inputs; dialogs allowed).
-  // Global ⌘P / Ctrl+P → global search across threads / notes / projects.
+  // Global ⌘P / Ctrl+P → global search across threads, notes, workspaces,
+  // documents, entities, and artifacts.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -109,6 +111,8 @@ export function AppShell() {
         />
       ) : mainArea === "admin" ? (
         <AdminScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
+      ) : mainArea === "settings" ? (
+        <AiSettingsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : mainArea === "documents" ? (
         <DocumentsScreen onOpenMobileNav={() => setMobileNavOpen(true)} />
       ) : mainArea === "images" ? (
@@ -144,7 +148,7 @@ export function AppShell() {
       )}
 
       {/* ── Right: context (xl+, только в полном чате) ── */}
-      {mainArea === "chat" && contextOpen && (
+      {(mainArea === "chat" || mainArea === "notebook") && contextOpen && (
         <ContextPanel onClose={() => setContextOpen(false)} />
       )}
 

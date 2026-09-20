@@ -1,9 +1,22 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
+import {
+  ALBUM_ALREADY_HERE,
+  ALBUM_SOURCE_NOT_IMAGE,
+} from "@/lib/album-copy";
+import {
+  albumKindForSource,
+  albumPersistType,
+  copiedAlbumUrl,
+  isAlbumSourceRow,
+  persistAlbumMeta,
+} from "@/lib/album-attach";
 import { db } from "@/lib/db";
-import { ensureWorkspace } from "@/lib/workspace-api";
-import { artifactDto } from "@/lib/workspace-shapes";
+import { ensureOwned, ensureWorkspace } from "@/lib/workspace-api";
+import { liveArtifactDto } from "@/lib/workspace-shapes";
+import { scheduleIndexArtifact } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +36,9 @@ export async function GET(req: Request, { params }: Params) {
     take: 200,
   });
 
-  return NextResponse.json({ artifacts: artifacts.map(artifactDto) });
+  return NextResponse.json({
+    artifacts: artifacts.map((a) => liveArtifactDto(a)),
+  });
 }
 
 /* ── POST /api/workspaces/[id]/artifacts — зарегистрировать артефакт ── */
@@ -42,12 +57,24 @@ const createSchema = z.object({
   meta: z.record(z.string(), z.unknown()).optional(),
 });
 
+const copySchema = z.object({
+  sourceId: z.string().trim().min(1).max(64),
+});
+
 export async function POST(req: Request, { params }: Params) {
   const { id } = await params;
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
 
-  const parsed = createSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
+  const copyParsed = copySchema.safeParse(body);
+  if (copyParsed.success) {
+    return copyFromLibrary(req, id, copyParsed.data.sourceId);
+  }
+
+  const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -70,5 +97,39 @@ export async function POST(req: Request, { params }: Params) {
     },
   });
 
-  return NextResponse.json({ artifact: artifactDto(artifact) }, { status: 201 });
+  scheduleIndexArtifact(db, artifact.id);
+
+  return NextResponse.json({ artifact: liveArtifactDto(artifact) }, { status: 201 });
+}
+
+async function copyFromLibrary(req: Request, projectId: string, sourceId: string) {
+  const sourceRow = await db.artifact.findUnique({ where: { id: sourceId } });
+  const owned = await ensureOwned(req, sourceRow);
+  if (!owned.ok) return owned.response;
+  const source = owned.row;
+
+  if (source.projectId === projectId) {
+    return NextResponse.json({ error: ALBUM_ALREADY_HERE }, { status: 409 });
+  }
+  if (!isAlbumSourceRow(source.type, source.meta)) {
+    return NextResponse.json({ error: ALBUM_SOURCE_NOT_IMAGE }, { status: 400 });
+  }
+
+  const kind = albumKindForSource(source.type, source.meta);
+  const artifact = await db.artifact.create({
+    data: {
+      projectId,
+      type: albumPersistType(kind),
+      title: source.title,
+      description: source.description,
+      url: copiedAlbumUrl(source.url),
+      prompt: source.prompt,
+      entityId: null,
+      stage: source.stage,
+      meta: persistAlbumMeta(source.meta, kind),
+    },
+  });
+
+  scheduleIndexArtifact(db, artifact.id);
+  return NextResponse.json({ artifact: liveArtifactDto(artifact) }, { status: 201 });
 }

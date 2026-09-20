@@ -1,4 +1,4 @@
-// VibeFlow — unified platform schema (SQLite)
+// PocketStudio — unified platform schema (PostgreSQL + pgvector)
 // Dual storage: project sources live on disk + git; platform data lives here.
 
 generator client {
@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -17,9 +17,16 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
+  /// Bumped on password change. JWT carries the same integer; mismatch → 401.
+  /// Column on User is enough — no Redis denylist.
+  tokenVersion Int      @default(0)
   // 'client' | 'admin' (IDE modes are NOT roles)
   role         String   @default("client")
   avatarUrl    String?
+  /// Первый запуск: тур onboarding пройден или пропущен.
+  onboardingDone Boolean @default(false)
+  /// Quest после онбординга: id первой заметки (proto1).
+  questNoteId    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -31,6 +38,13 @@ model User {
   notifications Notification[]
   auditLogs     AuditLog[]
   mcpServers    McpServer[]
+  aiProviders   AiProvider[]
+  toolModels    UserToolModel[]
+  skills        Skill[]
+  offers        Offer[]
+  payouts       Payout[]
+  invitesCreated Invite[] @relation("InviteCreator")
+  ragChunks      RagChunk[]
 }
 
 // ─────────────────────────── Notebook ───────────────────────────
@@ -65,12 +79,15 @@ model Note {
   // 'pending' | 'processing' | 'processed' | 'error'
   status    String   @default("pending")
 
+  /// Исходная ASR-расшифровка. rawText — текст после правки в композере.
   transcription String?
 
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   favorite Boolean  @default(false)
+  /// Напоминание (proto1 inbox): когда вернуть мысль в блокнот.
+  remindAt DateTime?
 
   // 4-block analysis (filled by pipeline)
   positiveBlock   String?
@@ -89,6 +106,7 @@ model Note {
 
   @@index([userId, status])
   @@index([userId, createdAt])
+  @@index([userId, remindAt])
 }
 
 model Tag {
@@ -132,6 +150,8 @@ model Project {
   stageIndex  Int?
   // 0–100, для прогресс-бара.
   progress    Int      @default(0)
+  favorite    Boolean  @default(false)
+  archived    Boolean  @default(false)
   remoteUrl   String?
   templateVersion String?
   lastBranch  String?
@@ -146,6 +166,10 @@ model Project {
   artifacts Artifact[]
   findings  Finding[]
   dawProject DawProject?
+  designDocs DesignDoc[]
+  videoProject VideoProject?
+  offers    Offer[]
+  ragChunks RagChunk[]
 
   @@index([userId])
 }
@@ -479,11 +503,14 @@ model Notification {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // 'analysis_ready' | 'agent_done' | 'diff_pending' | 'system'
+  // 'analysis_ready' | 'project_created' | 'checkpoint' | 'reminder' | 'system'
   type      String
   title     String
   body      String?
   entityId  String?
+  /// Reminder poll idempotency (`reminder:<noteId>`). Other types stay free
+  /// so checkpoints/analysis can fire more than once for the same entity.
+  dedupeKey String?  @unique
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 
@@ -498,19 +525,81 @@ model SystemSetting {
   updatedAt DateTime @updatedAt
 }
 
-model AIProvider {
-  id        String   @id @default(cuid())
-  name      String
-  baseUrl   String
-  apiKey    String
-  model     String
-  priority  Int      @default(10)
-  enabled   Boolean  @default(true)
-  kind      String   @default("chat")
+/// LLM / media provider. `userId` null = platform (admin, proxied, markup-ready);
+/// set = user BYOK. The server always holds the key and proxies requests.
+model AiProvider {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 'openai_compatible' | 'anthropic_compatible'
+  kind   String
+  name   String
+  /// OpenAI: https://api.openai.com/v1 · Anthropic: https://api.anthropic.com
+  baseUrl String
+  /// AES-256-GCM encrypted (enc:v1:…). Never returned in full to clients.
+  apiKey      String
+  apiKeyLast4 String  @default("")
+  enabled     Boolean @default(true)
+  /// Platform only: end users may pick this provider as a proxied option.
+  visibleToUsers   Boolean @default(true)
+  /// Future billing: percent markup (20 = +20%) on platform providers.
+  markupPercent    Float?
+  /// Future billing: multiplier (1.2 = +20%). Applied if percent is unset.
+  markupMultiplier Float?
+  /// Optional extra HTTP headers as a JSON object.
+  extraHeaders     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([enabled, priority])
+  models AiModel[]
+
+  @@index([userId, enabled])
+  @@index([enabled, visibleToUsers])
+}
+
+model AiModel {
+  id          String     @id @default(cuid())
+  providerId  String
+  provider    AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  /// Upstream id, e.g. gpt-4o-mini / claude-sonnet-4-5-20250929
+  modelId     String
+  displayName String
+  capChat        Boolean @default(true)
+  capImage       Boolean @default(false)
+  capTts         Boolean @default(false)
+  capAsr         Boolean @default(false)
+  capEmbeddings  Boolean @default(false)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  toolDefaults  ToolModelDefault[]
+  userOverrides UserToolModel[]
+
+  @@unique([providerId, modelId])
+  @@index([providerId, enabled])
+}
+
+/// Platform-level default model for a studio tool (admin-managed).
+model ToolModelDefault {
+  toolId    String   @id
+  modelId   String
+  model     AiModel  @relation(fields: [modelId], references: [id], onDelete: Restrict)
+  updatedAt DateTime @updatedAt
+}
+
+/// Per-user override: null modelId = «Студия (по умолчанию)».
+model UserToolModel {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  toolId    String
+  modelId   String?
+  model     AiModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, toolId])
 }
 
 model AuditLog {
@@ -525,4 +614,155 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([userId])
+}
+
+// ─────────────────────────── Skills (фаза E / F1) ───────────────────────────
+
+/// SKILL.md пользователя: builtin / созданный / импортированный / из магазина.
+model Skill {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Ключ каталога/магазина или null для своего.
+  catalogKey  String?
+  name        String
+  description String   @default("")
+  version     String   @default("1.0")
+  // 'builtin' | 'created' | 'imported' | 'store'
+  source      String   @default("created")
+  /// Тело SKILL.md (frontmatter + markdown).
+  skillMd     String
+  /// JSON string[]
+  triggers    String   @default("[]")
+  icon        String   @default("Wand2")
+  enabled     Boolean  @default(true)
+  purchased   Boolean  @default(false)
+  usedCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, catalogKey])
+  @@index([userId, enabled])
+}
+
+// ─────────────────────────── Monetization (F10) ───────────────────────────
+
+/// Оффер публикации воркспейса: цена и статус оплаты.
+model Offer {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  priceCents  Int      @default(0)
+  currency    String   @default("RUB")
+  // 'draft' | 'listed' | 'paid' | 'archived'
+  status      String   @default("draft")
+  /// 'simulated' | 'live'
+  paymentMode String   @default("simulated")
+  providerRef String?
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([projectId])
+}
+
+model Payout {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountCents Int
+  currency    String   @default("RUB")
+  // 'pending' | 'paid' | 'failed'
+  status      String   @default("pending")
+  providerRef String?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, status])
+}
+
+// ─────────────────────────── Design docs (F5) ───────────────────────────
+
+/// Документ дизайна: растр или макет, JSON слоёв/фреймов.
+model DesignDoc {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title     String   @default("Холст")
+  // 'raster' | 'layout'
+  mode      String   @default("raster")
+  /// JSON canvas (layers / frames).
+  payload   String   @default("{}")
+  /// Превью dataURL или /gen/…
+  previewUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, mode])
+}
+
+// ─────────────────────────── Video NLE (F6) ───────────────────────────
+
+/// Монтажный стол воркспейса (дорожки и клипы в JSON).
+model VideoProject {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fps       Int      @default(24)
+  /// JSON TimelineState — tracks/clips.
+  timeline  String   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────── Invites (F12) ───────────────────────────
+
+model Invite {
+  id        String   @id @default(cuid())
+  email     String
+  // 'client' | 'admin'
+  role      String   @default("client")
+  token     String   @unique
+  createdBy String
+  creator   User     @relation("InviteCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+  usedAt    DateTime?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+// ─────────────────────────── RAG (pgvector) ───────────────────────────
+
+/// Indexed chunk of a user's canon. `projectId` null = user-global
+/// (inbox notes, skills) — visible in main chat, never in another workspace.
+model RagChunk {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Null = user-global (not tied to a workspace).
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// note | section | entity | artifact | file | thread | skill | finding
+  sourceType  String
+  sourceId    String
+  path        String?
+  ordinal     Int      @default(0)
+  content     String
+  tokenCount  Int      @default(0)
+  /// pgvector column. Written/queried via raw SQL (Prisma 6 Unsupported).
+  embedding   Unsupported("vector")?
+  contentHash String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, sourceType, sourceId, ordinal])
+  @@index([userId, projectId, sourceType])
+  @@index([userId, sourceType, sourceId])
 }

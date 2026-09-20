@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   return NextResponse.json({
     ok: true,
-    service: "vibeflow",
+    service: "pocketstudio",
     time: new Date().toISOString(),
   });
 }

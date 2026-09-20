@@ -165,7 +165,7 @@
   display: none;
 }
 
-/* ── Typing indicator dots ("VibeFlow печатает…") ── */
+/* ── Typing indicator dots ("Студия печатает…") ── */
 @keyframes vf-bounce {
   0%,
   80%,

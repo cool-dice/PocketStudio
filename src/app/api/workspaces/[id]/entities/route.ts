@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
+import { relatedFromLinks } from "@/lib/entity-meta";
+import { loadSectionHints } from "@/lib/entity-mentions";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { entityDto } from "@/lib/workspace-shapes";
+import { scheduleIndexEntity } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -16,15 +20,21 @@ export async function GET(req: Request, { params }: Params) {
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
 
-  const entities = await db.entity.findMany({
-    where: { projectId: id },
-    orderBy: { updatedAt: "desc" },
-    include: { linksFrom: { select: { toId: true } } },
-  });
+  const [entities, hints] = await Promise.all([
+    db.entity.findMany({
+      where: { projectId: id },
+      orderBy: { updatedAt: "desc" },
+      include: {
+        linksFrom: { select: { toId: true } },
+        linksTo: { select: { fromId: true } },
+      },
+    }),
+    loadSectionHints(db, id),
+  ]);
 
   return NextResponse.json({
     entities: entities.map((e) =>
-      entityDto(e, e.linksFrom.map((l) => l.toId)),
+      entityDto(e, relatedFromLinks(e.linksFrom, e.linksTo), hints),
     ),
   });
 }
@@ -61,7 +71,9 @@ export async function POST(req: Request, { params }: Params) {
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
 
-  const parsed = createSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = createSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -85,6 +97,8 @@ export async function POST(req: Request, { params }: Params) {
       portrait: data.portrait ? JSON.stringify(data.portrait) : null,
     },
   });
+
+  scheduleIndexEntity(db, entity.id);
 
   return NextResponse.json({ entity: entityDto(entity) }, { status: 201 });
 }

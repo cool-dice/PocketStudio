@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { validateMcpConfig } from "@/lib/mcp-catalog";
 import type { McpTransport } from "@/lib/mcp-catalog";
 import { mcpDto } from "@/lib/mcp-shapes";
+import {
+  attachMcpRuntimeStatus,
+  probeMcpRuntime,
+  resolveCommandPresence,
+  stdioCommandFromConfig,
+} from "@/lib/mcp-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +42,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Сервер не найден" }, { status: 404 });
   }
 
-  const parsed = patchSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = patchSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -66,7 +75,17 @@ export async function PATCH(
     where: { id: row.id },
     data: update,
   });
-  return NextResponse.json({ server: mcpDto(updated) });
+  const runtime = await probeMcpRuntime();
+  const dto = mcpDto(updated);
+  const command =
+    dto.transport === "stdio" ? stdioCommandFromConfig(dto.config) : null;
+  const commandPresence = await resolveCommandPresence(command ? [command] : []);
+  return NextResponse.json({
+    server: attachMcpRuntimeStatus(dto, {
+      agentBrowser: runtime.agentBrowser,
+      commandPresence,
+    }),
+  });
 }
 
 /* ── DELETE /api/mcp/[id] — убрать свой сервер из реестра ── */

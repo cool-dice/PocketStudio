@@ -22,7 +22,11 @@ import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useThreads } from "@/hooks/use-threads";
-import { MAX_MESSAGE_LENGTH } from "@/lib/types";
+import {
+  COMPOSER_TEXTAREA_MAX_CHARS,
+  composerSizeUi,
+} from "@/lib/message-send";
+import { THREADS_LOAD_ERROR, THREADS_LOAD_ERROR_HINT } from "@/lib/thread-copy";
 import { useAppUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/lib/types";
@@ -45,6 +49,11 @@ export function HomeChatWidget() {
     busy,
     thinking,
     sendMessage,
+    ensureStudioThread,
+    threadsLoading,
+    threadsError,
+    sendError,
+    clearSendError,
   } = useThreads();
   const setMainArea = useAppUi((s) => s.setMainArea);
 
@@ -52,7 +61,13 @@ export function HomeChatWidget() {
   const listRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  const tail = messages.slice(-TAIL);
+  const studioScoped = activeThread?.projectId == null;
+  const tail = studioScoped ? messages.slice(-TAIL) : [];
+
+  useEffect(() => {
+    if (threadsLoading || threadsError) return;
+    void ensureStudioThread();
+  }, [threadsLoading, threadsError, ensureStudioThread, activeThread?.projectId]);
 
   // Прижмаем список к низу при новых сообщениях/стриминге.
   useEffect(() => {
@@ -60,12 +75,19 @@ export function HomeChatWidget() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, thinking, messagesLoading]);
 
-  const canSend = !busy && value.trim().length > 0;
+  const size = composerSizeUi(value, sendError);
+  const canSend =
+    !busy &&
+    !threadsError &&
+    value.trim().length > 0 &&
+    !size.disableSend;
 
   const submit = async () => {
-    if (!canSend) return;
+    if (!canSend || size.disableSend) return;
+    if (threadsError) return;
     const text = value.trim();
     setValue("");
+    await ensureStudioThread();
     await sendMessage(text);
   };
 
@@ -91,7 +113,9 @@ export function HomeChatWidget() {
             Чат со студией
           </h2>
           <p className="truncate text-[11px] leading-tight text-muted-foreground">
-            {activeThread?.title ?? "Новый диалог"}
+            {activeThread?.projectId == null
+              ? (activeThread?.title ?? "Новый диалог")
+              : "Диалог студии"}
           </p>
         </div>
         {busy && (
@@ -117,7 +141,14 @@ export function HomeChatWidget() {
         ref={listRef}
         className="vf-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-4"
       >
-        {messagesLoading ? (
+        {threadsError ? (
+          <div className="flex flex-col items-start gap-1 py-4">
+            <p className="text-sm font-medium">{THREADS_LOAD_ERROR}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {THREADS_LOAD_ERROR_HINT}
+            </p>
+          </div>
+        ) : messagesLoading || !studioScoped ? (
           <div className="space-y-3">
             <Skeleton className="h-8 w-2/3" />
             <Skeleton className="ml-auto h-8 w-1/2" />
@@ -125,7 +156,9 @@ export function HomeChatWidget() {
           </div>
         ) : tail.length === 0 ? (
           <EmptyThread
-            onStarter={(text) => void sendMessage(text)}
+            onStarter={(text) => {
+              void ensureStudioThread().then(() => sendMessage(text));
+            }}
             onExpand={expand}
           />
         ) : (
@@ -145,10 +178,19 @@ export function HomeChatWidget() {
             ref={taRef}
             rows={1}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              if (sendError) clearSendError();
+              setValue(e.target.value);
+            }}
             onKeyDown={handleKeyDown}
-            disabled={busy}
-            maxLength={MAX_MESSAGE_LENGTH}
+            disabled={busy || Boolean(threadsError)}
+            maxLength={COMPOSER_TEXTAREA_MAX_CHARS}
+            aria-invalid={Boolean(size.error)}
+            aria-describedby={
+              size.showCount
+                ? "home-chat-widget-hint home-chat-widget-count"
+                : "home-chat-widget-hint"
+            }
             placeholder={busy ? "Студия печатает…" : "Спросите студию…"}
             className="vf-scroll max-h-24 min-h-9 flex-1 resize-none self-center bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
@@ -163,9 +205,32 @@ export function HomeChatWidget() {
             <ArrowUp className="size-4" aria-hidden="true" />
           </Button>
         </div>
-        <p className="mt-1.5 px-1 text-center text-[10px] text-muted-foreground">
-          Enter — отправить · Shift+Enter — новая строка
-        </p>
+        <div className="mt-1.5 flex items-start justify-between gap-2 px-1">
+          <p
+            id="home-chat-widget-hint"
+            className={`min-w-0 flex-1 text-[10px] ${
+              size.error ? "text-destructive" : "text-muted-foreground"
+            }`}
+            role={size.error ? "alert" : undefined}
+          >
+            {size.error
+              ? size.error
+              : "Enter — отправить · Shift+Enter — новая строка"}
+          </p>
+          {size.showCount ? (
+            <span
+              id="home-chat-widget-count"
+              className={`shrink-0 text-[10px] tabular-nums ${
+                size.oversized
+                  ? "text-destructive"
+                  : "text-amber-600 dark:text-amber-400"
+              }`}
+              aria-live="polite"
+            >
+              {size.countLabel}
+            </span>
+          ) : null}
+        </div>
       </footer>
     </section>
   );

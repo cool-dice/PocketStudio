@@ -27,11 +27,12 @@ function metaOf(artifact: ArtifactDto, key: string): string | null {
   return typeof value === "string" ? value : null;
 }
 
-/** Артефакт принадлежит альбому: картинка/портрет с мета-видом или url. */
+/** Артефакт принадлежит альбому: картинка/портрет с мета-видом, url или пропавшим файлом. */
 export function isAlbumArtifact(artifact: ArtifactDto): boolean {
+  if (metaOf(artifact, "albumKind") !== null) return true;
   const visual = ["image", "portrait", "illustration", "concept"];
   if (!visual.includes(artifact.type)) return false;
-  return Boolean(artifact.url) || metaOf(artifact, "albumKind") !== null;
+  return Boolean(artifact.url) || Boolean(artifact.fileMissing);
 }
 
 function kindOf(artifact: ArtifactDto): AlbumItemKind {
@@ -65,6 +66,8 @@ export interface AlbumItem {
   /** Градиент-заглушка (когда url нет). */
   gradient: string;
   url: string | null;
+  /** /gen blob was in DB but is gone from disk. */
+  fileMissing: boolean;
   description: string | null;
   prompt: string | null;
   favorite: boolean;
@@ -92,7 +95,8 @@ export function albumItemOf(
     gradient:
       metaOf(artifact, "gradient") ??
       GRADIENTS[gradientIndexOf(artifact.id) % GRADIENTS.length],
-    url: artifact.url,
+    url: artifact.fileMissing ? null : artifact.url,
+    fileMissing: Boolean(artifact.fileMissing),
     description: artifact.description,
     prompt: artifact.prompt,
     favorite: artifact.favorite,

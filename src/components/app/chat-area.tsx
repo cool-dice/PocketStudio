@@ -26,6 +26,7 @@ import {
 import { Composer } from "@/components/app/composer";
 import { MessageBubble } from "@/components/app/message-bubble";
 import { PlanCard } from "@/components/app/plan-card";
+import { RagScopeBadge } from "@/components/app/rag-scope-badge";
 import { Welcome } from "@/components/app/welcome";
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
+import { formatPrefetchHint } from "@/lib/rag/prefetch";
 import { useAppUi } from "@/lib/store";
 import {
   MODE_DESCRIPTIONS,
@@ -81,6 +83,7 @@ export function ChatArea({
     phase,
     tasks,
     updateThreadMode,
+    canonHint,
   } = useThreads();
 
   const { getById } = useProjects();
@@ -147,6 +150,20 @@ export function ChatArea({
                   void updateThreadMode(activeThread.id, mode)
                 }
               />
+            )}
+            {activeThread && (
+              <RagScopeBadge
+                scope={activeThread.projectId ? "workspace" : "global"}
+              />
+            )}
+            {canonHint && (
+              <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                {formatPrefetchHint(
+                  canonHint.scope,
+                  canonHint.hitCount,
+                  canonHint.mode,
+                )}
+              </span>
             )}
           </div>
         </div>

@@ -282,13 +282,14 @@ function normTrack(value: unknown, steps: number): DawTrack | null {
 
 /** Нормализовать произвольный JSON к валидному DawState (или null). */
 export function normalizeDawState(value: unknown): DawState | null {
-  if (typeof value !== "object" || value === null) return null;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
+  // Без массива tracks мусор вроде `{ bpm: 120 }` не должен затирать дорожки.
+  if (!Array.isArray(raw.tracks)) return null;
   const bars = clamp(Math.round(Number(raw.bars) || 4), 1, MAX_BARS);
   const steps = stepCount(bars);
-  const tracksRaw = Array.isArray(raw.tracks) ? raw.tracks : [];
   const tracks: DawTrack[] = [];
-  for (const item of tracksRaw) {
+  for (const item of raw.tracks) {
     const track = normTrack(item, steps);
     if (track) tracks.push(track);
     if (tracks.length >= MAX_TRACKS) break;
@@ -301,6 +302,25 @@ export function normalizeDawState(value: unknown): DawState | null {
     metronome: Boolean(raw.metronome),
     tracks,
   };
+}
+
+export const EMPTY_DAW_EXPORT_ERROR =
+  "Нечего экспортировать: нет ударов, нот и голосовых клипов. Тихий WAV не собираю.";
+
+/** Есть ли в проекте хоть один слышимый триггер (не пустые дорожки). */
+export function dawHasAudibleContent(state: DawState): boolean {
+  for (const track of state.tracks) {
+    if (track.kind === "drums" && track.drums) {
+      for (const inst of DRUM_INSTRUMENTS) {
+        if (track.drums[inst]?.some(Boolean)) return true;
+      }
+    } else if (track.kind === "voice") {
+      if (track.voice?.artifactId && track.voice.artifactUrl) return true;
+    } else if (track.notes && track.notes.length > 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Длительность шага (сек) при BPM. */

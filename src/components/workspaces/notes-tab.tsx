@@ -1,23 +1,15 @@
 "use client";
 
 /**
- * NotesTab — «Заметки» воркспейса (PS-3-b).
- *
- * Заметки текущего воркспейса (карточки артефактов kind="note") +
- * композер быстрой мысли (мок: локальный state) + переход к глобальному
- * Блокноту + превью-диалог выбранной заметки.
+ * NotesTab — заметки воркспейса через Note + NoteLink (не мок).
+ * Typed create here (and agent create_note) never POSTs transcription.
  */
 
-import { useMemo, useState } from "react";
-import { ArrowUpRight, NotebookPen, Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowUpRight, NotebookPen, Plus, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
-import { ArtifactCard } from "@/components/workspaces/shared/artifact-card";
-import {
-  artifactsOfWorkspace,
-  type ArtifactItem,
-} from "@/components/workspaces/shared/artifacts-data";
-import { currentStageIndex, pluralNotes } from "@/components/workspaces/overview-data";
+import { NoteTranscriptionBlock } from "@/components/app/note-transcription";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,56 +20,112 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { invalidateWorkspaces } from "@/hooks/use-workspaces";
+import { api, ApiError } from "@/lib/api";
+import { notesListViewState } from "@/lib/notes-list-state";
+import { NOTEBOOK_LOAD_ERROR } from "@/lib/note-analysis";
 import { useAppUi } from "@/lib/store";
+import type { Note } from "@/lib/types";
+import { shouldShowTranscription } from "@/lib/voice-copy";
 import { WORKSPACE_STAGES, type WorkspaceSummary } from "@/lib/workspace-data";
+import { currentStageIndex, pluralNotes } from "@/components/workspaces/overview-data";
+import { timeAgo } from "@/components/workspaces/home-data";
 
 export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
   const setMainArea = useAppUi((s) => s.setMainArea);
+  const bumpNotes = useAppUi((s) => s.bumpNotes);
+  const notesVersion = useAppUi((s) => s.notesVersion);
 
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [notesWorkspaceId, setNotesWorkspaceId] = useState<string | null>(null);
+  const [errorWorkspaceId, setErrorWorkspaceId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [localNotes, setLocalNotes] = useState<ArtifactItem[]>([]);
-  const [openNote, setOpenNote] = useState<ArtifactItem | null>(null);
-
-  const notes = useMemo(() => {
-    const mockNotes = artifactsOfWorkspace(workspace.id).filter(
-      (a) => a.kind === "note",
-    );
-    return [...localNotes, ...mockNotes];
-  }, [localNotes, workspace.id]);
+  const [saving, setSaving] = useState(false);
+  const [openNote, setOpenNote] = useState<Note | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const currentStage =
-    WORKSPACE_STAGES[workspace.type][currentStageIndex(workspace)];
+    WORKSPACE_STAGES[workspace.type][currentStageIndex(workspace)] ??
+    WORKSPACE_STAGES[workspace.type][0];
 
-  function addNote() {
-    const text = draft.trim();
-    if (!text) return;
-    const note: ArtifactItem = {
-      id: `local-note-${Date.now()}`,
-      workspaceId: workspace.id,
-      kind: "note",
-      title: text,
-      meta: `записано сейчас · стадия «${currentStage}»`,
-      stage: currentStage,
-      createdAgo: "только что",
-      gradient: "from-emerald-500/50 to-stone-400/30",
+  const view = notesListViewState(
+    workspace.id,
+    notesWorkspaceId,
+    errorWorkspaceId,
+  );
+  const visibleNotes = view === "ready" ? notes : [];
+
+  useEffect(() => {
+    let cancelled = false;
+    const id = workspace.id;
+    void (async () => {
+      try {
+        const res = await api.listNotes({ projectId: id, limit: 50 });
+        if (cancelled) return;
+        setNotes(res.notes);
+        setNotesWorkspaceId(id);
+        setErrorWorkspaceId(null);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setNotes([]);
+        setNotesWorkspaceId(id);
+        setErrorWorkspaceId(id);
+        setError(
+          err instanceof ApiError ? err.message : NOTEBOOK_LOAD_ERROR,
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
-    setLocalNotes((prev) => [note, ...prev]);
-    setDraft("");
-    toast.success("Мысль записана", {
-      description: `Заметка прицеплена к стадии «${currentStage}». Пока хранится в этом сеансе.`,
-    });
+  }, [workspace.id, notesVersion, reloadTick]);
+
+  useEffect(() => {
+    setOpenNote(null);
+  }, [workspace.id]);
+
+  async function addNote() {
+    const text = draft.trim();
+    if (!text || saving) return;
+    setSaving(true);
+    try {
+      const note = await api.createNote({ text, projectId: workspace.id });
+      setNotes((prev) => [note, ...prev]);
+      setNotesWorkspaceId(workspace.id);
+      setErrorWorkspaceId(null);
+      setError(null);
+      setDraft("");
+      bumpNotes();
+      invalidateWorkspaces();
+      toast.success("Мысль записана", {
+        description: `Привязана к воркспейсу · стадия «${currentStage}»`,
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось записать заметку",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
+
+  const subtitle =
+    view === "loading"
+      ? "Загрузка…"
+      : view === "error"
+        ? "Не удалось загрузить"
+        : `${pluralNotes(visibleNotes.length)} · те же записи, что в Блокноте`;
 
   return (
     <div className="vf-scroll h-full min-h-0 overflow-y-auto">
       <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:px-6 sm:py-6">
-        {/* ── Заголовок + переход в Блокнот ── */}
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">Заметки воркспейса</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {pluralNotes(notes.length)} · привязаны к стадиям пайплайна
-            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
           </div>
           <button
             type="button"
@@ -86,17 +134,16 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <NotebookPen className="size-3.5" aria-hidden="true" />
-            Глобальные заметки живут в Блокноте
+            Все личные заметки — в Блокноте
             <ArrowUpRight className="size-3.5 text-primary" aria-hidden="true" />
           </button>
         </div>
 
-        {/* ── Композер быстрой мысли ── */}
         <form
           className="mt-4 flex gap-2"
           onSubmit={(e) => {
             e.preventDefault();
-            addNote();
+            void addNote();
           }}
         >
           <Input
@@ -104,29 +151,73 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Записать мысль в воркспейс…"
             aria-label="Новая заметка воркспейса"
-            maxLength={140}
+            maxLength={5000}
             className="h-10 bg-card"
           />
           <Button
             type="submit"
-            disabled={!draft.trim()}
+            disabled={!draft.trim() || saving}
             className="h-10 shrink-0 gap-1.5"
           >
             <Plus className="size-4" aria-hidden="true" />
-            Записать
+            {saving ? "Пишем…" : "Записать"}
           </Button>
         </form>
 
-        {/* ── Список заметок ── */}
         <div className="mt-4 space-y-2">
-          {notes.length > 0 ? (
-            notes.map((note) => (
-              <ArtifactCard
-                key={note.id}
-                artifact={note}
-                onOpen={(a) => setOpenNote(a)}
-              />
-            ))
+          {view === "loading" ? (
+            <div className="space-y-2" role="status" aria-label="Загрузка заметок">
+              <Skeleton className="h-16 w-full rounded-xl" />
+              <Skeleton className="h-16 w-full rounded-xl" />
+            </div>
+          ) : view === "error" ? (
+            <div
+              role="alert"
+              className="flex flex-col items-center gap-2 rounded-xl border border-dashed py-10 text-center"
+            >
+              <p className="text-sm text-muted-foreground">
+                {error ?? NOTEBOOK_LOAD_ERROR}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setError(null);
+                  setErrorWorkspaceId(null);
+                  setNotesWorkspaceId(null);
+                  setReloadTick((t) => t + 1);
+                }}
+              >
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+                Повторить
+              </Button>
+            </div>
+          ) : visibleNotes.length > 0 ? (
+            visibleNotes.map((note) => {
+              const preview = (note.rawText ?? "").replace(/\s+/g, " ").trim();
+              const hasTranscript = shouldShowTranscription(
+                note.rawText,
+                note.transcription,
+              );
+              return (
+                <button
+                  key={note.id}
+                  type="button"
+                  onClick={() => setOpenNote(note)}
+                  className="flex w-full flex-col rounded-xl border bg-card p-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/60"
+                >
+                  <span className="line-clamp-2 text-sm font-medium">
+                    {preview || "Пустая заметка"}
+                  </span>
+                  <span className="mt-1 text-[11px] text-muted-foreground">
+                    {timeAgo(note.createdAt)}
+                    {note.category ? ` · ${note.category.name}` : ""}
+                    {hasTranscript ? " · есть расшифровка" : ""}
+                  </span>
+                </button>
+              );
+            })
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-10 text-center">
               <span
@@ -137,20 +228,14 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
               </span>
               <p className="text-sm font-medium">Ни одной мысли пока нет</p>
               <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
-                Запишите первую мысль в поле выше — она прицепится к текущей
-                стадии «{currentStage}» и будет видна в Обзоре.
+                Запишите первую мысль — она сохранится в Блокноте и останется
+                привязанной к этому воркспейсу после перезагрузки.
               </p>
             </div>
           )}
         </div>
-
-        <p className="mt-6 text-center text-xs text-muted-foreground/70">
-          Заметки воркспейса живут рядом с его артефактами; личные мысли вне
-          контекста — в глобальном Блокноте.
-        </p>
       </div>
 
-      {/* ── Превью заметки (мок) ── */}
       <Dialog
         open={openNote !== null}
         onOpenChange={(open) => {
@@ -159,17 +244,21 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="pr-8 leading-snug">
-              {openNote?.title}
-            </DialogTitle>
+            <DialogTitle className="pr-8 leading-snug">Заметка воркспейса</DialogTitle>
             <DialogDescription>
-              Заметка · стадия «{openNote?.stage}» · {openNote?.createdAgo}
+              {openNote ? timeAgo(openNote.createdAt) : ""}
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground">
-            Полный текст заметки появится здесь вместе с редактором волны PS-3.
-            Карточка уже привязана к стадии «{openNote?.stage}» и видна в
-            Обзоре этого воркспейса.
+          <div>
+            <div className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed">
+              {openNote?.rawText || "Пусто"}
+            </div>
+            {openNote ? (
+              <NoteTranscriptionBlock
+                rawText={openNote.rawText}
+                transcription={openNote.transcription}
+              />
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpenNote(null)}>

@@ -19,6 +19,8 @@
 import { create } from "zustand";
 
 import { api } from "@/lib/api";
+import { BELL_LOAD_ERROR } from "@/lib/notification-copy";
+import { mergeNotification } from "@/lib/notification-merge";
 import type { Notification } from "@/lib/types";
 
 interface NotificationsState {
@@ -26,6 +28,8 @@ interface NotificationsState {
   unread: number;
   /** At least one successful REST/WS sync has happened. */
   loaded: boolean;
+  /** Failed REST list — never paint this as «Пока тихо». */
+  loadError: string | null;
   /** Incremented on every change → subscribers (bell) re-render. */
   version: number;
 
@@ -45,28 +49,38 @@ export const useNotifications = create<NotificationsState>((set, get) => ({
   notifications: [],
   unread: 0,
   loaded: false,
+  loadError: null,
   version: 0,
 
   refresh: async () => {
     try {
       const { notifications, unread } = await api.listNotifications();
-      set((s) => ({ notifications, unread, loaded: true, version: s.version + 1 }));
+      set((s) => ({
+        notifications,
+        unread,
+        loaded: true,
+        loadError: null,
+        version: s.version + 1,
+      }));
     } catch {
-      // keep the previous state — a later refresh will resync
+      set((s) => ({
+        loadError: BELL_LOAD_ERROR,
+        version: s.version + 1,
+      }));
     }
   },
 
   prepend: (notification) => {
-    set((s) => ({
-      // Dedupe by id (socket echo + optimistic refresh race).
-      notifications: [
-        notification,
-        ...s.notifications.filter((n) => n.id !== notification.id),
-      ].slice(0, 50),
-      unread: notification.read ? s.unread : s.unread + 1,
-      loaded: true,
-      version: s.version + 1,
-    }));
+    set((s) => {
+      const next = mergeNotification(s.notifications, s.unread, notification);
+      return {
+        notifications: next.notifications,
+        unread: next.unread,
+        loaded: true,
+        loadError: null,
+        version: s.version + 1,
+      };
+    });
   },
 
   markRead: (id) => {

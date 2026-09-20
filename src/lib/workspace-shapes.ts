@@ -4,6 +4,9 @@
  */
 
 import { db } from "@/lib/db";
+import { withLiveGenUrl } from "@/lib/gen-files";
+import { parseEntityRefs } from "@/lib/entity-meta";
+import { mentionsOfRefs, type SectionHintMap } from "@/lib/entity-mentions";
 import type {
   ArtifactDto,
   ArtifactType,
@@ -13,7 +16,6 @@ import type {
   EntityDomain,
   EntityKind,
   EntityDto,
-  EntityRefs,
   FindingDto,
   FindingSeverity,
   FindingStatus,
@@ -32,6 +34,8 @@ type ProjectRow = {
   stage: string | null;
   stageIndex: number | null;
   progress: number;
+  favorite?: boolean;
+  archived?: boolean;
   createdAt: Date;
   updatedAt: Date;
   _count?: {
@@ -62,6 +66,8 @@ export function workspaceDto(
     stage: p.stage,
     stageIndex: p.stageIndex,
     progress: p.progress,
+    favorite: Boolean(p.favorite),
+    archived: Boolean(p.archived),
     counts,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
@@ -190,25 +196,20 @@ type EntityRow = {
   updatedAt: Date;
 };
 
-export function entityDto(e: EntityRow, related: string[] = []): EntityDto {
+export function entityDto(
+  e: EntityRow,
+  related: string[] = [],
+  hints: SectionHintMap = new Map(),
+): EntityDto {
   let attributes: EntityAttribute[] = [];
   let tags: string[] = [];
-  let refs: EntityRefs = { kind: "chapter", items: [] };
+  const refs = parseEntityRefs(e.refs);
   let portrait: EntityDto["portrait"] = null;
   try {
     attributes = JSON.parse(e.attributes) ?? [];
   } catch { /* дефолт */ }
   try {
     tags = JSON.parse(e.tags) ?? [];
-  } catch { /* дефолт */ }
-  try {
-    const parsed = JSON.parse(e.refs);
-    if (parsed && typeof parsed === "object") {
-      refs = {
-        kind: parsed.kind === "section" ? "section" : "chapter",
-        items: Array.isArray(parsed.items) ? parsed.items.map(String) : [],
-      };
-    }
   } catch { /* дефолт */ }
   try {
     if (e.portrait) portrait = JSON.parse(e.portrait);
@@ -228,6 +229,7 @@ export function entityDto(e: EntityRow, related: string[] = []): EntityDto {
     attributes,
     tags,
     refs,
+    mentions: mentionsOfRefs(refs, hints),
     portrait,
     image: e.image ?? null,
     favorite: e.favorite,
@@ -263,10 +265,15 @@ export function artifactDto(a: ArtifactRow): ArtifactDto {
   try {
     if (a.meta) meta = JSON.parse(a.meta);
   } catch { /* дефолт */ }
+  const type = ARTIFACT_TYPES.includes(a.type)
+    ? (a.type as ArtifactType)
+    : a.type === "illustration" || a.type === "concept"
+      ? "image"
+      : "file";
   return {
     id: a.id,
     projectId: a.projectId,
-    type: (ARTIFACT_TYPES.includes(a.type) ? a.type : "file") as ArtifactType,
+    type,
     title: a.title,
     description: a.description,
     url: a.url,
@@ -277,6 +284,11 @@ export function artifactDto(a: ArtifactRow): ArtifactDto {
     favorite: a.favorite,
     createdAt: a.createdAt.toISOString(),
   };
+}
+
+/** Artifact DTO with a dead /gen URL stripped so the UI cannot 404-click it. */
+export function liveArtifactDto(a: ArtifactRow): ArtifactDto {
+  return withLiveGenUrl(artifactDto(a));
 }
 
 /* ─────────────────────────── findings ─────────────────────────── */

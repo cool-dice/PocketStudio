@@ -3,7 +3,8 @@
 //
 // Contract (worklog Tasks 1, 4 & 3-ctr):
 //   Client→server: "thread:join" {threadId}; "thread:leave" {threadId};
-//                  "message:send" {threadId, content}
+//                  "message:send" {threadId, content};
+//                  "turn:abort" {threadId}
 //   Server→client: "message:user" {message}; "agent:thinking" {threadId};
 //                  "message:start" {threadId, messageId};
 //                  "message:delta" {threadId, messageId, delta};
@@ -16,7 +17,7 @@
 //   Message shape: {id, threadId, role: 'user'|'assistant', content, createdAt}
 //
 // Agent turn = up to 8 LLM iterations. Each LLM reply is either plain text
-// (→ streamed to the client via message:start/delta/end, loop ends) or a JSON
+// (→ native SSE tokens forwarded on message:start/delta/end, loop ends) or a JSON
 // tool call (→ tool row persisted, tool executed with ToolContext
 // {threadId, mode, projectId} from the thread row, tool:start/tool:end
 // emitted, result fed back into the next LLM call via [TOOL_CALL]/
@@ -30,16 +31,31 @@
 // Path MUST be "/" (Caddy gateway requirement), port 3003 (hardcoded).
 
 import { createServer } from "http";
+import { randomUUID } from "node:crypto";
 import { Server, type Socket } from "socket.io";
 import { db } from "./db-client";
+import {
+  enabledMcpAdapters,
+  filesystemOffFromRows,
+} from "../../src/lib/mcp-runtime";
 import { verifyWsToken, type WsUser } from "./auth";
 import {
   generateLLMResponse,
-  parseToolCall,
+  parseToolCallResult,
   parsePlannerSteps,
-  chunkText,
   type LlmMessage,
+  type ToolCall,
 } from "./agent";
+import { prepareToolExecution } from "./tool-args-limit";
+import {
+  decideLiveDelta,
+  newLiveStream,
+  proseFromMixed,
+  resetLiveBubble,
+  resetLiveCall,
+  streamedProseSoFar,
+  type LiveStream,
+} from "./live-stream";
 import {
   buildAgentSystemPrompt,
   buildPlannerPrompt,
@@ -50,14 +66,36 @@ import { getTool, type ToolContext } from "./tools";
 import { createNotification } from "./notifications";
 import { startAnalyzer, stopAnalyzer } from "./analyzer";
 import {
+  persistAgentUnconfiguredReply,
+  replyIfAgentUnconfigured,
+  type PersistedAssistant,
+} from "./unconfigured-turn";
+import { isUnconfiguredToolError } from "../../src/lib/ai/resolve";
+import { UNCONFIGURED_TOOL_MESSAGE } from "../../src/lib/ai/tools";
+import {
   projectRoot,
   listWorkspaceTree,
   listProjectCommits,
   checkpointProject,
 } from "../../src/lib/workspace";
+import { retrieve } from "../../src/lib/rag/retrieve";
+import { resolveRetrieveScope } from "../../src/lib/rag/scope";
+import {
+  formatPrefetchBlock,
+  looksLikeCanonQuestion,
+} from "../../src/lib/rag/prefetch";
+import {
+  abortedToolResult,
+  decideAfterTool,
+  isAbortFlag,
+  throwIfAborted,
+} from "../../src/lib/abort-flag";
+import {
+  MESSAGE_SEND_MAX_PACKET_BYTES,
+  parseMessageSend,
+} from "../../src/lib/message-send";
 
 const PORT = 3003;
-const MAX_CONTENT_LENGTH = 20000;
 const HISTORY_LIMIT = 30; // last N message rows fed to the LLM (all roles)
 const MAX_TOOL_ITERATIONS = 8; // hard cap on LLM round-trips per turn (file work needs more steps)
 const TURN_TIMEOUT_MS = 120000; // total turn budget
@@ -68,6 +106,9 @@ const PROMPT_COMMITS = 5; // recent commits embedded in the system prompt
 const AUTO_CHECKPOINT_MESSAGE = "Агент: изменения за ход";
 const FALLBACK_REPLY =
   "Я обработал запрос, но что-то пошло не так — попробуйте переформулировать.";
+const ABORT_REPLY = "Генерация остановлена.";
+const TOOL_LOOP_CAP_REPLY =
+  "Достигнут лимит шагов инструментов за один ход. Напишите «продолжи», и я закончу с того места, где остановился.";
 const PLAN_MAX_TASKS = 20;
 const PLAN_MAX_TEXT_CHARS = 200;
 const REVIEWER_BUDGET_MS = 30000; // min remaining turn budget to run the reviewer
@@ -83,13 +124,11 @@ const io = new Server(httpServer, {
   },
   pingTimeout: 60000,
   pingInterval: 25000,
+  maxHttpBufferSize: MESSAGE_SEND_MAX_PACKET_BYTES,
 });
 
 // ─────────────────────────── helpers ───────────────────────────
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 interface MessageRow {
   id: string;
@@ -114,7 +153,11 @@ function serializeMessage(m: MessageRow) {
 }
 
 // Concurrency guard: one agent turn per thread at a time.
-const runningThreads = new Map<string, true>();
+const runningThreads = new Map<string, AbortController>();
+
+function isAbortErr(err: unknown): boolean {
+  return isAbortFlag(err);
+}
 
 /** Thread fields the turn orchestration needs (subset of the Prisma row;
  *  projectId is mutated in-place when create_project binds the thread so
@@ -148,23 +191,52 @@ async function buildTurnSystemPrompt(
     const tasks = await threadTasks(thread.id);
     const planTasks = tasks.map((t) => ({ text: t.text, done: t.done }));
 
+    const skillRows = await db.skill.findMany({
+      where: { userId, enabled: true },
+      select: { name: true, triggers: true, skillMd: true },
+      take: 12,
+    });
+    const skillDocs = skillRows.map((s) => {
+      let triggers = s.triggers;
+      try {
+        const parsed = JSON.parse(s.triggers) as unknown;
+        if (Array.isArray(parsed)) triggers = parsed.join(", ");
+      } catch {
+        // keep raw
+      }
+      return `### ${s.name}\nТриггеры: ${triggers}\n\n${s.skillMd}`;
+    });
+
+    const studios = await db.project.findMany({
+      where: { userId, archived: false },
+      select: { name: true, type: true },
+      orderBy: { updatedAt: "desc" },
+      take: 30,
+    });
+
     if (!thread.projectId) {
       return buildAgentSystemPrompt({
         mode: thread.mode,
+        ragScope: "global",
+        studios,
         planTasks,
         mcpToolDocs: mcp.docs,
         filesystemOff: mcp.filesystemOff,
+        skillDocs,
       });
     }
     const project = await db.project.findFirst({
       where: { id: thread.projectId, userId },
-      select: { id: true, name: true, origin: true },
+      select: { id: true, name: true, origin: true, type: true },
     });
     if (!project) {
       return buildAgentSystemPrompt({
         mode: thread.mode,
+        ragScope: "global",
+        studios,
         mcpToolDocs: mcp.docs,
         filesystemOff: mcp.filesystemOff,
+        skillDocs,
       });
     }
     const root = projectRoot(project.id);
@@ -174,7 +246,9 @@ async function buildTurnSystemPrompt(
     ]);
     return buildAgentSystemPrompt({
       mode: thread.mode,
+      ragScope: "workspace",
       projectName: project.name,
+      projectType: project.type,
       projectOrigin: project.origin,
       projectTree: tree.entries
         .filter((e) => e.type === "file")
@@ -184,6 +258,7 @@ async function buildTurnSystemPrompt(
       planTasks,
       mcpToolDocs: mcp.docs,
       filesystemOff: mcp.filesystemOff,
+      skillDocs,
     });
   } catch (err) {
     console.warn(
@@ -234,19 +309,15 @@ async function loadMcpState(userId: string): Promise<TurnMcpState> {
         filesystemOff: false,
       };
     }
-    const adapters = new Set<string>();
-    for (const row of rows) {
-      if (row.enabled && !row.external && row.adapter) adapters.add(row.adapter);
-    }
+    const adapters = enabledMcpAdapters(rows);
     const docs: string[] = [];
     for (const adapter of adapters) {
       docs.push(...(MCP_ADAPTER_DOCS[adapter] ?? []));
     }
-    const filesystemRow = rows.find((r) => r.adapter === "filesystem");
     return {
       adapters,
       docs,
-      filesystemOff: Boolean(filesystemRow) && !filesystemRow!.enabled,
+      filesystemOff: filesystemOffFromRows(rows),
     };
   } catch (err) {
     // Реестр недоступен (миграция/сбой) — дефолты, ход не ломаем.
@@ -338,27 +409,93 @@ function sanitizeTextAnswer(raw: string): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
+/** Emit start immediately; persist the empty row in the background. */
+function beginAssistantMessage(
+  live: LiveStream,
+  room: string,
+  threadId: string,
+): void {
+  if (live.messageId) return;
+  live.messageId = randomUUID();
+  io.to(room).emit("message:start", { threadId, messageId: live.messageId });
+  const id = live.messageId;
+  live.persist = db.message
+    .create({
+      data: { id, threadId, role: "assistant", content: "" },
+    })
+    .then(() => undefined)
+    .catch((err) => {
+      console.warn(
+        "[agent] persist stream start failed:",
+        err instanceof Error ? err.message : err,
+      );
+    });
+}
+
 /**
- * Stream a final text answer to the thread room (emulated streaming):
- * assistant row (empty) → message:start → message:delta ×N → persist →
- * message:end.
+ * Forward provider tokens on the existing `message:delta` event.
+ * JSON / fenced tool candidates are held so `{` never reaches the bubble.
+ */
+function attachLiveDeltas(
+  room: string,
+  threadId: string,
+  live: LiveStream,
+): (delta: string) => Promise<void> {
+  return async (delta: string) => {
+    const decision = decideLiveDelta(live, delta);
+    if (decision.emitStart) beginAssistantMessage(live, room, threadId);
+    if (decision.emitDelta && live.messageId) {
+      io.to(room).emit("message:delta", {
+        threadId,
+        messageId: live.messageId,
+        delta: decision.emitDelta,
+      });
+    }
+  };
+}
+
+/**
+ * Finalize a text answer on the existing `message:delta` protocol:
+ * reuse a live bubble when tokens already went out, otherwise start →
+ * one delta (full text, e.g. abort / buffered JSON that wasn't a tool) → end.
  */
 async function streamFinalResponse(
   room: string,
   threadId: string,
   text: string,
+  live?: LiveStream | null,
 ): Promise<void> {
+  const existingId = live?.messageId ?? null;
+  if (existingId && live) {
+    await live.persist;
+    try {
+      const assistantMessage = await db.message.update({
+        where: { id: existingId },
+        data: { content: text },
+      });
+      io.to(room).emit("message:end", {
+        threadId,
+        message: serializeMessage(assistantMessage),
+      });
+      return;
+    } catch (err) {
+      console.warn(
+        "[agent] persist stream end failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
   let assistantMessage = await db.message.create({
     data: { threadId, role: "assistant", content: "" },
   });
   io.to(room).emit("message:start", { threadId, messageId: assistantMessage.id });
-
-  const chunks = chunkText(text);
-  for (const delta of chunks) {
-    io.to(room).emit("message:delta", { threadId, messageId: assistantMessage.id, delta });
-    await sleep(25 + Math.random() * 10); // ~25–35ms per chunk
+  if (text) {
+    io.to(room).emit("message:delta", {
+      threadId,
+      messageId: assistantMessage.id,
+      delta: text,
+    });
   }
-
   assistantMessage = await db.message.update({
     where: { id: assistantMessage.id },
     data: { content: text },
@@ -494,12 +631,71 @@ function emitPhase(
   io.to(room).emit("turn:phase", { threadId, phase, label: label ?? null });
 }
 
+/** Persist-then-emit the unconfigured error so the composer unlocks on message:end. */
+function emitUnconfiguredAssistant(
+  room: string,
+  threadId: string,
+  row: PersistedAssistant,
+): void {
+  io.to(room).emit("message:start", { threadId, messageId: row.id });
+  io.to(room).emit("message:delta", {
+    threadId,
+    messageId: row.id,
+    delta: row.content,
+  });
+  io.to(room).emit("message:end", {
+    threadId,
+    message: serializeMessage(row),
+  });
+  emitPhase(room, threadId, "idle");
+}
+
 /** Cheap local heuristic: does this act-mode request look like real work? */
 function looksLikeWorkRequest(content: string): boolean {
   if (content.length >= ORCHESTRATE_MIN_CHARS) return true;
   return /созда|сдела|напиши|реализу|добав|исправ|настро|обнов|разработ|постро|собер|установ|нарису|сгенери|написат|создать|выполни/i.test(
     content,
   );
+}
+
+/** Inject RAG snippets before the first LLM turn on content/code questions. */
+async function prefetchCanonContext(
+  userId: string,
+  thread: ThreadTurnInfo,
+  userText: string,
+  signal?: AbortSignal,
+): Promise<{
+  text: string;
+  scope: "studio" | "workspace";
+  hitCount: number;
+  mode: "vector" | "keyword";
+  notice: string | null;
+} | null> {
+  if (!looksLikeCanonQuestion(userText)) return null;
+  throwIfAborted(signal);
+  const scope = resolveRetrieveScope({
+    userId,
+    threadProjectId: thread.projectId,
+    requestedProjectId: null,
+  });
+  const result = await retrieve(db, {
+    scope,
+    query: userText.slice(0, 400),
+    limit: 6,
+    signal,
+  });
+  const text = formatPrefetchBlock(result.hits, {
+    mode: result.mode,
+    notice: result.notice,
+  });
+  if (!text) return null;
+  return {
+    text,
+    scope: result.scope === "workspace" ? "workspace" : "studio",
+    hitCount: result.hits.length,
+    mode: result.mode,
+    notice: result.notice,
+  };
 }
 
 /**
@@ -511,20 +707,24 @@ async function runPlanner(
   thread: ThreadTurnInfo,
   content: string,
   existingTree: string[],
+  userId: string,
+  signal?: AbortSignal,
 ): Promise<string[] | null> {
   try {
+    throwIfAborted(signal);
     const prompt = buildPlannerPrompt({
       projectName: null,
       projectTree: existingTree,
       hasProject: Boolean(thread.projectId),
     });
     const raw = await generateLLMResponse(prompt, [
-      { role: "user", content: content.slice(0, MAX_CONTENT_LENGTH) },
-    ]);
+      { role: "user", content },
+    ], { userId, toolId: "agent", signal });
     const steps = parsePlannerSteps(raw);
     if (steps && steps.length >= 2) return steps;
     return null;
   } catch (err) {
+    if (isAbortFlag(err)) throw err;
     console.warn(
       "[agent] planner failed (continuing without plan):",
       err instanceof Error ? err.message : String(err),
@@ -545,20 +745,27 @@ async function executeToolCall(opts: {
   threadId: string;
   userId: string;
   thread: ThreadTurnInfo;
-  call: { tool: string; args: Record<string, unknown> };
+  call: ToolCall;
   mcp: TurnMcpState;
+  signal: AbortSignal;
+  /** Parse-time oversized dump — skip execute, Russian error in the thread. */
+  payloadError?: string;
 }): Promise<unknown> {
-  const { room, userRoom, threadId, userId, thread, call, mcp } = opts;
+  const { room, userRoom, threadId, userId, thread, call, mcp, signal } = opts;
+
+  if (signal.aborted) return abortedToolResult();
+
+  const prepared = prepareToolExecution(call, opts.payloadError);
 
   // Tool call → persist a "pending" tool row first (it becomes the
-  // message id reported to the client).
+  // message id reported to the client). Oversized args are never stored.
   const toolMessage = await db.message.create({
     data: {
       threadId,
       role: "tool",
       content: "",
       toolName: call.tool,
-      toolArgs: JSON.stringify(call.args),
+      toolArgs: prepared.argsForStore,
       toolResult: "pending",
     },
   });
@@ -566,7 +773,7 @@ async function executeToolCall(opts: {
     threadId,
     messageId: toolMessage.id,
     tool: call.tool,
-    args: call.args,
+    args: prepared.argsForEmit,
   });
 
   // Execute (never throws into the caller — errors become tool results).
@@ -576,26 +783,34 @@ async function executeToolCall(opts: {
     threadId,
     mode: thread.mode,
     projectId: thread.projectId,
+    signal,
   };
   let result: unknown;
   try {
     const tool = getTool(call.tool);
     // MCP-гейтинг (Фаза D): инструмент с адаптером виден только при
     // включённом сервере реестра интеграций.
-    if (tool?.mcpAdapter && !mcp.adapters.has(tool.mcpAdapter)) {
+    if (prepared.error) {
+      result = { error: prepared.error };
+    } else if (tool?.mcpAdapter && !mcp.adapters.has(tool.mcpAdapter)) {
       result = {
         error:
           `Инструмент ${call.tool} недоступен: MCP-сервер «` +
           (tool.mcpAdapter === "filesystem" ? "Filesystem" : tool.mcpAdapter === "fetch" ? "Fetch" : "Playwright") +
           "» отключён в Инструментах → Интеграции",
       };
+    } else if (signal.aborted) {
+      result = abortedToolResult();
     } else {
       result = tool
         ? await tool.execute(call.args, userId, ctx)
         : { error: `Неизвестный инструмент: ${call.tool}` };
     }
   } catch (err) {
-    result = { error: err instanceof Error ? err.message : String(err) };
+    result =
+      signal.aborted || isAbortErr(err)
+        ? abortedToolResult()
+        : { error: err instanceof Error ? err.message : String(err) };
   }
 
   const resultJson = (JSON.stringify(result) ?? "{}").slice(0, MAX_TOOL_RESULT_CHARS);
@@ -607,7 +822,7 @@ async function executeToolCall(opts: {
     threadId,
     messageId: toolMessage.id,
     tool: call.tool,
-    args: call.args,
+    args: prepared.argsForEmit,
     result,
   });
 
@@ -637,7 +852,7 @@ async function executeToolCall(opts: {
         );
       }
     } else if (
-      (call.tool === "write_file" || call.tool === "delete_file") &&
+      (call.tool === "write_file" || call.tool === "delete_file" || call.tool === "apply_patch") &&
       thread.projectId
     ) {
       io.to(userRoom).emit("project:updated", {
@@ -657,6 +872,30 @@ async function executeToolCall(opts: {
       const commitMsg =
         cp && typeof cp.message === "string" ? cp.message : "контрольная точка";
       await notifyCheckpoint(userId, thread.projectId, commitMsg);
+    } else if (
+      [
+        "create_note",
+        "create_entity",
+        "create_document",
+        "append_section",
+        "rewrite_section",
+        "generate_image",
+        "tts_narration",
+        "check_document",
+        "open_in_design",
+        "apply_filter",
+      ].includes(call.tool)
+    ) {
+      const wsId =
+        typeof r.workspaceId === "string"
+          ? r.workspaceId
+          : thread.projectId;
+      if (wsId) {
+        io.to(userRoom).emit("project:updated", {
+          projectId: wsId,
+          reason: "workspace",
+        });
+      }
     }
   }
 
@@ -690,10 +929,12 @@ async function runAgentTurn(
   threadId: string,
   content: string,
   thread: ThreadTurnInfo,
+  signal: AbortSignal,
 ): Promise<void> {
   const room = `thread:${threadId}`;
   const userRoom = `user:${user.sub}`;
   const turnStart = Date.now();
+  const live = newLiveStream();
 
   try {
     // 1. Persist user message.
@@ -707,6 +948,18 @@ async function runAgentTurn(
     // that nothing slow remains after the final message:end emit — this
     // keeps the busy-flag race window at effectively zero.
     await maybeAutoTitle(threadId, user.sub);
+
+    // 1c. Unconfigured `agent` model: Russian error in the thread immediately.
+    // Skip MCP / planner / RAG / LLM so the socket does not hang.
+    const unconfigured = await replyIfAgentUnconfigured({
+      db,
+      userId: user.sub,
+      threadId,
+    });
+    if (unconfigured) {
+      emitUnconfiguredAssistant(room, threadId, unconfigured);
+      return;
+    }
 
     // 2. Mode + project context for the whole turn (built once; rebuilt
     // after orchestration when a plan was saved). MCP-состояние реестра
@@ -737,7 +990,7 @@ async function runAgentTurn(
           // tree is a nice-to-have for the planner
         }
       }
-      const steps = await runPlanner(thread, content, existingTree);
+      const steps = await runPlanner(thread, content, existingTree, user.sub, signal);
       if (steps) {
         orchestrated = true;
         await savePlanTasks(threadId, user.sub, steps);
@@ -749,60 +1002,130 @@ async function runAgentTurn(
       }
     }
 
+    try {
+      const prefetch = await prefetchCanonContext(user.sub, thread, content, signal);
+      if (prefetch) {
+        systemPrompt += `\n\n${prefetch.text}`;
+        io.to(room).emit("canon:prefetch", {
+          threadId,
+          scope: prefetch.scope,
+          hitCount: prefetch.hitCount,
+          mode: prefetch.mode,
+          notice: prefetch.notice,
+        });
+      }
+    } catch (err) {
+      if (signal.aborted || isAbortErr(err)) {
+        // Stop before the tool loop — prefetch is cooperative too.
+      } else {
+        console.warn(
+          "[agent] canon prefetch failed (ignored):",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
     // 3. Tool-calling loop.
     let finalText: string | null = null;
     let turnDirty = false; // write_file/delete_file succeeded this turn
     let toolCallsSucceeded = 0;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      if (signal.aborted) {
+        finalText = ABORT_REPLY;
+        break;
+      }
       if (Date.now() - turnStart > TURN_TIMEOUT_MS) break;
 
       // Thinking indicator (before the first LLM call and between iterations).
       io.to(room).emit("agent:thinking", { threadId });
 
       const history = await buildLLMHistory(threadId);
-      const raw = await generateLLMResponse(systemPrompt, history);
-
-      const call = parseToolCall(raw);
-      if (!call) {
-        // Would-be plain text: strip leaked protocol artifacts first.
-        const clean = sanitizeTextAnswer(raw);
-        if (clean) {
-          finalText = clean;
+      resetLiveCall(live);
+      const onDelta = attachLiveDeltas(room, threadId, live);
+      let raw: string;
+      try {
+        raw = await generateLLMResponse(systemPrompt, history, {
+          userId: user.sub,
+          toolId: "agent",
+          signal,
+          onDelta,
+        });
+      } catch (err) {
+        if (signal.aborted || isAbortErr(err)) {
+          finalText = streamedProseSoFar(live) || ABORT_REPLY;
           break;
         }
-        // Nothing human-readable left (model emitted protocol garbage) —
-        // keep looping; the model gets another chance to answer properly.
+        throw err;
+      }
+
+      const parsedCall = parseToolCallResult(raw);
+      if (parsedCall.status === "call" || parsedCall.status === "oversized") {
+        if (live.messageId) {
+          const prose =
+            sanitizeTextAnswer(proseFromMixed(raw, live.acc)) ||
+            proseFromMixed(raw, live.acc);
+          await streamFinalResponse(
+            room,
+            threadId,
+            prose || streamedProseSoFar(live) || "…",
+            live,
+          );
+          resetLiveBubble(live);
+        }
+        const call =
+          parsedCall.status === "call"
+            ? parsedCall.call
+            : { tool: parsedCall.tool, args: {} };
+        const result = await executeToolCall({
+          room,
+          userRoom,
+          threadId,
+          userId: user.sub,
+          thread,
+          call,
+          mcp,
+          signal,
+          payloadError:
+            parsedCall.status === "oversized" ? parsedCall.error : undefined,
+        });
+        const r = resultObject(result);
+        if (r && r.error === undefined) {
+          toolCallsSucceeded++;
+          if (
+            (call.tool === "write_file" ||
+              call.tool === "delete_file" ||
+              call.tool === "apply_patch") &&
+            thread.projectId
+          ) {
+            turnDirty = true;
+          }
+        }
+        const after = decideAfterTool({
+          signalAborted: signal.aborted,
+          result,
+        });
+        if (after !== "continue") {
+          finalText = ABORT_REPLY;
+          break;
+        }
+        resetLiveBubble(live);
         continue;
       }
 
-      const result = await executeToolCall({
-        room,
-        userRoom,
-        threadId,
-        userId: user.sub,
-        thread,
-        call,
-        mcp,
-      });
-      const r = resultObject(result);
-      if (r && r.error === undefined) {
-        toolCallsSucceeded++;
-        if (
-          (call.tool === "write_file" || call.tool === "delete_file") &&
-          thread.projectId
-        ) {
-          turnDirty = true;
-        }
+      const clean = sanitizeTextAnswer(raw);
+      if (clean || live.mode === "text") {
+        finalText = clean || live.acc.trim() || raw.trim();
+        break;
       }
-      // Loop continues — the next iteration sees [TOOL_CALL]/[TOOL_RESULT].
+      continue;
     }
 
     // 3b. Completion sweep (Stage 4c): the coder often finishes with a text
     // answer before checking off the plan steps it already completed. Give
     // it up to 3 nudged iterations to call complete_task for them — this is
     // what makes the checklist finish and arms the reviewer phase.
-    if (orchestrated && toolCallsSucceeded > 0) {
+    if (orchestrated && toolCallsSucceeded > 0 && !signal.aborted) {
       try {
         let sweepCalls = 0;
         while (sweepCalls < 3 && Date.now() - turnStart < TURN_TIMEOUT_MS - 15000) {
@@ -818,10 +1141,22 @@ async function runAgentTurn(
               `Шаги плана: ${pending.map((t) => `#${t.order} «${t.text}»`).join("; ")}. ` +
               "Вызывай complete_task ТОЛЬКО для шагов, которые ты реально уже выполнил в этом диалоге. Если ни один не выполнен — просто ответь текстом.",
           });
-          const raw = await generateLLMResponse(systemPrompt, sweepHistory);
-          const call = parseToolCall(raw);
-          if (!call) break; // model answered with text — accept it
+          if (signal.aborted) {
+            finalText = ABORT_REPLY;
+            break;
+          }
+          const raw = await generateLLMResponse(systemPrompt, sweepHistory, {
+            userId: user.sub,
+            toolId: "agent",
+            signal,
+          });
+          const parsedCall = parseToolCallResult(raw);
+          if (parsedCall.status === "none") break; // model answered with text — accept it
           sweepCalls++;
+          const call =
+            parsedCall.status === "call"
+              ? parsedCall.call
+              : { tool: parsedCall.tool, args: {} };
           await executeToolCall({
             room,
             userRoom,
@@ -830,7 +1165,14 @@ async function runAgentTurn(
             thread,
             call,
             mcp,
+            signal,
+            payloadError:
+              parsedCall.status === "oversized" ? parsedCall.error : undefined,
           });
+          if (signal.aborted) {
+            finalText = ABORT_REPLY;
+            break;
+          }
           if (call.tool !== "complete_task") break; // unexpected tool — stop sweeping
         }
         // Restore the phase label after the sweep.
@@ -845,7 +1187,7 @@ async function runAgentTurn(
 
     // 4. Auto-checkpoint a dirty act-mode turn (contract 3-ctr §5) — BEFORE
     // the final answer streams. Failure must never break the turn.
-    if (turnDirty && thread.mode === "act" && thread.projectId) {
+    if (turnDirty && thread.mode === "act" && thread.projectId && !signal.aborted) {
       try {
         const cp = await checkpointProject(
           projectRoot(thread.projectId),
@@ -869,7 +1211,11 @@ async function runAgentTurn(
     // 5. Final answer (or the fallback when the loop ended without text).
     //    Plan-mode answers may carry a ```план fence → save as Task rows.
     //    Done BEFORE streaming so the card appears with the answer.
-    let answerText = finalText ?? FALLBACK_REPLY;
+    let answerText =
+      signal.aborted
+        ? (streamedProseSoFar(live) || ABORT_REPLY)
+        : (finalText ??
+          (toolCallsSucceeded > 0 ? TOOL_LOOP_CAP_REPLY : FALLBACK_REPLY));
     if (thread.mode === "plan" && finalText) {
       const plan = parsePlanFence(answerText);
       if (plan) {
@@ -889,23 +1235,28 @@ async function runAgentTurn(
     // one completed task get a grounded step-by-step report instead of the
     // coder's (often terse) final line. Budget-checked so big turns skip
     // it gracefully.
-    if (orchestrated) {
+    if (orchestrated && !signal.aborted) {
       try {
         const tasksNow = await threadTasks(threadId);
         const doneCount = tasksNow.filter((t) => t.done).length;
         const remaining = TURN_TIMEOUT_MS - (Date.now() - turnStart);
-        if (doneCount >= 1 && remaining >= REVIEWER_BUDGET_MS) {
+        if (doneCount >= 1 && remaining >= REVIEWER_BUDGET_MS && !signal.aborted) {
           emitPhase(room, threadId, "review", "Проверяю результат…");
           const reviewerPrompt = buildReviewerPrompt(
             tasksNow.map((t) => ({ text: t.text, done: t.done })),
           );
           const reviewerHistory = await buildLLMHistory(threadId);
-          const reviewRaw = await generateLLMResponse(reviewerPrompt, reviewerHistory);
+          const reviewRaw = await generateLLMResponse(reviewerPrompt, reviewerHistory, {
+            userId: user.sub,
+            toolId: "agent",
+            signal,
+          });
           const reviewClean = sanitizeTextAnswer(reviewRaw);
           if (reviewClean && reviewClean.length >= 20) {
             answerText = reviewClean;
           }
         }
+        if (signal.aborted) answerText = ABORT_REPLY;
       } catch (err) {
         console.warn(
           "[agent] reviewer failed (keeping coder answer):",
@@ -914,7 +1265,7 @@ async function runAgentTurn(
       }
     }
 
-    await streamFinalResponse(room, threadId, answerText);
+    await streamFinalResponse(room, threadId, answerText, live);
     emitPhase(room, threadId, "idle");
 
     // NOTE: nothing slow may happen after the final message:end emit —
@@ -923,6 +1274,25 @@ async function runAgentTurn(
     // race into "Агент ещё отвечает…". Auto-title moved to the turn start,
     // the auto-checkpoint runs before the answer streams.
   } catch (err) {
+    if (signal.aborted || isAbortErr(err)) {
+      try {
+        const abortText = streamedProseSoFar(live) || ABORT_REPLY;
+        await streamFinalResponse(room, threadId, abortText, live);
+        emitPhase(room, threadId, "idle");
+      } catch {
+        socket.emit("error", { message: ABORT_REPLY });
+      }
+      return;
+    }
+    if (isUnconfiguredToolError(err)) {
+      try {
+        const row = await persistAgentUnconfiguredReply(db, threadId);
+        emitUnconfiguredAssistant(room, threadId, row);
+      } catch {
+        socket.emit("error", { message: UNCONFIGURED_TOOL_MESSAGE });
+      }
+      return;
+    }
     console.error(
       `[agent] turn failed (thread ${threadId}):`,
       err instanceof Error ? err.message : String(err),
@@ -995,6 +1365,9 @@ io.on("connection", async (socket: Socket) => {
         return;
       }
       socket.join(`thread:${threadId}`);
+      if (runningThreads.has(threadId)) {
+        socket.emit("agent:thinking", { threadId });
+      }
     } catch (err) {
       console.error("[ws] thread:join failed:", err instanceof Error ? err.message : String(err));
       socket.emit("error", { message: "Диалог не найден" });
@@ -1014,20 +1387,12 @@ io.on("connection", async (socket: Socket) => {
   // ── message:send {threadId, content} ──
   socket.on("message:send", async (payload: unknown) => {
     try {
-      const { threadId, content } = (payload ?? {}) as { threadId?: unknown; content?: unknown };
-      if (typeof threadId !== "string" || !threadId || typeof content !== "string") {
-        socket.emit("error", { message: "Некорректный запрос" });
+      const parsed = parseMessageSend(payload);
+      if (!parsed.ok) {
+        socket.emit("error", { message: parsed.message });
         return;
       }
-      const text = content.trim();
-      if (!text) {
-        socket.emit("error", { message: "Сообщение не может быть пустым" });
-        return;
-      }
-      if (text.length > MAX_CONTENT_LENGTH) {
-        socket.emit("error", { message: `Сообщение слишком длинное (максимум ${MAX_CONTENT_LENGTH} символов)` });
-        return;
-      }
+      const { threadId, text } = parsed;
 
       const thread = await db.thread.findUnique({ where: { id: threadId } });
       if (!thread || thread.userId !== user.sub) {
@@ -1041,12 +1406,13 @@ io.on("connection", async (socket: Socket) => {
         return;
       }
 
-      runningThreads.set(threadId, true);
+      const ac = new AbortController();
+      runningThreads.set(threadId, ac);
       try {
         // Make sure the sender receives thread room events even if they
         // skipped an explicit thread:join.
         socket.join(`thread:${threadId}`);
-        await runAgentTurn(socket, user, threadId, text, thread);
+        await runAgentTurn(socket, user, threadId, text, thread, ac.signal);
       } finally {
         runningThreads.delete(threadId);
       }
@@ -1054,6 +1420,21 @@ io.on("connection", async (socket: Socket) => {
       console.error("[ws] message:send failed:", err instanceof Error ? err.message : String(err));
       socket.emit("error", { message: "Не удалось отправить сообщение" });
     }
+  });
+
+  // ── turn:abort {threadId} ──
+  socket.on("turn:abort", async (payload: unknown) => {
+    const { threadId } = (payload ?? {}) as { threadId?: unknown };
+    if (typeof threadId !== "string" || !threadId) {
+      socket.emit("error", { message: "Некорректный запрос" });
+      return;
+    }
+    const thread = await db.thread.findUnique({ where: { id: threadId } });
+    if (!thread || thread.userId !== user.sub) {
+      socket.emit("error", { message: "Диалог не найден" });
+      return;
+    }
+    runningThreads.get(threadId)?.abort();
   });
 
   socket.on("disconnect", () => {
@@ -1064,14 +1445,11 @@ io.on("connection", async (socket: Socket) => {
 // ─────────────────────────── boot ───────────────────────────
 
 async function main() {
-  // Shared SQLite: enable WAL + busy timeout so the Next.js app and this
-  // service can write concurrently without "database is locked" errors.
   try {
-    await db.$queryRawUnsafe("PRAGMA journal_mode=WAL;");
-    await db.$queryRawUnsafe("PRAGMA busy_timeout=5000;");
+    await db.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS vector");
   } catch (err) {
     console.warn(
-      "[db] WAL/busy_timeout pragma failed (continuing):",
+      "[db] CREATE EXTENSION vector failed (is DATABASE_URL Postgres + pgvector?):",
       err instanceof Error ? err.message : String(err),
     );
   }

@@ -5,7 +5,7 @@
  * (ArtifactDto): крупное превью (реальная картинка при url, иначе
  * градиент с иконкой типа), название, описание, промпт, контекст
  * воркспейса и дата, действия: «Открыть в воркспейсе» (переход на
- * вкладку типа контента), «В избранное» (api.updateArtifact),
+ * вкладку типа контента), «В избранное» (PATCH, toast только после успеха),
  * «Скачать» (реальный файл при url).
  */
 
@@ -23,8 +23,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ArtifactDto, WorkspaceDto } from "@/lib/workspace-types";
+import { libraryFavoriteToast } from "@/lib/library-copy";
 import {
-  findWorkspace,
   WORKSPACE_TABS_BY_TYPE,
   WORKSPACE_TYPE_META,
 } from "@/lib/workspace-data";
@@ -42,7 +42,7 @@ interface LibraryArtifactDialogProps {
   /** Живые воркспейсы (для контекста и перехода). */
   workspaceById: Record<string, WorkspaceDto>;
   onOpenChange: (open: boolean) => void;
-  onToggleFavorite: (artifact: ArtifactDto) => void;
+  onToggleFavorite: (artifact: ArtifactDto) => boolean | void | Promise<boolean | void>;
 }
 
 export function LibraryArtifactDialog({
@@ -60,7 +60,7 @@ export function LibraryArtifactDialog({
   const gradient = artifactGradient(data);
   const isCssGradient = /gradient\(/.test(gradient);
   const liveWorkspace = workspaceById[data.projectId] ?? null;
-  const workspace = liveWorkspace ? toWorkspaceSummary(liveWorkspace) : findWorkspace(data.projectId);
+  const workspace = liveWorkspace ? toWorkspaceSummary(liveWorkspace) : null;
   const wsMeta = workspace ? WORKSPACE_TYPE_META[workspace.type] : null;
 
   function handleOpenInWorkspace() {
@@ -74,19 +74,15 @@ export function LibraryArtifactDialog({
       ? kind.tab
       : "overview";
     onOpenChange(false);
-    if (liveWorkspace) {
-      useAppUi.getState().openWorkspaceData(workspace, tab);
-    } else {
-      useAppUi.getState().openWorkspace(workspace.id, tab);
-    }
+    useAppUi.getState().openWorkspaceData(workspace, tab);
   }
 
-  function handleFavorite() {
-    onToggleFavorite(data);
-    toast.success(
-      data.favorite ? "Убрано из избранного" : "Добавлено в избранное",
-      { description: `«${data.title}»` },
-    );
+  async function handleFavorite() {
+    const wasFavorite = data.favorite;
+    const ok = await onToggleFavorite(data);
+    if (ok !== true) return;
+    const result = libraryFavoriteToast(true, wasFavorite);
+    toast.success(result.message, { description: `«${data.title}»` });
   }
 
   function handleDownload() {
@@ -117,6 +113,9 @@ export function LibraryArtifactDialog({
               alt={artifact.title}
               loading="lazy"
               className="size-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
             />
           ) : (
             <KindIcon className="size-12 text-white/90 drop-shadow" />

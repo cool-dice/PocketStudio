@@ -8,11 +8,12 @@
  */
 
 import { BookOpenText } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { DocumentDto, DocumentSectionDto } from "@/lib/workspace-types";
+import type { DocumentDto, DocumentSectionDto, EntityDto } from "@/lib/workspace-types";
 import type { DocShelf, SectionPatch } from "@/hooks/use-documents";
+import { api } from "@/lib/api";
 import { AiAssistantPanel } from "./ai-assistant-panel";
 import { ChapterTree } from "./chapter-tree";
 import { DocChipsBar, DocumentLibrary } from "./doc-library";
@@ -26,6 +27,7 @@ import {
 } from "./editor-page";
 import { EditorToolbar } from "./editor-toolbar";
 import { SectionHistorySheet } from "./section-history-sheet";
+import { SectionMentionsBar } from "./section-mentions";
 import { countWords } from "@/hooks/use-documents";
 
 export interface ManuscriptTabProps {
@@ -47,7 +49,9 @@ export interface ManuscriptTabProps {
   saveSection: (id: string, patch: SectionPatch) => Promise<DocumentSectionDto | null>;
   createSection: (title: string) => Promise<DocumentSectionDto>;
   deleteSection: (id: string) => Promise<void>;
+  applySection: (section: DocumentSectionDto) => void;
   onDocPatched: (docId: string, patch: Partial<DocumentDto>) => void;
+  workspaceId: string | null;
 }
 
 export function ManuscriptTab(props: ManuscriptTabProps) {
@@ -65,12 +69,32 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
     saveSection,
     createSection,
     deleteSection,
+    applySection,
     onDocPatched,
+    workspaceId,
   } = props;
 
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [entities, setEntities] = useState<EntityDto[]>([]);
+  const [mentionBusy, setMentionBusy] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setEntities([]);
+      return;
+    }
+    let cancelled = false;
+    void api.listEntities(workspaceId).then((list) => {
+      if (!cancelled) setEntities(list);
+    }).catch(() => {
+      if (!cancelled) setEntities([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
 
   const sections = doc?.sections ?? [];
   // Выбор главы — производное значение: пока не выбрали (или выбрали
@@ -92,7 +116,8 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
     [saveSection, doc, onDocPatched],
   );
 
-  const { draft, onChange, saveState, savedLabel } = useSectionAutosave(activeSection, handleSaveSection);
+  const { draft, onChange, saveState, savedLabel, flush, replaceDraft } =
+    useSectionAutosave(activeSection, handleSaveSection);
 
   async function handleCreateSection(title: string) {
     const section = await createSection(title);
@@ -116,14 +141,42 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
     });
   }
 
-  // Восстановление из истории: обновить локальное состояние и драфт поля
-  // (PATCH-ноуп в БД не создаёт дубль-снапшот — текст уже идентичен).
+  // Восстановление из истории: текст уже в БД, только синхронизируем
+  // редактор — без повторного PATCH, который гоняется с автосейвом.
   function handleRestored(section: DocumentSectionDto) {
-    void handleSaveSection(section.id, { content: section.content });
-    onChange(section.content);
+    applySection(section);
+    replaceDraft(section.content);
   }
 
   const draftWords = useMemo(() => countWords(draft), [draft]);
+
+  function applyMentionedEntity(updated: EntityDto) {
+    setEntities((prev) =>
+      prev.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+    );
+  }
+
+  async function handleBindMention(entityId: string) {
+    if (!activeSection || mentionBusy) return;
+    setMentionBusy(true);
+    try {
+      applyMentionedEntity(await api.addSectionMention(activeSection.id, entityId));
+    } finally {
+      setMentionBusy(false);
+    }
+  }
+
+  async function handleUnbindMention(entityId: string) {
+    if (!activeSection || mentionBusy) return;
+    setMentionBusy(true);
+    try {
+      applyMentionedEntity(
+        await api.removeSectionMention(activeSection.id, entityId),
+      );
+    } finally {
+      setMentionBusy(false);
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -196,7 +249,17 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
           )}
         </div>
         {doc ? (
-          <EditorFooterStats doc={doc} section={activeSection} draftWords={draftWords} />
+          <>
+            <SectionMentionsBar
+              sectionId={activeSection?.id ?? null}
+              draft={draft}
+              entities={entities}
+              onBind={(id) => void handleBindMention(id)}
+              onUnbind={(id) => void handleUnbindMention(id)}
+              busy={mentionBusy}
+            />
+            <EditorFooterStats doc={doc} section={activeSection} draftWords={draftWords} />
+          </>
         ) : null}
 
         {/* История версий главы (PS-6) */}
@@ -238,7 +301,18 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
             )}
           </TabsContent>
           <TabsContent value="ai" className="flex min-h-0 flex-1 flex-col">
-            <AiAssistantPanel />
+            <AiAssistantPanel
+              section={activeSection}
+              draft={draft}
+              onBeforeGenerate={() => flush()}
+              onApplied={(updated) => {
+                applySection(updated);
+                replaceDraft(updated.content);
+                if (doc) {
+                  onDocPatched(doc.id, { updatedAt: new Date().toISOString() });
+                }
+              }}
+            />
           </TabsContent>
         </Tabs>
       </aside>

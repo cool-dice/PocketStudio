@@ -2,6 +2,13 @@
 import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 
+/** Both env vars are set — `ensureAdminSeed()` will create the admin if missing. */
+export function adminSeedConfigured(): boolean {
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD;
+  return Boolean(email && password);
+}
+
 export async function ensureAdminSeed(): Promise<void> {
   try {
     const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();

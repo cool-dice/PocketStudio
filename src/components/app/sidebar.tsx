@@ -2,36 +2,41 @@
 
 /**
  * SidebarContent — logo + notifications bell, «Новый диалог», thread list
- * (rename inline / delete with confirm), collections (soon), profile menu
- * (theme toggle, admin panel for admins, logout) with a WS status dot.
+ * (rename inline / archive / delete with confirm), collections (soon), profile menu
+ * (display name, theme light/dark/system, admin panel for admins, logout) with a WS status dot.
  * Rendered inside the desktop <aside> and the mobile <Sheet>.
+ * Default list hides archived threads; «Показать архив» loads `?archived=1`.
  */
 
 import { useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   Check,
   FolderKanban,
   House,
+  KeyRound,
   Library,
   LogOut,
   MessageSquare,
   MessageSquarePlus,
-  Moon,
   NotebookPen,
   PenLine,
   Pencil,
   Rocket,
   Search,
   Shield,
-  Sun,
   Trash2,
+  UserRound,
   Wrench,
   X,
+  RefreshCw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useTheme } from "next-themes";
 
 import { Logo } from "@/components/logo";
+import { ProfileDialog } from "@/components/app/profile-dialog";
+import { ThemeMenuItems } from "@/components/app/theme-menu";
 import { NotificationsBell } from "@/components/app/notifications-bell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -54,7 +59,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
@@ -65,6 +69,17 @@ import { useNotes } from "@/hooks/use-notes";
 import { useSocket } from "@/hooks/use-socket";
 import { useThreads } from "@/hooks/use-threads";
 import { useAppUi, type MainArea } from "@/lib/store";
+import {
+  THREADS_ARCHIVE_ACTION,
+  THREADS_HIDE_ARCHIVE,
+  THREADS_LOAD_ERROR,
+  THREADS_LOAD_ERROR_HINT,
+  THREADS_RETRY,
+  THREADS_SHOW_ARCHIVE,
+  THREADS_UNARCHIVE_ACTION,
+  threadsEmptyCopy,
+  threadsListView,
+} from "@/lib/thread-copy";
 import type { ThreadListItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -127,11 +142,16 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const {
     threads,
     threadsLoading,
+    threadsError,
+    refreshThreads,
+    showArchived,
+    toggleShowArchived,
     activeThreadId,
     selectThread,
     newThread,
     deleteThread,
     renameThread,
+    archiveThread,
   } = useThreads();
   const mainArea = useAppUi((s) => s.mainArea);
   const setMainArea = useAppUi((s) => s.setMainArea);
@@ -141,7 +161,10 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ThreadListItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const initials = (user?.name ?? "U")
     .trim()
     .split(/\s+/)
@@ -198,13 +221,32 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
     setRenamingId(null);
   };
 
-  const confirmDelete = () => {
-    if (deleteTarget) {
-      onNavigate?.();
-      void deleteThread(deleteTarget.id);
-    }
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    const ok = await deleteThread(deleteTarget.id);
+    setDeleting(false);
+    if (!ok) return;
     setDeleteTarget(null);
+    onNavigate?.();
   };
+
+  const handleArchive = async (thread: ThreadListItem) => {
+    if (archivingId) return;
+    setArchivingId(thread.id);
+    try {
+      await archiveThread(thread.id, !thread.archived);
+    } finally {
+      setArchivingId(null);
+    }
+  };
+
+  const listView = threadsListView(
+    threadsLoading,
+    threadsError,
+    threads.length,
+  );
+  const emptyCopy = threadsEmptyCopy(showArchived);
 
   return (
     <>
@@ -263,19 +305,47 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
 
       {/* ── Threads ── */}
       <nav aria-label="Диалоги" className="flex min-h-0 flex-1 flex-col px-3">
-        <h3 className="px-1 pb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Диалоги
-        </h3>
+        <div className="flex items-center justify-between gap-2 px-1 pb-1.5">
+          <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            {showArchived ? "Архив" : "Диалоги"}
+          </h3>
+          <button
+            type="button"
+            aria-pressed={showArchived}
+            onClick={() => void toggleShowArchived()}
+            className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            {showArchived ? THREADS_HIDE_ARCHIVE : THREADS_SHOW_ARCHIVE}
+          </button>
+        </div>
         <div className="vf-scroll min-h-0 flex-1 overflow-y-auto pb-2">
-          {threadsLoading ? (
+          {listView === "loading" ? (
             <div className="space-y-2 px-1 pt-1">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full rounded-lg" />
               ))}
             </div>
-          ) : threads.length === 0 ? (
+          ) : listView === "error" ? (
+            <div className="flex flex-col items-start gap-2 px-1 pt-2">
+              <p className="text-sm font-medium">
+                {threadsError ?? THREADS_LOAD_ERROR}
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {THREADS_LOAD_ERROR_HINT}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-1"
+                onClick={() => void refreshThreads()}
+              >
+                <RefreshCw className="size-3.5" aria-hidden="true" />
+                {THREADS_RETRY}
+              </Button>
+            </div>
+          ) : listView === "empty" ? (
             <p className="px-1 pt-2 text-sm leading-relaxed text-muted-foreground">
-              Пока нет диалогов. Начните новый — и он появится здесь.
+              {emptyCopy.title}. {emptyCopy.hint}
             </p>
           ) : (
             <ul className="space-y-1">
@@ -367,6 +437,32 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
                           aria-label={`Переименовать диалог «${thread.title}»`}
                         >
                           <Pencil className="size-3.5" aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          disabled={archivingId === thread.id}
+                          onClick={() => void handleArchive(thread)}
+                          aria-label={
+                            thread.archived
+                              ? `Вернуть диалог «${thread.title}» из архива`
+                              : `Архивировать диалог «${thread.title}»`
+                          }
+                          title={
+                            thread.archived
+                              ? THREADS_UNARCHIVE_ACTION
+                              : THREADS_ARCHIVE_ACTION
+                          }
+                        >
+                          {thread.archived ? (
+                            <ArchiveRestore
+                              className="size-3.5"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <Archive className="size-3.5" aria-hidden="true" />
+                          )}
                         </Button>
                         <Button
                           variant="ghost"
@@ -528,7 +624,26 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
               </span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <ThemeToggleItem />
+            <ThemeMenuItems />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                onNavigate?.();
+                setProfileOpen(true);
+              }}
+            >
+              <UserRound className="size-4" aria-hidden="true" />
+              Профиль
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                onNavigate?.();
+                setMainArea("settings");
+              }}
+            >
+              <KeyRound className="size-4" aria-hidden="true" />
+              Настройки ИИ
+            </DropdownMenuItem>
             {user?.role === "admin" && (
               <DropdownMenuItem
                 onSelect={() => {
@@ -550,13 +665,14 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
       </div>
 
       {/* ── Delete confirmation ── */}
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
+          if (!open && !deleting) setDeleteTarget(null);
         }}
       >
         <AlertDialogContent>
@@ -568,41 +684,20 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Отмена</AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmDelete}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDelete();
+              }}
+              disabled={deleting}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
-              Удалить
+              {deleting ? "Удаляем…" : "Удалить"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
-  );
-}
-
-function ThemeToggleItem() {
-  const { resolvedTheme, setTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
-  return (
-    <DropdownMenuItem
-      onSelect={(e) => {
-        // Keep the menu open when flipping the switch.
-        e.preventDefault();
-        setTheme(isDark ? "light" : "dark");
-      }}
-    >
-      <Sun className="size-4 dark:hidden" aria-hidden="true" />
-      <Moon className="hidden size-4 dark:block" aria-hidden="true" />
-      Тёмная тема
-      <Switch
-        checked={isDark}
-        aria-label="Тёмная тема"
-        className="ml-auto"
-        onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
-        onClick={(e) => e.stopPropagation()}
-      />
-    </DropdownMenuItem>
   );
 }

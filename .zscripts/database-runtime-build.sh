@@ -1,4 +1,6 @@
 #!/bin/bash
+# LEGACY sandbox packager (z-ai preview / SQLite file:./db/custom.db).
+# Not how PocketStudio runs — see README.md and docs/. Product DB is PostgreSQL.
 
 set -euo pipefail
 

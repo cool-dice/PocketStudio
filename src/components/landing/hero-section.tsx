@@ -9,6 +9,7 @@
  */
 
 import { motion } from "framer-motion";
+import Link from "next/link";
 import {
   AudioWaveform,
   BookOpenText,
@@ -22,9 +23,19 @@ import {
 import { fadeUp } from "@/components/landing/landing-shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  LANDING_HERO_SUB,
+  LANDING_LAUNCH_CAPTION,
+  landingCtaHref,
+  landingHeroNote,
+} from "@/lib/landing-copy";
 import { cn } from "@/lib/utils";
 
-export function HeroSection({ onRegister }: { onRegister: () => void }) {
+export function HeroSection({
+  firstUserBecomesAdmin = false,
+}: {
+  firstUserBecomesAdmin?: boolean;
+}) {
   return (
     <section className="relative mx-auto w-full max-w-6xl px-4 sm:px-6">
       {/* soft emerald wash behind the whole hero */}
@@ -51,14 +62,14 @@ export function HeroSection({ onRegister }: { onRegister: () => void }) {
             <span className="text-primary">в карман</span>
           </h1>
           <p className="max-w-xl text-pretty text-muted-foreground sm:text-lg">
-            PocketStudio превращает диалог с ИИ в творческий конвейер: книги и
-            статьи, изображения, аудио и видео, готовые приложения — от первой
-            мысли до первой продажи.
+            {LANDING_HERO_SUB}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button size="lg" onClick={onRegister}>
-              <Sparkles className="size-4" aria-hidden="true" />
-              Начать бесплатно
+            <Button size="lg" asChild>
+              <Link href={landingCtaHref("register")}>
+                <Sparkles className="size-4" aria-hidden="true" />
+                Начать бесплатно
+              </Link>
             </Button>
             <Button
               size="lg"
@@ -73,7 +84,7 @@ export function HeroSection({ onRegister }: { onRegister: () => void }) {
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            Без карты. Первый аккаунт получает права администратора.
+            {landingHeroNote(firstUserBecomesAdmin)}
           </p>
         </motion.div>
 
@@ -169,7 +180,7 @@ function HeroTileDock() {
         <FloatTile
           icon={Rocket}
           label="Запуск"
-          caption="деплой и публикация"
+          caption={LANDING_LAUNCH_CAPTION}
           className="col-span-2 sm:col-span-1 lg:rotate-1 lg:-translate-y-2"
           duration={4.6}
           delay={0.9}

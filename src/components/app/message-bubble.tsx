@@ -11,6 +11,8 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import { Sparkles } from "lucide-react";
 
 import { ToolCard } from "@/components/app/tool-card";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import { stabilizeStreamingMarkdown } from "@/lib/streaming-markdown";
 import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -116,6 +118,7 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   const isStreamingEmpty = message.streaming && message.content === "";
+  const isUnconfigured = message.content === UNCONFIGURED_TOOL_MESSAGE;
 
   return (
     <div className="flex w-full items-start gap-2.5 sm:gap-3">
@@ -126,7 +129,13 @@ export const MessageBubble = memo(function MessageBubble({
         <Sparkles className="size-3.5" />
       </span>
       <div className="flex min-w-0 max-w-[85%] flex-col items-start sm:max-w-[75%]">
-        <div className="w-full rounded-2xl rounded-bl-md border bg-card px-4 py-2.5 text-sm leading-relaxed">
+        <div
+          className={cn(
+            "w-full rounded-2xl rounded-bl-md border bg-card px-4 py-2.5 text-sm leading-relaxed",
+            isUnconfigured && "border-destructive/40 text-destructive",
+          )}
+          role={isUnconfigured ? "alert" : undefined}
+        >
           {isStreamingEmpty ? (
             <span className="flex items-center gap-1.5 py-0.5 text-muted-foreground">
               <span className="vf-dot" />
@@ -136,7 +145,9 @@ export const MessageBubble = memo(function MessageBubble({
           ) : (
             <div className="min-w-0">
               <ReactMarkdown components={markdownComponents}>
-                {message.content}
+                {message.streaming
+                  ? stabilizeStreamingMarkdown(message.content)
+                  : message.content}
               </ReactMarkdown>
               {message.streaming && <span className="vf-caret" aria-hidden="true" />}
             </div>

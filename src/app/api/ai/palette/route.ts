@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
-import { aiChatJson } from "@/lib/ai";
+import {
+  aiChatJson,
+  aiErrorResponse,
+  isUnconfiguredToolError,
+  resolveToolRoute,
+  UNCONFIGURED_TOOL_MESSAGE,
+} from "@/lib/ai";
+import { PALETTE_SYSTEM } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
 import {
   normalizeStylePalette,
@@ -14,7 +22,10 @@ import { ensureWorkspace } from "@/lib/workspace-api";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-/* ── POST /api/ai/palette — собрать палитру стиля проекта (LLM) ── */
+/* ── POST /api/ai/palette — собрать палитру стиля проекта (LLM) ──
+ * Unconfigured `palette` fails immediately with UNCONFIGURED_TOOL_MESSAGE
+ * (400) — no fake swatches persist. Failed/unreadable LLM does not create
+ * a new style artifact and never deletes a previous one. */
 
 const schema = z.object({
   projectId: z.string().trim().min(1),
@@ -29,18 +40,12 @@ const TYPE_LABELS: Record<string, string> = {
   universal: "универсальный проект",
 };
 
-const PALETTE_SYSTEM = `Ты — арт-директор студии. По брифу проекта собери мини-гайдлайн визуального стиля.
-Верни СТРОГО один JSON-объект (без markdown, без пояснений до и после) вида:
-{"mood":"настроение проекта одной ёмкой фразой","colors":[{"hex":"#RRGGBB","name":"короткое название цвета","usage":"где и зачем использовать этот цвет"}],"fonts":{"heading":"шрифт для заголовков","body":"шрифт для основного текста","note":"одна фраза о том, как пара работает вместе"},"advice":"1–2 конкретных совета по применению стиля"}
-Требования:
-- ровно 5 или 6 согласованных цветов: фон/света, тени/глубина, 1–2 акцента; hex строго #RRGGBB;
-- названия цветов, usage, mood, advice и всё остальное — на русском языке;
-- шрифты — реально существующие пары (можно из Google Fonts), heading и body разные;
-- advice — практичный, без общих слов.`;
-
 /** LLM → нормализованная палитра; бросает ошибку, если ответ нечитаем. */
-async function requestPalette(briefText: string): Promise<StylePalette> {
-  const raw = await aiChatJson<unknown>(PALETTE_SYSTEM, briefText);
+async function requestPalette(
+  userId: string,
+  briefText: string,
+): Promise<StylePalette> {
+  const raw = await aiChatJson<unknown>(userId, "palette", PALETTE_SYSTEM, briefText);
   const palette =
     normalizeStylePalette(raw) ??
     (typeof raw === "string"
@@ -51,7 +56,9 @@ async function requestPalette(briefText: string): Promise<StylePalette> {
 }
 
 export async function POST(req: Request) {
-  const parsed = schema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = schema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -62,6 +69,22 @@ export async function POST(req: Request) {
 
   const check = await ensureWorkspace(req, projectId);
   if (!check.ok) return check.response;
+
+  try {
+    await resolveToolRoute(db, check.userId, "palette");
+  } catch (err) {
+    if (isUnconfiguredToolError(err)) {
+      return NextResponse.json(
+        { error: UNCONFIGURED_TOOL_MESSAGE },
+        { status: 400 },
+      );
+    }
+    const mapped = aiErrorResponse(
+      err,
+      "Модель вернула нечитаемую палитру — предыдущая карта на месте",
+    );
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+  }
 
   /* Бриф: данные воркспейса + пожелания пользователя. */
   const workspace = await db.project.findFirst({
@@ -86,19 +109,19 @@ export async function POST(req: Request) {
   /* LLM → строгий JSON с фолбэком и понятной 502 при провале. */
   let palette: StylePalette;
   try {
-    palette = await requestPalette(briefText);
+    palette = await requestPalette(check.userId, briefText);
   } catch (err) {
-    console.error(
-      "[ai/palette] failed:",
-      err instanceof Error ? err.message : err,
+    const mapped = aiErrorResponse(
+      err,
+      "Модель вернула нечитаемую палитру — предыдущая карта на месте",
     );
-    return NextResponse.json(
-      {
-        error:
-          "Модель вернула нечитаемую палитру — попробуйте ещё раз или уточните бриф",
-      },
-      { status: 502 },
-    );
+    if (mapped.status >= 500) {
+      console.error(
+        "[ai/palette] failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 
   /* Сохраняем как артефакт воркспейса (type file, stage style). */

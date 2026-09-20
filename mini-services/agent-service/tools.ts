@@ -1,6 +1,6 @@
 // PocketStudio agent tools — notebook + project/file tools.
 //
-// The z-ai SDK has no native function calling, so tools are described in the
+// Модели отвечают JSON-протоколом, native function calling не требуется.
 // system prompt (JSON protocol) and the model's JSON reply is parsed by
 // agent.ts:parseToolCall. Every tool is userId-scoped and validates its args
 // manually — invalid args return {error: "..."} instead of throwing, so the
@@ -16,7 +16,13 @@
 // Allowlists MUST stay in sync with the main app's notes REST contract
 // (worklog Task 4, Task 1-a).
 
+import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
+import { isToolUnconfigured } from "../../src/lib/ai/resolve";
+import { noteAnalysisFieldsForQueue } from "../../src/lib/note-analysis";
 import { db } from "./db-client";
+import { scheduleIndexFile, scheduleIndexNote } from "../../src/lib/rag/hooks";
+import { removeFileChunks } from "../../src/lib/rag/indexer";
+import { shouldSkipPath } from "../../src/lib/rag/skip";
 import {
   projectRoot,
   createFromTemplate,
@@ -38,6 +44,8 @@ export interface ToolContext {
   threadId: string;
   mode: string;
   projectId: string | null;
+  /** Turn abort from client `turn:abort` — long tools must check this. */
+  signal?: AbortSignal;
 }
 
 export interface ToolDef {
@@ -121,7 +129,7 @@ function parseLimit(value: unknown, fallback = 10): number {
   return Math.min(20, Math.max(1, Math.floor(n)));
 }
 
-/** Find the user's category by exact name, case-insensitive (SQLite-aware). */
+/** Find the user's category by exact name, case-insensitive (JS, Unicode-safe). */
 async function findCategoryByName(
   userId: string,
   name: string,
@@ -155,7 +163,7 @@ function feedShape(n: NoteWithCategory) {
 const createNote: ToolDef = {
   name: "create_note",
   description:
-    "Записать заметку пользователя в блокнот. Возвращает созданную заметку и её категорию.",
+    "Записать заметку. Если диалог привязан к воркспейсу — заметка появится во вкладке Заметки этого воркспейса.",
   argsSchema: {
     text: "полный текст заметки (обязательно, 1–5000 символов)",
     category_name: "название категории (необязательно, 1–40 символов)",
@@ -163,8 +171,10 @@ const createNote: ToolDef = {
       "цвет категории: emerald|amber|rose|sky|violet|stone|teal|orange|pink|cyan (по умолчанию stone)",
     category_icon:
       "иконка категории: lightbulb|briefcase|shopping-cart|heart|brain|zap|star|book|code|rocket|wallet|coffee (по умолчанию lightbulb)",
+    workspaceId: "id воркспейса (необязательно, если чат уже внутри воркспейса)",
+    workspaceName: "название воркспейса",
   },
-  async execute(args: any, userId: string) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -229,14 +239,45 @@ const createNote: ToolDef = {
       }
     }
 
+    // Typed agent thought — not ASR. Do not copy text into transcription.
+    // Unconfigured `notes` is error immediately (no pending wait for analyzer).
+    const analysis = noteAnalysisFieldsForQueue(
+      await isToolUnconfigured(db, userId, "notes"),
+    );
     const note = await db.note.create({
       data: {
         userId,
         rawText: text,
-        status: "pending",
         categoryId: category?.id ?? null,
+        ...analysis,
       },
     });
+
+    let workspaceId: string | null = null;
+    const explicitWs =
+      typeof args.workspaceId === "string" && args.workspaceId.trim()
+        ? args.workspaceId.trim()
+        : typeof args.projectId === "string" && args.projectId.trim()
+          ? args.projectId.trim()
+          : ctx.projectId;
+    if (explicitWs) {
+      const owned = await db.project.findFirst({
+        where: { id: explicitWs, userId },
+        select: { id: true },
+      });
+      if (owned) {
+        try {
+          await db.noteLink.create({
+            data: { noteId: note.id, projectId: owned.id, kind: "context" },
+          });
+          workspaceId = owned.id;
+        } catch {
+          workspaceId = owned.id;
+        }
+      }
+    }
+
+    scheduleIndexNote(db, note.id);
 
     return {
       note: {
@@ -247,6 +288,7 @@ const createNote: ToolDef = {
       },
       category: category ? categoryShape(category) : null,
       createdNewCategory,
+      workspaceId,
     };
   },
 };
@@ -276,7 +318,7 @@ const searchNotes: ToolDef = {
 
     const limit = parseLimit(args.limit);
 
-    // SQLite has no case-insensitive LIKE for non-ASCII (Russian) via Prisma
+    // Unicode-safe case-insensitive match (JS): Postgres ILIKE depends on locale.
     // `contains`, so fetch the newest 500 notes and filter in JS.
     const needle = query.toLowerCase();
     const recent = await db.note.findMany({
@@ -636,14 +678,102 @@ const writeFile: ToolDef = {
 
     // Write guard: only the «act» mode may mutate files.
     if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+    throwIfAborted(ctx.signal);
 
     const loaded = await loadProject(userId, ctx);
     if ("error" in loaded) return { error: loaded.error };
 
     try {
+      throwIfAborted(ctx.signal);
       const root = projectRoot(loaded.project.id);
-      return await writeWorkspaceFile(root, args.path.trim(), args.content, MAX_AGENT_FILE_BYTES);
+      const written = await writeWorkspaceFile(root, args.path.trim(), args.content, MAX_AGENT_FILE_BYTES);
+      if (!shouldSkipPath(written.path)) {
+        scheduleIndexFile(db, {
+          userId,
+          projectId: loaded.project.id,
+          relPath: written.path,
+          content: args.content,
+        });
+      }
+      return written;
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+};
+
+// ─────────────────────────── tool: apply_patch ───────────────────────────
+
+const applyPatch: ToolDef = {
+  mcpAdapter: "filesystem",
+  name: "apply_patch",
+  description:
+    "Точечно заменить фрагмент файла активного проекта (oldText→newText или unified diff). Только режим «Действовать». Предпочтительнее write_file для существующих файлов.",
+  argsSchema: {
+    path: "путь к файлу внутри проекта",
+    oldText: "точный фрагмент, который заменить (если не передан patch)",
+    newText: "новый фрагмент",
+    patch: "опциональный unified diff с hunk @@",
+    replaceAll: "заменить все вхождения oldText (по умолчанию только первое)",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    if (typeof args.path !== "string" || !args.path.trim()) {
+      return { error: "Аргумент path обязателен и должен быть строкой" };
+    }
+    if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+    throwIfAborted(ctx.signal);
+
+    const loaded = await loadProject(userId, ctx);
+    if ("error" in loaded) return { error: loaded.error };
+
+    try {
+      throwIfAborted(ctx.signal);
+      const { applyPatchArgs } = await import("../../src/lib/apply-patch");
+      const root = projectRoot(loaded.project.id);
+      const file = await readWorkspaceFile(
+        root,
+        args.path.trim(),
+        MAX_AGENT_FILE_BYTES,
+      );
+      const oldText =
+        typeof args.oldText === "string" ? args.oldText : null;
+      const newText =
+        typeof args.newText === "string" ? args.newText : null;
+      const patch = typeof args.patch === "string" ? args.patch : null;
+      const { next, replacements } = applyPatchArgs({
+        content: file.content,
+        oldText,
+        newText,
+        patch,
+        replaceAll: Boolean(args.replaceAll),
+      });
+      throwIfAborted(ctx.signal);
+      const written = await writeWorkspaceFile(
+        root,
+        args.path.trim(),
+        next,
+        MAX_AGENT_FILE_BYTES,
+      );
+      if (!shouldSkipPath(written.path)) {
+        scheduleIndexFile(db, {
+          userId,
+          projectId: loaded.project.id,
+          relPath: written.path,
+          content: next,
+        });
+      }
+      return {
+        path: written.path,
+        replacements,
+        size: written.size,
+        message: `Правка ${written.path}: ${replacements} замен`,
+      };
+    } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return { error: err instanceof Error ? err.message : String(err) };
     }
   },
@@ -669,14 +799,19 @@ const deleteFile: ToolDef = {
 
     // Write guard: only the «act» mode may mutate files.
     if (ctx.mode !== "act") return { error: ACT_MODE_ERROR };
+    throwIfAborted(ctx.signal);
 
     const loaded = await loadProject(userId, ctx);
     if ("error" in loaded) return { error: loaded.error };
 
     try {
+      throwIfAborted(ctx.signal);
       const root = projectRoot(loaded.project.id);
-      return await deleteWorkspacePath(root, args.path.trim());
+      const deleted = await deleteWorkspacePath(root, args.path.trim());
+      await removeFileChunks(db, userId, loaded.project.id, deleted.path);
+      return deleted;
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return { error: err instanceof Error ? err.message : String(err) };
     }
   },
@@ -713,6 +848,7 @@ const checkpointTool: ToolDef = {
 
     // Write guard: only the «act» mode may commit.
     if (ctx.mode !== "act") return { error: CHECKPOINT_MODE_ERROR };
+    throwIfAborted(ctx.signal);
 
     const loaded = await loadProject(userId, ctx);
     if ("error" in loaded) return { error: loaded.error };
@@ -722,6 +858,7 @@ const checkpointTool: ToolDef = {
       const cp = await checkpointProject(root, message);
       return { noop: cp.noop, commit: cp.commit, filesChanged: cp.filesChanged };
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return { error: err instanceof Error ? err.message : String(err) };
     }
   },
@@ -783,7 +920,9 @@ const completeTask: ToolDef = {
 // Инструменты MCP-адаптеров (Фаза D) — определены в mcp-tools.ts и гейтятся
 // включёнными серверами реестра интеграций (server.ts).
 import { WORKSPACE_TOOLS } from "./workspace-tools";
+import { DESIGN_TOOLS } from "./design-tools";
 import { MCP_TOOLS } from "./mcp-tools";
+import { CANON_TOOLS } from "./canon-tools";
 
 export const TOOLS: ToolDef[] = [
   createNote,
@@ -795,10 +934,13 @@ export const TOOLS: ToolDef[] = [
   listFiles,
   readFile,
   writeFile,
+  applyPatch,
   deleteFile,
   checkpointTool,
   completeTask,
+  ...CANON_TOOLS,
   ...WORKSPACE_TOOLS,
+  ...DESIGN_TOOLS,
   ...MCP_TOOLS,
 ];
 

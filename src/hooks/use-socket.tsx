@@ -36,6 +36,7 @@ import { api } from "@/lib/api";
 import { textPreview } from "@/lib/format";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
+import { invalidateWorkspaces } from "@/hooks/use-workspaces";
 import type {
   Note,
   WsNoteAnalyzedPayload,
@@ -177,7 +178,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       if (now - healRef.last < 30000) return;
       healRef.last = now;
       try {
-        await fetch("/api/health/agent-service", { method: "POST" });
+        await fetch("/api/health/agent-service", {
+          method: "POST",
+          credentials: "same-origin",
+        });
       } catch {
         // Next app unreachable — nothing we can do from here
       }
@@ -244,7 +248,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     /* ── Notifications (Stage 4b) ── */
 
-    // Live bell push. NO toast here — the underlying events
+    // Live bell push. NO toast here — reminders toast from the due-notes
+    // poller only (`shouldToastNewReminder("ws")` is false). Other events
     // (note:analyzed / project:created / project:updated) already toast
     // from their own handlers; this only updates the persistent history.
     const handleNotificationNew = (payload: unknown) => {
@@ -274,6 +279,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const { projectId, reason } = (payload ?? {}) as WsProjectUpdatedPayload;
       if (typeof projectId !== "string") return;
       const ui = useAppUi.getState();
+      if (reason === "workspace") {
+        ui.bumpNotes();
+        ui.bumpWorkspace();
+        invalidateWorkspaces();
+        return;
+      }
       if (ui.activeProjectId !== projectId) return;
       ui.bumpProjectFiles();
       if (reason === "checkpoint") {

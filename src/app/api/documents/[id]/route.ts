@@ -1,18 +1,27 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
+import { detachSectionMentions } from "@/lib/entity-mentions";
 import { ensureOwned } from "@/lib/workspace-api";
+import { isWorkspaceDocId } from "@/lib/app-url";
 import { documentDto } from "@/lib/workspace-shapes";
+import { removeSource, scheduleIndexEntity } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
+function notFound() {
+  return NextResponse.json({ error: "Документ не найден" }, { status: 404 });
+}
+
 /* ── GET /api/documents/[id] — документ с секциями ── */
 
 export async function GET(req: Request, { params }: Params) {
   const { id } = await params;
+  if (!isWorkspaceDocId(id)) return notFound();
   const documentRow = await db.document.findUnique({
     where: { id },
     include: { sections: { orderBy: { order: "asc" } } },
@@ -38,7 +47,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!check.ok) return check.response;
   const document = check.row;
 
-  const parsed = patchSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = patchSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -69,6 +80,19 @@ export async function DELETE(req: Request, { params }: Params) {
   if (!check.ok) return check.response;
   const document = check.row;
 
+  const sections = await db.documentSection.findMany({
+    where: { documentId: id },
+    select: { id: true },
+  });
   await db.document.delete({ where: { id } });
+  const detached = await detachSectionMentions(
+    db,
+    document.projectId,
+    sections.map((section) => section.id),
+  );
+  for (const entityId of detached) scheduleIndexEntity(db, entityId);
+  for (const section of sections) {
+    await removeSource(db, check.userId, "section", section.id);
+  }
   return NextResponse.json({ ok: true });
 }

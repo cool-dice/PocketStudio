@@ -1,24 +1,27 @@
 "use client";
 
 /**
- * GlobalSearch — Ctrl+P / ⌘P command palette (Stage 4): fuzzy-ish substring
- * search across threads, notes and projects (GET /api/search). Selecting a
- * hit navigates: thread → chat area + activate, note → context panel,
- * project → project detail screen. Debounced 250 ms, ≥2 chars, grouped
- * result sections with icons, keyboard-first cmdk UX.
+ * GlobalSearch — Ctrl+P / ⌘P command palette: GET /api/search for the
+ * current user (workspace-scoped when a workspace is open). Empty ≠ error.
+ * Workspace hits open /w/[id]; notes open the notebook + note panel;
+ * documents open /w/{id}?tab=documents&doc=; entities open the documents
+ * module (or the workspace + query); artifacts open images or library.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  FileText,
   FolderGit2,
   Hash,
+  ImageIcon,
   Loader2,
   MessageSquare,
   Search,
+  Shapes,
   StickyNote,
 } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { SearchResults } from "@/lib/types";
 import {
   CommandDialog,
@@ -28,9 +31,32 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Button } from "@/components/ui/button";
 import { useAppUi } from "@/lib/store";
 import { useThreads } from "@/hooks/use-threads";
 import { cn } from "@/lib/utils";
+import type { WorkspaceTab } from "@/lib/workspace-data";
+import { TAB_SET } from "@/lib/app-url";
+import {
+  SEARCH_DESCRIPTION,
+  SEARCH_ERROR,
+  SEARCH_ERROR_HINT,
+  SEARCH_GROUP_ARTIFACTS,
+  SEARCH_GROUP_DOCUMENTS,
+  SEARCH_GROUP_ENTITIES,
+  SEARCH_GROUP_NOTES,
+  SEARCH_GROUP_THREADS,
+  SEARCH_GROUP_WORKSPACES,
+  SEARCH_HINT_GLOBAL,
+  SEARCH_HINT_WORKSPACE,
+  SEARCH_LOADING,
+  SEARCH_MIN_HINT,
+  SEARCH_PLACEHOLDER_GLOBAL,
+  SEARCH_PLACEHOLDER_WORKSPACE,
+  SEARCH_RETRY,
+  SEARCH_TITLE,
+  searchEmptyMessage,
+} from "@/lib/search-copy";
 
 const DEBOUNCE_MS = 250;
 
@@ -38,76 +64,113 @@ export function GlobalSearch() {
   const searchOpen = useAppUi((s) => s.searchOpen);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const setMainArea = useAppUi((s) => s.setMainArea);
-  const openProject = useAppUi((s) => s.openProject);
+  const openWorkspace = useAppUi((s) => s.openWorkspace);
+  const activeWorkspaceId = useAppUi((s) => s.activeWorkspaceId);
+  const mainArea = useAppUi((s) => s.mainArea);
+
+  const workspaceId =
+    mainArea === "workspace" && activeWorkspaceId ? activeWorkspaceId : null;
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const seqRef = useRef(0);
 
   const { selectThread } = useThreads();
 
-  const runSearch = useCallback((q: string) => {
-    const seq = ++seqRef.current;
-    setLoading(true);
-    api
-      .search(q)
-      .then((res) => {
-        if (seq !== seqRef.current) return;
-        setResults(res);
-      })
-      .catch(() => {
-        if (seq !== seqRef.current) return;
-        setResults({ threads: [], notes: [], projects: [], total: 0 });
-      })
-      .finally(() => {
-        if (seq === seqRef.current) setLoading(false);
-      });
-  }, []);
+  const runSearch = useCallback(
+    (q: string) => {
+      const seq = ++seqRef.current;
+      setLoading(true);
+      setError(null);
+      api
+        .search(q, workspaceId)
+        .then((res) => {
+          if (seq !== seqRef.current) return;
+          setResults(res);
+          setError(null);
+        })
+        .catch((err: unknown) => {
+          if (seq !== seqRef.current) return;
+          setResults(null);
+          setError(err instanceof ApiError ? err.message : SEARCH_ERROR);
+        })
+        .finally(() => {
+          if (seq === seqRef.current) setLoading(false);
+        });
+    },
+    [workspaceId],
+  );
 
-  // Debounced search whenever the palette is open.
   useEffect(() => {
     if (!searchOpen) return;
     const q = query.trim();
-    if (q.length < 2) return; // hint state is derived at render time
+    if (q.length < 2) {
+      setResults(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     const timer = setTimeout(() => runSearch(q), DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [query, searchOpen, runSearch]);
 
-  /** Close + reset (event-handler context, not an effect). */
   const close = useCallback(() => {
-    seqRef.current++; // cancel in-flight responses
+    seqRef.current++;
     setSearchOpen(false);
     setQuery("");
     setResults(null);
+    setError(null);
     setLoading(false);
   }, [setSearchOpen]);
 
   const showHint = query.trim().length < 2;
   const nothing =
-    !loading && results !== null && results.total === 0 && !showHint;
+    !loading && !error && results !== null && results.total === 0 && !showHint;
 
   const go = useMemo(
     () => ({
-      thread: async (id: string) => {
+      thread: async (id: string, projectId: string | null) => {
         close();
-        setMainArea("chat");
+        if (projectId) openWorkspace(projectId);
+        else setMainArea("chat");
         await selectThread(id);
       },
       note: (noteId: string) => {
         close();
-        // Cheap open: fetch full note → context panel (mobile gets a dialog).
+        setMainArea("notebook");
         void api
           .getNote(noteId)
           .then((note) => useAppUi.getState().openNote(note))
           .catch(() => {});
       },
-      project: (id: string) => {
+      workspace: (id: string) => {
         close();
-        openProject(id);
+        openWorkspace(id);
+      },
+      href: (href: string, projectId: string, docId?: string) => {
+        close();
+        if (href.startsWith("/?area=library")) {
+          setMainArea("library");
+          return;
+        }
+        if (href.startsWith("/?area=images")) {
+          setMainArea("images");
+          return;
+        }
+        const params = new URL(href, "http://pocketstudio.local").searchParams;
+        const tabParam = params.get("tab");
+        const tab =
+          tabParam && TAB_SET.has(tabParam as WorkspaceTab)
+            ? (tabParam as WorkspaceTab)
+            : "chat";
+        openWorkspace(projectId, tab);
+        const doc = docId ?? params.get("doc");
+        if (doc) useAppUi.getState().setWorkspaceDocId(doc);
       },
     }),
-    [close, openProject, setMainArea, selectThread],
+    [close, openWorkspace, setMainArea, selectThread],
   );
 
   return (
@@ -117,14 +180,16 @@ export function GlobalSearch() {
         if (open) setSearchOpen(true);
         else close();
       }}
-      title="Поиск по PocketStudio"
-      description="Диалоги, заметки и проекты"
+      title={SEARCH_TITLE}
+      description={SEARCH_DESCRIPTION}
       className="sm:max-w-xl"
     >
       <CommandInput
         value={query}
         onValueChange={setQuery}
-        placeholder="Поиск по диалогам, заметкам и проектам…"
+        placeholder={
+          workspaceId ? SEARCH_PLACEHOLDER_WORKSPACE : SEARCH_PLACEHOLDER_GLOBAL
+        }
       />
       <CommandList className="vf-scroll max-h-[60dvh]">
         {loading && !showHint && (
@@ -133,24 +198,41 @@ export function GlobalSearch() {
             role="status"
           >
             <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            Ищем…
+            {SEARCH_LOADING}
+          </div>
+        )}
+        {error && !showHint && !loading && (
+          <div
+            role="alert"
+            className="flex flex-col items-center gap-2 px-4 py-8 text-center"
+          >
+            <p className="text-sm font-medium">{error}</p>
+            <p className="text-xs text-muted-foreground">{SEARCH_ERROR_HINT}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runSearch(query.trim())}
+            >
+              {SEARCH_RETRY}
+            </Button>
           </div>
         )}
         {nothing && (
-          <CommandEmpty>
-            Ничего не нашлось по «{query.trim()}». Попробуйте другое слово.
-          </CommandEmpty>
+          <CommandEmpty>{searchEmptyMessage(query.trim())}</CommandEmpty>
         )}
-        {results && results.projects.length > 0 && (
-          <CommandGroup heading="Проекты">
+        {!showHint && !error && results && results.projects.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_WORKSPACES}>
             {results.projects.map((p) => (
               <CommandItem
                 key={`p-${p.id}`}
-                value={`проект ${p.name} ${p.description ?? ""}`}
-                onSelect={() => go.project(p.id)}
+                value={`воркспейс ${p.name} ${p.description ?? ""}`}
+                onSelect={() => go.workspace(p.id)}
                 className="gap-3"
               >
-                <FolderGit2 className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                <FolderGit2
+                  className="size-4 shrink-0 text-primary"
+                  aria-hidden="true"
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{p.name}</span>
                   {p.description && (
@@ -163,16 +245,19 @@ export function GlobalSearch() {
             ))}
           </CommandGroup>
         )}
-        {results && results.threads.length > 0 && (
-          <CommandGroup heading="Диалоги">
+        {!showHint && !error && results && results.threads.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_THREADS}>
             {results.threads.map((t) => (
               <CommandItem
                 key={`t-${t.id}`}
                 value={`диалог ${t.title} ${t.preview ?? ""}`}
-                onSelect={() => void go.thread(t.id)}
+                onSelect={() => void go.thread(t.id, t.projectId)}
                 className="gap-3"
               >
-                <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <MessageSquare
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{t.title}</span>
                   {t.preview && (
@@ -185,8 +270,8 @@ export function GlobalSearch() {
             ))}
           </CommandGroup>
         )}
-        {results && results.notes.length > 0 && (
-          <CommandGroup heading="Заметки">
+        {!showHint && !error && results && results.notes.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_NOTES}>
             {results.notes.map((n) => (
               <CommandItem
                 key={`n-${n.id}`}
@@ -212,13 +297,82 @@ export function GlobalSearch() {
             ))}
           </CommandGroup>
         )}
-        {!results && !loading && showHint && (
+        {!showHint && !error && results && results.documents.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_DOCUMENTS}>
+            {results.documents.map((d) => (
+              <CommandItem
+                key={`d-${d.id}`}
+                value={`документ ${d.title} ${d.snippet}`}
+                onSelect={() => go.href(d.href, d.projectId, d.id)}
+                className="gap-3"
+              >
+                <FileText
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{d.title}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {d.snippet}
+                  </span>
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {!showHint && !error && results && results.entities.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_ENTITIES}>
+            {results.entities.map((e) => (
+              <CommandItem
+                key={`e-${e.id}`}
+                value={`сущность ${e.name} ${e.snippet}`}
+                onSelect={() => go.href(e.href, e.projectId)}
+                className="gap-3"
+              >
+                <Shapes
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{e.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {e.snippet}
+                  </span>
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {!showHint && !error && results && results.artifacts.length > 0 && (
+          <CommandGroup heading={SEARCH_GROUP_ARTIFACTS}>
+            {results.artifacts.map((a) => (
+              <CommandItem
+                key={`a-${a.id}`}
+                value={`артефакт ${a.title} ${a.kind} ${a.snippet}`}
+                onSelect={() => go.href(a.href, a.projectId)}
+                className="gap-3"
+              >
+                <ImageIcon
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{a.title}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {a.snippet}
+                  </span>
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {!results && !loading && !error && showHint && (
           <div className="flex flex-col items-center gap-1.5 px-4 py-8 text-center text-sm text-muted-foreground">
             <Search className="size-5 opacity-50" aria-hidden="true" />
-            <p>Введите минимум 2 символа</p>
+            <p>{SEARCH_MIN_HINT}</p>
             <p className="text-xs opacity-70">
               <Hash className="mr-0.5 inline size-3" aria-hidden="true" />
-              диалоги · заметки · проекты — всё сразу
+              {workspaceId ? SEARCH_HINT_WORKSPACE : SEARCH_HINT_GLOBAL}
             </p>
           </div>
         )}

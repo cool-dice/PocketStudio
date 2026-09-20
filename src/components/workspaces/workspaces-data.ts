@@ -9,6 +9,8 @@
 import {
   WORKSPACE_STAGES,
   WORKSPACE_TYPE_META,
+  canonicalStageLabel,
+  pipelineStageIndex,
   type WorkspaceSummary,
   type WorkspaceType,
 } from "@/lib/workspace-data";
@@ -42,14 +44,16 @@ export const WORKSPACES_TYPE_CHIPS: {
 /** 0-based индекс стадии пайплайна: по названию, иначе по stageIndex. */
 export function stageIndexOf(ws: WorkspaceDto): number {
   const stages = WORKSPACE_STAGES[ws.type];
-  const byName = stages.indexOf(ws.stage ?? "");
+  const byName = pipelineStageIndex(stages, ws.stage ?? "");
   if (byName >= 0) return byName;
   return Math.min(Math.max(ws.stageIndex ?? 1, 1), stages.length) - 1;
 }
 
-/** Человекочитаемая стадия: из БД, иначе первая стадия пайплайна типа. */
+/** Человекочитаемая стадия: из БД (legacy «Публикация» → «Выпуск»). */
 export function stageLabelOf(ws: WorkspaceDto): string {
-  return ws.stage ?? WORKSPACE_STAGES[ws.type][stageIndexOf(ws)];
+  return ws.stage
+    ? canonicalStageLabel(ws.stage)
+    : WORKSPACE_STAGES[ws.type][stageIndexOf(ws)];
 }
 
 /** Подпись-строка карточки: описание или подсказка типа. */

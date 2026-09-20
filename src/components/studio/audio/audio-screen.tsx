@@ -14,14 +14,15 @@
  * (глобальный вызов — чипы показываются для всех вкладок).
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AudioWaveform, FolderOpen, Library, Mic, SlidersHorizontal } from "lucide-react";
 
 import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared/module-header";
-import { Skeleton } from "@/components/ui/skeleton";
+import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
-import type { WorkspaceDto } from "@/lib/workspace-types";
+import { useWorkspaces } from "@/hooks/use-workspaces";
+import { useAppUi } from "@/lib/store";
+import { AUDIO_MODULE_DESCRIPTION } from "@/lib/studio-copy";
 import { AudioLibraryTab } from "./audio-library-tab";
 import { DawStudio } from "./daw-studio";
 import { NarrationLibrary } from "./narration-library";
@@ -60,28 +61,15 @@ export function AudioScreen({
   const [tab, setTab] = useState<AudioTabValue>("voice");
 
   /* Глобальный вызов (без workspaceId) — воркспейс выбирается чипами. */
-  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const { workspaces, loading: wsLoading, error: wsError, load: loadWorkspaces } =
+    useWorkspaces();
   const [pickedWorkspaceId, setPickedWorkspaceId] = useState<string | null>(null);
   const [libraryKey, setLibraryKey] = useState(0);
+  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
+  const libraryRefresh = libraryKey + workspaceVersion;
 
   const embeddedWorkspaceId = workspaceId ?? null;
   const activeWorkspaceId = embeddedWorkspaceId ?? pickedWorkspaceId;
-
-  useEffect(() => {
-    if (embeddedWorkspaceId) return;
-    let cancelled = false;
-    api
-      .listWorkspaces()
-      .then((list) => {
-        if (!cancelled) setWorkspaces(list);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaces([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [embeddedWorkspaceId]);
 
   const bumpLibrary = () => setLibraryKey((k) => k + 1);
 
@@ -93,7 +81,7 @@ export function AudioScreen({
       <ModuleHeader
         icon={AudioWaveform}
         title="Аудио"
-        description="Озвучка, DAW-студия и аудиотека"
+        description={AUDIO_MODULE_DESCRIPTION}
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />
@@ -110,28 +98,26 @@ export function AudioScreen({
               Озвучки, проект студии и аудиотека живут в воркспейсе — выберите,
               с каким работать.
             </p>
-            <div className="mt-2.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto vf-scroll">
-              {workspaces === null ? (
-                <>
-                  <Skeleton className="h-7 w-36 rounded-full" />
-                  <Skeleton className="h-7 w-28 rounded-full" />
-                  <Skeleton className="h-7 w-32 rounded-full" />
-                </>
-              ) : workspaces.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Воркспейсов пока нет — создайте первый в разделе «Воркспейсы».
-                </p>
-              ) : (
-                workspaces.map((ws) => (
-                  <SelectableChip
-                    key={ws.id}
-                    label={ws.name}
-                    selected={pickedWorkspaceId === ws.id}
-                    onClick={() => setPickedWorkspaceId(ws.id)}
-                  />
-                ))
-              )}
-            </div>
+            <WorkspacePickerStatus
+              loading={!embeddedWorkspaceId && wsLoading}
+              error={!embeddedWorkspaceId && wsError}
+              empty={
+                !embeddedWorkspaceId &&
+                !wsLoading &&
+                !wsError &&
+                workspaces.length === 0
+              }
+              onRetry={loadWorkspaces}
+            >
+              {workspaces.map((ws) => (
+                <SelectableChip
+                  key={ws.id}
+                  label={ws.name}
+                  selected={pickedWorkspaceId === ws.id}
+                  onClick={() => setPickedWorkspaceId(ws.id)}
+                />
+              ))}
+            </WorkspacePickerStatus>
           </section>
         ) : null}
 
@@ -157,7 +143,7 @@ export function AudioScreen({
             {activeWorkspaceId ? (
               <>
                 <NarrationPanel workspaceId={activeWorkspaceId} onCreated={bumpLibrary} />
-                <NarrationLibrary workspaceId={activeWorkspaceId} refreshKey={libraryKey} />
+                <NarrationLibrary workspaceId={activeWorkspaceId} refreshKey={libraryRefresh} />
               </>
             ) : (
               <WorkspacePlaceholder
@@ -192,7 +178,7 @@ export function AudioScreen({
             className="mt-0 flex min-h-0 flex-1 flex-col overflow-y-auto vf-scroll pr-0.5"
           >
             {activeWorkspaceId ? (
-              <AudioLibraryTab projectId={activeWorkspaceId} refreshKey={libraryKey} />
+              <AudioLibraryTab projectId={activeWorkspaceId} refreshKey={libraryRefresh} />
             ) : (
               <WorkspacePlaceholder
                 title="Выберите воркспейс"

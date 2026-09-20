@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { hashPassword, signSession, sessionCookieOptions } from "@/lib/auth";
-import { SESSION_COOKIE } from "@/lib/auth-shared";
+import {
+  attachSessionCookie,
+  hashPassword,
+  sessionPayloadFromUser,
+  signSession,
+} from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
+import { inviteLifecycle, sanitizeInviteRole } from "@/lib/invite-status";
+import { consumeRateLimit } from "@/lib/rate-limit";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -21,15 +28,13 @@ const registerSchema = z.object({
   password: z
     .string({ message: "Укажите пароль" })
     .min(8, "Пароль должен содержать минимум 8 символов"),
+  invite: z.string().trim().min(8).max(80).optional(),
 });
 
 export async function POST(req: Request) {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
 
   const parsed = registerSchema.safeParse(body);
   if (!parsed.success) {
@@ -41,28 +46,110 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ошибка валидации", fields }, { status: 400 });
   }
 
-  const { name, email, password } = parsed.data;
+  const { name, email, password, invite: inviteToken } = parsed.data;
 
-  // Seed env admin first so it takes priority over "first user becomes admin".
-  await ensureAdminSeed();
-
-  const existing = await db.user.findUnique({ where: { email } });
-  if (existing) {
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "local";
+  const gated = consumeRateLimit(`register:${ip}`, 8, 15 * 60 * 1000);
+  if (!gated.ok) {
     return NextResponse.json(
-      { error: "Пользователь с таким email уже существует" },
-      { status: 409 }
+      { error: "Слишком много попыток регистрации. Подождите и попробуйте снова." },
+      { status: 429, headers: { "retry-after": String(gated.retryAfterSec) } },
     );
   }
 
-  const userCount = await db.user.count();
-  const user = await db.user.create({
-    data: {
-      name,
-      email,
-      passwordHash: await hashPassword(password),
-      role: userCount === 0 ? "admin" : "client",
-    },
-  });
+  // Seed env admin first so it takes priority over "first user becomes admin".
+  // GET /api/auth/bootstrap must predict this order (see firstUserBecomesAdminFromState).
+  await ensureAdminSeed();
+
+  const passwordHash = await hashPassword(password);
+  let user;
+  try {
+    user = await db.$transaction(async (tx) => {
+      const existing = await tx.user.findUnique({ where: { email } });
+      if (existing) {
+        throw Object.assign(new Error("email-taken"), { code: "EMAIL_TAKEN" });
+      }
+
+      let inviteRole: string | null = null;
+      if (inviteToken) {
+        const invite = await tx.invite.findUnique({ where: { token: inviteToken } });
+        const life = inviteLifecycle(invite);
+        if (life === "invalid") {
+          throw Object.assign(new Error("invite-invalid"), { code: "INVITE_INVALID" });
+        }
+        if (life === "used") {
+          throw Object.assign(new Error("invite-used"), { code: "INVITE_USED" });
+        }
+        if (life === "expired") {
+          throw Object.assign(new Error("invite-expired"), { code: "INVITE_EXPIRED" });
+        }
+        if (invite?.email && invite.email !== email) {
+          throw Object.assign(new Error("invite-email"), { code: "INVITE_EMAIL" });
+        }
+        inviteRole = sanitizeInviteRole(invite?.role);
+      }
+
+      const userCount = await tx.user.count();
+      const created = await tx.user.create({
+        data: {
+          name,
+          email,
+          passwordHash,
+          role: inviteRole ?? (userCount === 0 ? "admin" : "client"),
+        },
+      });
+
+      if (inviteToken) {
+        const consumed = await tx.invite.updateMany({
+          where: { token: inviteToken, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+        if (consumed.count !== 1) {
+          throw Object.assign(new Error("invite-invalid"), { code: "INVITE_INVALID" });
+        }
+      }
+      return created;
+    });
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "EMAIL_TAKEN") {
+      return NextResponse.json(
+        { error: "Пользователь с таким email уже существует" },
+        { status: 409 },
+      );
+    }
+    if (code === "INVITE_EXPIRED") {
+      return NextResponse.json(
+        { error: "Срок инвайта истёк — попросите новую ссылку." },
+        { status: 400 },
+      );
+    }
+    if (code === "INVITE_USED") {
+      return NextResponse.json(
+        { error: "Этот инвайт уже использован — зарегистрироваться по нему нельзя." },
+        { status: 400 },
+      );
+    }
+    if (code === "INVITE_EMAIL") {
+      return NextResponse.json(
+        { error: "Этот инвайт выписан на другой email" },
+        { status: 400 },
+      );
+    }
+    if (code === "INVITE_INVALID") {
+      return NextResponse.json({ error: "Инвайт недействителен" }, { status: 400 });
+    }
+    if (code === "P2002") {
+      return NextResponse.json(
+        { error: "Пользователь с таким email уже существует" },
+        { status: 409 },
+      );
+    }
+    throw err;
+  }
 
   // Best-effort audit log.
   try {
@@ -78,12 +165,7 @@ export async function POST(req: Request) {
     console.error("[audit] auth.register failed:", err);
   }
 
-  const token = await signSession({
-    sub: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-  });
+  const token = await signSession(sessionPayloadFromUser(user));
 
   const res = NextResponse.json(
     {
@@ -101,6 +183,6 @@ export async function POST(req: Request) {
     },
     { status: 201 }
   );
-  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  attachSessionCookie(res, token);
   return res;
 }

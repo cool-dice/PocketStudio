@@ -41,7 +41,8 @@ export type MainArea =
   | "workspaces" // Список воркспейсов
   | "library" // Библиотека: весь контент всех воркспейсов
   | "tools" // Инструменты: скиллы, интеграции, монетизация, админ
-  | "workspace"; // Контекстная оболочка воркспейса
+  | "workspace" // Контекстная оболочка воркспейса
+  | "settings"; // Настройки ИИ пользователя
 
 
 interface AppUiState {
@@ -115,6 +116,10 @@ interface AppUiState {
   searchOpen: boolean;
   setSearchOpen: (open: boolean) => void;
 
+  /** Incremented when chat tools mutate workspace content (notes/docs/media). */
+  workspaceVersion: number;
+  bumpWorkspace: () => void;
+
   /* ── PS-3: воркспейсы — единый творческий контекст ── */
 
   /** Открытый воркспейс (mainArea === "workspace"): id из мок-данных. */
@@ -131,6 +136,25 @@ interface AppUiState {
   closeWorkspace: () => void;
   /** Переключить вкладку открытого воркспейса. */
   setWorkspaceTab: (tab: WorkspaceTab) => void;
+  /** Последний открытый документ вкладки «Документы» (`?doc=`). */
+  workspaceDocId: string | null;
+  setWorkspaceDocId: (id: string | null) => void;
+
+  /** Картинка, с которой открыли растр («Редактировать» в галерее). */
+  designSourceUrl: string | null;
+  openDesignEditor: (opts?: { imageUrl?: string | null }) => void;
+
+  /** Composer prefill from preview inspect / quest. */
+  composerDraft: string | null;
+  /**
+   * When set (including `null` = global thread), Composer sends the draft
+   * once the active Thread.projectId matches. `undefined` = only prefill.
+   */
+  composerAutoSendProjectId: string | null | undefined;
+  setComposerDraft: (
+    text: string | null,
+    opts?: { autoSendProjectId?: string | null },
+  ) => void;
 }
 
 export const useAppUi = create<AppUiState>((set, get) => ({
@@ -212,31 +236,63 @@ export const useAppUi = create<AppUiState>((set, get) => ({
   searchOpen: false,
   setSearchOpen: (searchOpen) => set({ searchOpen }),
 
+  workspaceVersion: 0,
+  bumpWorkspace: () =>
+    set((state) => ({ workspaceVersion: state.workspaceVersion + 1 })),
+
   activeWorkspaceId: null,
   activeWorkspaceOverride: null,
   /* Chat-first: воркспейс открывается сразу на вкладке «Чат» —
      оркестратор является главным инструментом, остальное — вкладки. */
   workspaceTab: "chat",
+  workspaceDocId: null,
   openWorkspace: (id, tab) =>
-    set({
+    set((state) => ({
       mainArea: "workspace",
       activeWorkspaceId: id,
       activeWorkspaceOverride: null,
       workspaceTab: tab ?? "chat",
-    }),
+      workspaceDocId: state.activeWorkspaceId === id ? state.workspaceDocId : null,
+    })),
   openWorkspaceData: (ws, tab) =>
-    set({
+    set((state) => ({
       mainArea: "workspace",
       activeWorkspaceId: ws.id,
       activeWorkspaceOverride: ws,
       workspaceTab: tab ?? "chat",
-    }),
+      workspaceDocId: state.activeWorkspaceId === ws.id ? state.workspaceDocId : null,
+    })),
   closeWorkspace: () =>
     set({
       mainArea: "workspaces",
       activeWorkspaceId: null,
       activeWorkspaceOverride: null,
       workspaceTab: "chat",
+      workspaceDocId: null,
     }),
   setWorkspaceTab: (workspaceTab) => set({ workspaceTab }),
+  setWorkspaceDocId: (workspaceDocId) => set({ workspaceDocId }),
+
+  designSourceUrl: null,
+  openDesignEditor: (opts) => {
+    const imageUrl = opts?.imageUrl ?? null;
+    const state = get();
+    if (state.activeWorkspaceId) {
+      set({
+        workspaceTab: "design",
+        designSourceUrl: imageUrl,
+      });
+      return;
+    }
+    set({ mainArea: "design", designSourceUrl: imageUrl });
+  },
+
+  composerDraft: null,
+  composerAutoSendProjectId: undefined,
+  setComposerDraft: (composerDraft, opts) =>
+    set({
+      composerDraft,
+      composerAutoSendProjectId:
+        composerDraft == null ? undefined : opts?.autoSendProjectId,
+    }),
 }));

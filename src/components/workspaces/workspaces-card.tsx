@@ -1,10 +1,8 @@
 "use client";
 
 /**
- * WorkspaceCard — карточка воркспейса в списке (Фаза A): большая
- * градиентная обложка с типом и стадией, звезда избранного, прогресс
- * с процентом, живые счётчики counts из БД и человекочитаемое обновление.
- * Клик по карточке открывает оболочку воркспейса.
+ * WorkspaceCard — карточка воркспейса в списке: градиентная обложка,
+ * тип и стадия, прогресс, живые счётчики counts из БД.
  */
 
 import {
@@ -39,16 +37,14 @@ const COUNT_ITEMS = [
 
 interface WorkspaceCardProps {
   workspace: WorkspaceDto;
-  favorite: boolean;
-  onToggleFavorite: (id: string) => void;
   onOpen: (id: string) => void;
+  onToggleFavorite?: (id: string, next: boolean) => void;
 }
 
 export function WorkspacesCard({
   workspace,
-  favorite,
-  onToggleFavorite,
   onOpen,
+  onToggleFavorite,
 }: WorkspaceCardProps) {
   const meta = WORKSPACE_TYPE_META[workspace.type];
   const Icon = meta.icon;
@@ -87,29 +83,24 @@ export function WorkspacesCard({
         >
           {stage}
         </Badge>
-      </button>
-
-      {/* ── Избранное ── */}
-      <button
-        type="button"
-        onClick={() => onToggleFavorite(workspace.id)}
-        aria-pressed={favorite}
-        aria-label={
-          favorite ? "Убрать из избранного" : "Добавить в избранное"
-        }
-        title={favorite ? "Убрать из избранного" : "Добавить в избранное"}
-        className={cn(
-          "absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-lg border backdrop-blur transition-colors",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-          favorite
-            ? "border-amber-400/60 bg-amber-500/25 text-amber-400"
-            : "border-white/25 bg-black/20 text-white/85 hover:bg-black/30 hover:text-white",
-        )}
-      >
-        <Star
-          className={cn("size-4", favorite && "fill-amber-400 text-amber-400")}
-          aria-hidden="true"
-        />
+        {onToggleFavorite ? (
+          <button
+            type="button"
+            className="absolute right-3 top-3 rounded-full bg-background/80 p-1.5 text-white backdrop-blur-sm"
+            aria-label={workspace.favorite ? "Убрать из избранного" : "В избранное"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite(workspace.id, !workspace.favorite);
+            }}
+          >
+            <Star
+              className={cn(
+                "size-4 text-white",
+                workspace.favorite && "fill-amber-400 text-amber-400",
+              )}
+            />
+          </button>
+        ) : null}
       </button>
 
       {/* ── Тело карточки ── */}

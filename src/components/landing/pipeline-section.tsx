@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
+import { LANDING_PIPELINE_MONETIZE } from "@/lib/landing-copy";
 
 const STEPS: {
   step: string;
@@ -42,8 +43,7 @@ const STEPS: {
     step: "3",
     icon: Coins,
     title: "Монетизация",
-    description:
-      "Публикуйте книги, курсы и приложения — выплаты приходят в студию.",
+    description: LANDING_PIPELINE_MONETIZE,
   },
 ];
 

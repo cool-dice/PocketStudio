@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * DeployScreen (5-c) — «Экспорт и публикация».
+ * DeployScreen (5-c) — «Экспорт и деплой».
  *
  * Честно: деплой в облако в песочнице недоступен (задел на будущее —
  * домены, сборка, релизы). Рабочая часть — экспорт воркспейса в ZIP
@@ -26,11 +26,15 @@ import {
   ModuleHeader,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
+import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { useAppUi } from "@/lib/store";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import {
+  DEPLOY_SCREEN_DESCRIPTION,
+  DEPLOY_SCREEN_TITLE,
+} from "@/lib/docker-copy";
 import type { WorkspaceDto } from "@/lib/workspace-types";
 import type { ProjectListItem } from "@/lib/types";
 import { DockerfileCard } from "./dockerfile-card";
@@ -62,7 +66,8 @@ export function DeployScreen({
   workspaceId,
 }: ModuleScreenProps & { workspaceId?: string }) {
   /* Глобальный экран без воркспейса: список воркспейсов + код-проектов. */
-  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const { workspaces, loading: wsLoading, error: wsError, load: loadWorkspaces } =
+    useWorkspaces();
   const [codeProjects, setCodeProjects] = useState<ProjectListItem[]>([]);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
@@ -75,20 +80,10 @@ export function DeployScreen({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  const setMainArea = useAppUi((s) => s.setMainArea);
-
-  /* Загрузка списка воркспейсов и код-проектов для глобального экрана. */
+  /* Код-проекты для глобального экрана (воркспейсы — из useWorkspaces). */
   useEffect(() => {
     if (workspaceId) return;
     let cancelled = false;
-    api
-      .listWorkspaces()
-      .then((ws) => {
-        if (!cancelled) setWorkspaces(ws);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaces([]);
-      });
     api
       .listProjects()
       .then((projects) => {
@@ -173,13 +168,13 @@ export function DeployScreen({
 
   return (
     <section
-      aria-label="Экспорт и публикация"
+      aria-label={DEPLOY_SCREEN_TITLE}
       className="flex h-full min-w-0 flex-1 flex-col bg-background"
     >
       <ModuleHeader
         icon={Rocket}
-        title="Экспорт и публикация"
-        description="Честный экспорт воркспейса: ZIP со всеми реальными артефактами"
+        title={DEPLOY_SCREEN_TITLE}
+        description={DEPLOY_SCREEN_DESCRIPTION}
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />
@@ -221,25 +216,19 @@ export function DeployScreen({
             <p className="mt-1 text-xs text-muted-foreground">
               Готовность и экспорт живут внутри воркспейса — выберите нужный.
             </p>
-            {workspaces === null ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {Array.from({ length: 4 }, (_, i) => (
-                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
-                ))}
-              </div>
-            ) : workspaces.length === 0 && codeProjects.length === 0 ? (
-              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
-                <p className="text-sm text-muted-foreground">
-                  Пока нет ни одного воркспейса — сначала создайте его.
-                </p>
-                <Button size="sm" onClick={() => setMainArea("workspaces")}>
-                  <Rocket className="size-4" aria-hidden="true" />
-                  К воркспейсам
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {workspaces.map((ws) => {
+            <WorkspacePickerStatus
+              loading={!workspaceId && wsLoading}
+              error={!workspaceId && wsError}
+              empty={
+                !workspaceId &&
+                !wsLoading &&
+                !wsError &&
+                workspaces.length === 0 &&
+                codeProjects.length === 0
+              }
+              onRetry={loadWorkspaces}
+            >
+              {workspaces.map((ws) => {
                   const Meta = WORKSPACE_TYPE_META[ws.type];
                   const Icon = Meta.icon;
                   return (
@@ -268,8 +257,7 @@ export function DeployScreen({
                     className="max-w-full"
                   />
                 ))}
-              </div>
-            )}
+            </WorkspacePickerStatus>
           </section>
         ) : null}
 
@@ -300,7 +288,7 @@ export function DeployScreen({
             />
 
             {/* Dockerfile для воркспейсов с кодом (Фаза D). */}
-            {workspace && workspace.origin !== "workspace" ? (
+            {workspace && (workspace.origin !== "workspace" || workspace.type === "app") ? (
               <DockerfileCard workspace={workspace} />
             ) : null}
 

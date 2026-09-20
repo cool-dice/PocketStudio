@@ -1,0 +1,367 @@
+# PocketStudio — полный план сборки приложения
+
+> Живой документ исполнения. Видение и спецификация — в [`docs/ROADMAP.md`](./ROADMAP.md)
+> и [`worklog.md`](../worklog.md). Этот файл — **как мы пишем всё, что уже заложено**,
+> в каком порядке, и когда волна считается закрытой.
+>
+> Принцип пользователя (2026-09-19): *«Всё что у меня заложено — часть MVP.
+> Не надо никаких сознательных срезов. Пишем полностью всё приложение.»*
+>
+> Сознательные сокращения предыдущего прогона (скрыть скиллы, отложить NLE/растр,
+> «без биллинга», «W12 опционально») **отменены**. Если пункт есть в ROADMAP,
+> в UI или в worklog — он входит в сборку. Голливуд, которого в доках нет
+> (Stripe-юрлицо, 2-часовой Netflix-пайплайн, мультирегион), не выдумываем.
+>
+> Шлюз ИИ (`src/lib/ai/`, OpenAI/Anthropic) **уже сделан — не переписывать.**
+> z-ai не возвращать.
+
+Обновлено: 2026-09-19. Ветка: `cursor/ai-providers-openai-anthropic-0e4b`.
+PR: https://github.com/cool-dice/PocketStudio/pull/1
+
+---
+
+## 0. Что значит «полностью рабочее приложение»
+
+### Золотой путь
+
+1. Гость открывает лендинг (`/`) → регистрируется или входит (`/login`). Первый пользователь = `admin`.
+2. Первый запуск: короткий onboarding-тур + опциональный quest по первой заметке.
+3. Админ открывает **Админ → Модели ИИ** и задаёт провайдера + модели + дефолты инструментов.
+4. Если ИИ не настроен — чат и генерации ясно говорят по-русски, что нужно настроить провайдера.
+5. Пользователь создаёт воркспейс. URL становится `/w/[id]` (и вкладка `/w/[id]?tab=chat|documents|…`) — ссылка шарится и переживает reload.
+6. В чате воркспейса пишет задачу. Агент создаёт персистентный артефакт; включённые **скиллы** влияют на system prompt.
+7. Вкладки воркспейса показывают те же данные из БД. Редакторы (растр, макет, DAW, NLE-lite) правят артефакты руками.
+8. Экспорт: zip / WAV / WebM / zip кода. Деплой: Dockerfile + попытка `docker build` (или честный статус, если демона нет) + локальный preview.
+9. Доход: оффер с ценой, статус оплаты, кабинет выплат. Платёжный адаптер — `simulated` **плюс** поле для реального ключа.
+10. Админ: пользователи, роли, инвайты, аудит, статистика, провайдеры ИИ, пометки «оплачено».
+
+### Контракт модуля (если поверхность видна — она работает)
+
+| Модуль | Полезное действие |
+|---|---|
+| Чат | socket.io, ask/plan/act/review, tool-calling, скиллы в промпте, MCP-гейтинг |
+| Воркспейсы | CRUD, избранное в БД, дублировать, архивировать, настройки, URL `/w/[id]` |
+| Заметки воркспейса | Note + `NoteLink`, reload не теряет |
+| Блокнот | глобальные заметки, ASR, LLM-анализ, категории; quest из заметки |
+| Документы | рукопись, автосейв, версии, сущности, альбом, аналитик; ИИ: написать / переписать / продолжить / история |
+| Изображения | промпт → Artifact; избранное; «Редактировать» → растр |
+| Дизайн | растр (холст, кисть, ластик, выделение, кадр, текст, фигуры, пипетка, слои, фильтры, undo, зум) + макет (фреймы, дерево, инспектор x/y/w/h/fill/radius/shadow/шрифт, выравнивание) |
+| Аудио | TTS + DAW (дорожки, сэмплы, секвенсор, микшер, piano roll, BPM, экспорт WAV, библиотека) |
+| Видео | сценарий/раскад + NLE-lite (V1/V2/A1/A2/титры, бритва, магнит, переходы, LUT-пресеты, скорость, Ken Burns, «Собрать» → WebM) |
+| Код | Monaco, git-чекпоинты, zip, iframe-превью проекта |
+| Деплой | Dockerfile, zip, `docker build` если демон есть, иначе честный статус + инструкция; publish-карточка с реальным путём (локальный compose/preview) |
+| Монетизация | план ИИ, активы, офферы (создать/цена/статус), кабинет выплат, админ «отметить оплачено» |
+| Интеграции | builtin fetch/filesystem/browser + добавление/конфиг своих MCP (stdio/sse) |
+| Скиллы | список SKILL.md, импорт файла/URL, создать, вкл/выкл, магазин (внутренний флаг «куплено», не Stripe), инъекция в промпт агента |
+| Библиотека | все артефакты всех воркспейсов, каталогизация, избранное |
+| Админ | пользователи, роли, инвайты, аудит, статистика, ИИ-провайдеры, оплаты |
+| Настройки ИИ | BYOK / студийный прокси |
+| Лендинг | конвейер, модули, чат-мок, CTA → `/login` |
+| Onboarding | первый запуск + quest |
+
+---
+
+## 1. Внешние зависимости, которые эмулируем (не «вырезаем»)
+
+Фича **всё равно поставляется**. Адаптер честно говорит, в каком режиме работает.
+
+| Зависимость | Как поставляем |
+|---|---|
+| Stripe / эквайринг | адаптер `PaymentProvider`: `simulated` по умолчанию + поля `apiKey` / `mode=live`. Офферы, цена, статусы, кабинет выплат, админ «оплачено» — живые. |
+| Docker daemon | кнопка «Собрать образ» вызывает `docker build`; если CLI/демон нет — статус `unavailable` с текстом, как собрать локально. Не фейковый «опубликовано». |
+| Внешний хост / registry | карточка публикации: zip + Dockerfile + preview URL (локальный iframe / static). Push/SSH — поля и лог попытки, не скрытый пункт. |
+| stdio MCP (GitHub и др.) | конфиг сохраняется, `mcp.json` отдаётся; запуск, если бинарь есть; иначе честный «сервер сохранён, процесс не стартовал». Builtin-адаптеры работают всегда. |
+| ffmpeg | WebM через canvas + MediaRecorder (уже есть); если `ffmpeg` в PATH — используем для склейки. |
+| OAuth Google/GitHub | **только если** появится в UI/доках. Сейчас JWT + email/пароль + инвайты. Не добавляем провайдеров «от себя». |
+| next-intl | UI остаётся на русском без библиотеки, пока ROADMAP явно не потребует. |
+
+Прототипы в `prototypes/` **не удаляем** в этом прогоне. Портируем недостающее поведение (onboarding/quest, скиллы, деплой, agent-IDE preview).
+
+---
+
+## 2. Источник правды (порядок)
+
+1. `docs/ROADMAP.md` — волны PS-2 / PS-3 / фазы A–E, редакторы, скиллы, монетизация.
+2. `worklog.md` — merge VibeMind + Aiflow, chat-first, реальные файлы+git, принцип редакторов.
+3. Существующие экраны и вкладки (сайдбар, Инструменты, вкладки воркспейса, лендинг, админ), включая спрятанные Скиллы.
+4. Этот файл — порядок исполнения.
+5. `prototypes/` — референс недостающего поведения.
+
+ROADMAP.md как vision **не переписываем** в этом прогоне, кроме фактического статуса волн после закрытия.
+
+---
+
+## 3. Инвентаризация поверхностей (все остаются)
+
+### Глобальный сайдбар
+
+Чат · Главная · Воркспейсы · Блокнот · Библиотека · Инструменты · Деплой.
+Профиль: Настройки ИИ, Админ, тема, выход.
+
+`MainArea` `documents` / `images` / `audio` / `video` / `design` / `mcp` / `skills` / `monetize` / `projects` остаются доступны из вкладок воркспейса и Инструментов. Не прячем.
+
+### Инструменты
+
+Скиллы · Интеграции · Модели ИИ · Монетизация · Админ.
+
+Скиллы **возвращаются первой волной** (F1). Шапка без бейджа «wip», когда бэкенд живой.
+
+### Вкладки воркспейса (`WORKSPACE_TABS_BY_TYPE`)
+
+Чат · Обзор · Заметки · Документы / Изображения / Аудио / Видео / Код · Дизайн · Деплой · Доход — состав по типу как сейчас, ничего не режем.
+
+### URL
+
+| Путь | Экран |
+|---|---|
+| `/` | лендинг (гость) или оболочка (сессия); query `?area=` синхронизирует mainArea |
+| `/login` | вход / регистрация |
+| `/w/[id]` | оболочка воркспейса |
+| `/w/[id]?tab=` | вкладка оболочки |
+
+Bookmark/share обязательны (бывшая «опциональная W12»).
+
+---
+
+## 4. Данные (дополнения к текущей Prisma)
+
+Уже есть: User, Note/Category/Tag, Project (воркспейс), Document/Section/Revision, Entity, Artifact, DawProject, McpServer, Finding, Thread/Message, AiProvider/AiModel, AuditLog.
+
+Добавляем в F1:
+
+- `Project.favorite` / `Project.archived` — избранное и архив воркспейса.
+- `Skill` — пользовательские скиллы (name, description, version, source, enabled, skillMd, triggers JSON, catalogKey?, purchased).
+- `Offer` — оффер публикации (workspaceId, title, priceCents, currency, status: draft/listed/paid/archived, paymentMode).
+- `Payout` — выплата (userId, amountCents, status: pending/paid/failed, providerRef).
+- `DesignDoc` — документ дизайна (projectId, mode raster|layout, json canvas/layers).
+- `VideoProject` — NLE (projectId, json tracks/clips/settings).
+- `Invite` — инвайт (email, role, token, usedAt).
+- `User.onboardingDone` / `User.questNoteId` — первый запуск.
+
+Не плодим вторую таблицу «WorkspaceNote»: `Note` + `NoteLink`.
+
+---
+
+## 5. Как вписывается шлюз ИИ (уже собрано)
+
+- Провайдеры: `AiProvider` / `AiModel` / `ToolModelDefault` / `UserToolModel`.
+- Резолв: `src/lib/ai/resolve.ts`. Вызовы: `src/lib/ai/connector.ts`.
+- Агент-сервис ходит в тот же шлюз. z-ai не возвращать.
+- Включённые скиллы пользователя дописываются в `buildAgentSystemPrompt`.
+
+---
+
+## 6. Волны исполнения (полный продукт)
+
+Чекбоксы: `[x]` = закрыто в этом прогоне. Волна не закрывается «макетом без API».
+
+### F0 — План без срезов (этот документ)
+
+- **Цель:** зафиксировать полный скоуп и порядок.
+- **DoD:** нет секции «чего не будет», противоречащей пользователю; внешние зависимости — в §1 как эмуляция, не как вырезание.
+- [x] F0
+
+### F1 — Скиллы как настоящий модуль (сразу)
+
+- **Цель:** вкладка Скиллы снова в Инструментах; SKILL.md в БД; вкл/выкл; импорт файла и URL; создать; магазин с внутренним `purchased`; инъекция в system prompt агента.
+- **Файлы:** prisma `Skill`; `/api/skills`; `skills-screen.tsx` и дети; `mini-services/agent-service/prompts.ts` + `server.ts`; `tools-screen.tsx`.
+- **Видимый результат:** тоггл скилла переживает reload; чат получает блок «Включённые скиллы» с телом SKILL.md; «Импортировать» из магазина ставит `purchased` + создаёт Skill.
+- **DoD:** нет `useState`-магазина как единственного стора; нет баннера «скоро» на рабочем импорте.
+- [x] F1
+
+### F2 — URL `/w/[id]`, `/login`
+
+- **Цель:** воркспейс и чат можно открыть по ссылке.
+- **Файлы:** `src/app/login/page.tsx`, `src/app/w/[id]/page.tsx`, синхронизация `useAppUi` ↔ `history`/`searchParams`; лендинг CTA → `/login`.
+- **DoD:** reload на `/w/{id}?tab=documents` восстанавливает оболочку и вкладку; гость на `/w/…` → `/login?next=`.
+- [x] F2
+
+### F3 — Воркспейс: избранное, дублировать, архив, настройки
+
+- **Цель:** контролы хедера и звезды списка — живые API.
+- **Файлы:** schema Project; PATCH favorite/archived; POST duplicate; `workspace-header.tsx`; `workspaces-card.tsx`; `workspaces-screen.tsx`.
+- **DoD:** звезда в БД; «Дублировать» создаёт копию метаданных+документов (без гигантских медиа — копируем строки Artifact с теми же url); «Архивировать» прячет из основного списка с фильтром «Показать архив».
+- [x] F3
+
+### F4 — Документный ИИ до конца ROADMAP
+
+- **Цель:** написать с нуля, переписать, продолжить, история, откат — всё из панели и из чата.
+- **Файлы:** `ai-assistant-panel.tsx` (кнопка «Написать» для пустой главы); `/api/ai/section` action `write`; `section-history-sheet`; инструмент `rewrite_section`.
+- **DoD:** нет фейковой истории; ревизии из API; пустая глава → «Написать».
+- [x] F4
+
+### F5 — Дизайн: растр + макет (lite, как в ROADMAP N2)
+
+- **Цель:** не Photoshop/Figma, но **их** набор: холст, инструменты, слои, фильтры, undo; фреймы и инспектор.
+- **Файлы:** `DesignDoc`; `/api/workspaces/[id]/design`; `src/components/studio/design/raster-editor.tsx`, `layout-editor.tsx`; вход «Редактировать» с тайла галереи; сохранение dataURL → Artifact.
+- **DoD:** правка переживает reload; агент-инструменты `open_in_design` / `apply_filter` (минимум open).
+- [x] F5
+
+### F6 — Видео: NLE-lite (ROADMAP N4)
+
+- **Цель:** монтажный стол поверх сцен раскадровки.
+- **Файлы:** `VideoProject`; `/api/workspaces/[id]/timeline`; `nle-timeline.tsx` (дорожки V1/V2/A1/A2/титры, бритва, snap, LUT-пресеты, скорость, титры); сборка WebM учитывает таймлайн.
+- **DoD:** без кадров — честный empty; с кадрами — «Собрать» качает WebM; бейдж «цель 10–20 мин, перспектива до 2 ч» остаётся подписью, не обещанием движка.
+- [x] F6
+
+### F7 — Аудио: добить DAW
+
+- **Цель:** то, что уже в UI (микшер, piano roll, экспорт, библиотека) — round-trip + загрузка своих сэмплов. Stem-split — только если появится в ROADMAP как отдельный пункт (сейчас «разложить песню на дорожки» = действие оркестратора/кнопка, раскладывающая клипы по существующим трекам, не ML-source-separation).
+- **DoD:** save/load, WAV, библиотека, свои сэмплы.
+- [x] F7
+
+### F8 — Код: Monaco + git + zip + iframe preview
+
+- **Цель:** вкладка Код этого воркспейса; чекпоинт; zip; превью `index.html` / dev-сервер если поднят, иначе static iframe из файлов проекта (`src/app/api/projects/[id]/preview`).
+- **DoD:** два app-воркспейса не делят Monaco; preview не врёт «приложение запущено», если это просто static HTML.
+- [x] F8
+
+### F9 — Деплой: реальный путь песочницы
+
+- **Цель:** Dockerfile + zip уже есть; добавить «Собрать» (`docker build` → лог) и «Локальный preview». Publish UX из ROADMAP — карточка со статусами `ready_zip` / `built` / `preview` / `unavailable`.
+- **DoD:** нет кнопки «Опубликовано на хосте» при неуспехе.
+- [x] F9
+
+### F10 — Монетизация: кабинет, офферы, выплаты
+
+- **Цель:** экраны ROADMAP фазы E без юрлица Stripe: создать оффер, цена, статус, отметить оплачено (админ), список выплат.
+- **Файлы:** Offer/Payout; `/api/offers`, `/api/payouts`, admin mark-paid; вкладка Доход + Инструменты → Монетизация; адаптер `src/lib/payments.ts` (`simulated` | `live`).
+- **DoD:** пользователь создаёт оффер; админ помечает paid; кабинет показывает сумму.
+- [x] F10
+
+### F11 — MCP: builtin + свои серверы
+
+- **Цель:** как уже показывает UI: каталог, enable, свой сервер (stdio/sse), mcp.json. Builtin работают. Конфиг внешних сохраняется и участвует в промпте как «доступен конфиг».
+- **DoD:** добавление сервера пишет строку в БД; отключение гейтит инструменты.
+- [x] F11
+
+### F12 — Auth: JWT + инвайты/роли
+
+- **Цель:** роли `client` | `admin` (уже есть). Инвайт: админ создаёт ссылку/email+роль; регистрация по токену. OAuth не добавляем.
+- **DoD:** `/api/admin/invites`; регистрация принимает `invite`. Смена пароля и «Выйти на всех устройствах» гасят прежние JWT через `tokenVersion`. Обычный logout — только cookie этого устройства.
+- [x] F12
+
+### F13 — Onboarding + quest (proto1)
+
+- **Цель:** worklog: onboarding-тур и quest с контекстом заметки — часть merge.
+- **Файлы:** `src/components/app/onboarding-tour.tsx`; `/api/me/onboarding`; quest = тред с `projectId` null + `open_note` и режимом ask, привязанный к выбранной заметке.
+- **DoD:** один раз после первой регистрации; «Пропустить»; quest открывает чат с заметкой в контексте.
+- [x] F13
+
+### F14 — Админ до ROADMAP
+
+- Пользователи, смена роли, аудит, статистика (в т.ч. активность заметок — график proto1), провайдеры ИИ, оплаты офферов.
+- [x] F14
+
+### F15 — Закалка, README полного приложения, смоки
+
+- Расширить `src/app/api/mvp.smoke.test.ts` (skills, favorite, duplicate, offers, login route contract).
+- README: как запустить **полное** приложение, не «урезанный MVP».
+- `bun run test` зелёный.
+- [x] F15
+
+---
+
+## 7. Тесты / запуск
+
+```bash
+cp .env.example .env
+docker compose up -d postgres
+bun install
+bunx prisma generate && bun run db:push
+bun run dev          # Next :3000
+bun run dev:agent    # агент :3003 (или POST /api/health/agent-service)
+bun run test
+```
+
+Первый пользователь = admin. Ключи ИИ — в Админ → Модели ИИ, не в `.env`.
+Хранилище — **PostgreSQL + pgvector**, не SQLite.
+
+Не коммитить: `.env`, `db/custom.db*`, секреты.
+
+---
+
+## 8. Скрипт золотого пути (полный)
+
+```text
+1. Регистрация → админ
+2. (опц.) пройти onboarding
+3. Админ → Модели ИИ
+4. Инструменты → Скиллы: включить «Копирайтер книг», импортировать из магазина
+5. Создать воркспейс Книга → URL /w/{id}
+6. Чат: «запиши заметку и напиши главу 1» — скилл в промпте, артефакты в БД
+7. Документы: Переписать / Продолжить / история
+8. Изображения → Редактировать (растр) → сохранить
+9. Фильм-воркспейс: сцены → Монтаж (таймлайн) → Собрать WebM
+10. Музыка: DAW → WAV
+11. Приложение: код, чекпоинт, preview, Dockerfile, «Собрать»
+12. Доход: оффер 100 ₽ → админ «оплачено» → кабинет
+13. Избранное / дублировать / архив
+14. Выйти, открыть /login и /w/{id} снова
+```
+
+---
+
+## 9. Статус относительно ROADMAP.md
+
+ROADMAP помечает визуальные волны ✅. По коду на старт этого прогона:
+
+- **Живое:** auth JWT, чат, блокнот, воркспейсы API, документы+ИИ главы, картинки, TTS, DAW, раскадровка+WebM, Dockerfile+zip, MCP builtin, шлюз OpenAI/Anthropic, админ ИИ.
+- **Было спрятано/урезано — вернуть:** скиллы, URL-роутинг, избранное/дубли/архив воркспейса, растр/макет, NLE-lite, кабинет монетизации, iframe preview, onboarding/quest, инвайты.
+- **Честный leftover их доков (не наша философия):** курсор-стиль клик-по-DOM в превью — **сделан** как инспектор iframe + «Попросить агента». Полный hot-reload пользовательского Next **упирается в отсутствие dev-сервера** в песочнице (кнопка «Обновить» перезагружает static HTML). **SQLite не прод-хранилище.** RAG/pgvector **в продукте**: главный чат знает канон всех воркспейсов пользователя; чат воркспейса (в т.ч. личный кодер в «Приложение») не выходит за `Project.id`. BullMQ/Gitea не тащим. Проверка занятости имени «PocketStudio» — вне кода. Live-эквайринг — поля UX есть, сеть карт нет. Смена пароля в профиле **сделана**; сброс по email **нет** — SMTP в продукте отсутствует, письмо не фейкаем. JWT: `User.tokenVersion` в токене; смена пароля и «Выйти на всех устройствах» сразу гасят старые Bearer/cookie (не Redis denylist). Обычный «Выйти» чистит только эту cookie. `ps_session`: HttpOnly + SameSite=Lax + Secure в production; iframe по-прежнему Bearer из localStorage. Регистрация: 8 попыток / 15 мин с IP (как login); занятый email по-прежнему 409. Ответы Next: `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: SAMEORIGIN` + CSP только `frame-ancestors 'self'` (превью в sandbox-iframe same-origin; не DENY). Строгий `script-src`/`connect-src` CSP **нет** — сломает Monaco и socket.io. HSTS **нет** (локальный HTTP). GET `/api/health` — `{status:"up"|"down"}` без env/stack (down → 503). GET `/api/health/agent-service` — `{up}`; POST 401/503 — canned `error`. App Router: `not-found.tsx` / `error.tsx` / `global-error.tsx` — русский текст, ссылки «На главную» и «Войти», без `digest`/stack/`error.message`. `robots.txt`: Allow `/` и `/login`; Disallow `/w/`, `/api/`, `/admin` и `/?area=admin`. Sitemap приватных `/w/[id]` **нет**. Meta `robots: { index: false }` на `/w/*` (layout); гостевой лендинг `/` не noindex. Ответы `/api/*` несут `X-Robots-Tag: noindex` и `Cache-Control: no-store` (proxy + `next.config` `/api/:path*`); HTML `/` и `/login` без этих заголовков. CORS `Access-Control-*` не выставляем и не снимаем. JSON POST/PUT/PATCH: `Content-Length` > 256 КБ → 413 RU (`Тело запроса слишком большое`); 1 МБ — file / глава / DAW / NLE; 3 МБ — design preview; 36 МБ — voice JSON и upload. Multipart zip — свой лимит 20 МБ, не этот. Chunked без `Content-Length` тоже режется по байтам чтения. socket.io `message:send`: UTF-8 текст > 64 КБ → событие `error` RU (`Сообщение слишком длинное`); композер показывает ту же строку (`role=alert`), «Отправить» выключена, счётчик у капа, без тоста успеха. Пакет engine.io ≤ 96 КБ; сверх этого сокет рвётся без русского `error`. JSON tool-call `{"tool","args"}`: 256 КБ (write_file / apply_patch — 1 МБ) → RU `Аргументы инструмента слишком большие` в карточке, без execute / без записи мегабайта в БД.
+
+---
+
+## 10. Журнал исполнения
+
+| Дата | Волна | Заметка |
+|---|---|---|
+| 2026-09-19 | F0 | План переписан: срезы отменены, полный скоуп по ROADMAP/UI/worklog |
+| 2026-09-19 | F1–F15 | Скиллы в БД+промпт, `/w/[id]` `/login`, избранное/дубли/архив, растр+макет, NLE-lite, офферы/выплаты simulated, docker build, iframe preview, onboarding, инвайты |
+| 2026-09-19 | Prompts + proto port | Аудит промптов (`docs/PROMPTS.md`), retrieve_canon/apply_patch, инспектор DOM, теги/напоминания/график блокнота, ffmpeg-сборка если есть, брендинг PocketStudio |
+| 2026-09-19 | Honesty + RAG harden | Cookie/token `ps_session`/`ps_token` (dual-read `vf_*`). Лендинг: деплой/выплаты/MCP без вранья. Напоминания стреляют в колокол. RAG: очередь с retry, skip huge files. MCP: CLI missing. CI `bun test` + prisma generate. |
+| 2026-09-19 | Reminder bell + inspect send | Тип `reminder` в колоколе (иконка, клик → заметка). Бейдж RAG = `Thread.projectId`. «Попросить агента» отправляет контекст в чат. Tool JSON: trailing commas + name/arguments. Login `useState` (крэш входа). |
+| 2026-09-19 | Design/NLE/DAW persist | PUT→GET round-trip; invalid JSON 400 without wipe; empty timeline/DAW export honest; empty canvas save OK; `?doc=` restores last manuscript |
+| 2026-09-19 | Documents + Code holes | Откат главы возвращает текст и переиндексирует RAG; история — строки API; `?doc=` / missing id → 404 не 500; write vs rewrite; чекпоинты list/create/restore только этого Project.id; zip владельца; iframe `running: false`; Monaco save → RAG |
+| 2026-09-19 | Restore + file RAG | `git reset --hard` ставит в очередь переиндекс файлов проекта и чистит чанки удалённых путей; чекпоинт эмбеддинги не снапшотит; вкладка картинок отличает пустую галерею от ошибки загрузки |
+| 2026-09-19 | Entity sheet meta | Атрибуты, теги и связи на карточке правятся и пишутся в PATCH (JSON-колонки + EntityLink); битый JSON 400 без затирания; save → RAG; IDOR 404 |
+| 2026-09-19 | Document analyst | Проверка через `document_check`; без модели — русская ошибка, находки не создаются; Finding в БД переживает reload; цитаты только из текста; Исправлено/Отклонить → API; IDOR 404 |
+| 2026-09-19 | Deploy honesty | ZIP только владельца; Dockerfile `published: false`; `docker build` — лог или `unavailable`; пустой app не «собрано»; IDOR 404 |
+| 2026-09-19 | deploy_project | Агент: только app; пустой не built; без Docker — текст unavailable в чат; никогда не published |
+| 2026-09-19 | Landing CTA honesty | Гость `/`: CTA → `/login` и `/login?tab=register`; first-user-admin copy; чат-мок подписан; без обещаний живого хоста / карт / GitHub MCP |
+| 2026-09-19 | First-user-admin flag | Публичный GET `/api/auth/bootstrap`: `firstUserBecomesAdmin` true только при 0 пользователей и без `ADMIN_EMAIL`+`ADMIN_PASSWORD` сида (как `register()`). Лендинг и вкладка регистрации показывают фразу только при true. |
+| 2026-09-19 | TTS / audio honesty | Ненастроенный `tts` → `UNCONFIGURED_TOOL_MESSAGE`, без WAV и артефакта; голоса UI — OpenAI (alloy/nova/…), не Tongtong; сбой не оставляет «играющий» плеер; успех пишет артефакт + RAG; пустая аудиотека ≠ ошибка загрузки; IDOR 404 |
+| 2026-09-19 | Image generation honesty | Ненастроенный `image` → `UNCONFIGURED_TOOL_MESSAGE`, без PNG и артефакта; сбой не оставляет битый файл / 404 `<img>`; успех пишет `public/gen` + Artifact + RAG; пустая галерея ≠ ошибка загрузки; IDOR 404 |
+| 2026-09-19 | Notes LLM analysis honesty | Ненастроенный `notes` → `UNCONFIGURED_TOOL_MESSAGE`, `status=error`, без фейкового 4-block JSON; сбой не выдумывает positive/negative/final; успех пишет блоки в Note и переживает reload; пустой блокнот ≠ ошибка загрузки; IDOR 404 |
+| 2026-09-19 | Notes analysis fail-fast | POST/PATCH/очередь анализа: ненастроенный `notes` сразу `status=error` (тот же UNCONFIGURED), без ~5 с `pending` до воркера; GET сразу ошибка |
+| 2026-09-19 | Monetize plan honesty | Ненастроенный `monetize` → `UNCONFIGURED_TOOL_MESSAGE`, документ не пишется; сбой LLM не затирает прежний план; успех переживает GET reload; IDOR 404 |
+| 2026-09-19 | Agent/chat unconfigured | Ненастроенный `agent` → русская `UNCONFIGURED_TOOL_MESSAGE` в треде сразу (message:end), без зависания сокета и без фейкового успеха; композер снова печатает |
+| 2026-09-19 | Section + RAG unconfigured | Ненастроенный `rewrite_section` → 400 UNCONFIGURED на write/rewrite/continue/custom, глава не меняется, без hang LLM. Поиск/prefetch без эмбеддингов — keyword «поиск без эмбеддингов», тот же скоуп, без выдуманных векторов; reindex по-прежнему 400 |
+| 2026-09-19 | Palette + describe fail-fast | Ненастроенный `palette`/`describe` → 400 UNCONFIGURED сразу, без hang LLM и без фейковых свотчей/био. Сбой или пустой ответ не затирает прежнюю палитру и описание карточки; IDOR 404 |
+| 2026-09-19 | ASR fail-fast + bell honesty | Ненастроенный `asr` → 400 UNCONFIGURED до чтения тела и провайдера, без заметки; пустая расшифровка 422. Колокол: отметить все прочитанными, пустой список ≠ ошибка загрузки, IDOR 404; напоминания не дублируют тосты |
+| 2026-09-19 | Chat thread archive | Сайдбар: PATCH archived только владельцем (чужой 404). Список по умолчанию скрывает архив; тоггл «Показать архив». Тост успеха только после API. Пустой архив ≠ ошибка загрузки. |
+| 2026-09-19 | Workspace grid archive | Сетка: default без архива; «Показать архив» → `?archived=1`. Тост архива после PATCH. Пустой архив ≠ ошибка загрузки. Звезда не снимает карточку и не трогает archived. |
+| 2026-09-19 | Overview + meta honesty | Обзор «Дальше»: generic copy, не сид (Ари/4K/v0.3.1/хост). «Спросить оркестратора» шлёт драфт в чат, без тоста «отправлен». SEO meta не «публикует его». Доход: файлы, не publish. Пикер: ошибка ≠ пустой список. |
+| 2026-09-19 | Profile name + theme | PATCH `/api/me` имя (self only). Тема light/dark/system в меню, `storageKey` переживает reload. Пустое имя — поле, не тост успеха. Тост после API. Стадия пайплайна: неизвестная 400, клик по узлу PATCH. |
+| 2026-09-19 | Password change | PATCH `/api/me/password`: текущий + новый + повтор. Неверный текущий — 400 RU, без утечки hash/секрета. Успех не печатает пароль, перевыпускает сессию. Rate-limit как у login. Сброс по почте нет — SMTP не настроен. |
+| 2026-09-19 | Session kill | `User.tokenVersion` в JWT; смена пароля делает increment. Старый Bearer/cookie → 401, новый → 200. Redis не нужен. |
+| 2026-09-19 | Logout everywhere | Профиль: «Выйти на всех устройствах» → increment `tokenVersion` + clear cookie. Обычный «Выйти» cookie-only. Два токена: оба 401, login снова 200. |
+| 2026-09-19 | Session cookie flags | `ps_session`: HttpOnly, SameSite=Lax, Secure в production. Bearer/`ps_token` iframe path без изменений. Set-Cookie тесты login/logout. |
+| 2026-09-19 | Register rate-limit | POST `/api/auth/register`: 8 / 15 мин in-memory per IP, 429 + Retry-After. Дубль email — 409 «уже существует», без enumeration-маски. |
+| 2026-09-19 | REST IDOR sweep | Path `[id]` уже с `ensureOwned`/`userId`. Добиты leftover query/body: `GET /api/offers?projectId=` чужой → 404 (не пустой список); `GET /api/notes?categoryId=`/`tagId=` чужой → 404; `POST /api/rag/search` `projectId` чужой → 404 (как `threadProjectId`). |
+| 2026-09-19 | Note categories/tags CRUD | POST/PATCH/DELETE только свои (чужой id → 404, без тела). Пустой список ≠ ошибка загрузки. Тост успеха только после API. Удаление категории/тега не трогает и не отдаёт чужие заметки с тем же именем. |
+| 2026-09-19 | Category color/icon picker | Диалог категорий: пикер цвета и иконки, POST/PATCH allowlist, тост только после API. Теги по-прежнему имя. |
+| 2026-09-19 | Admin users list | Список: empty ≠ error ≠ 403. Смена роли: тост после API, клиент 403. Последнего админа не снимаем (409). JSON без passwordHash. |
+| 2026-09-19 | Security headers | `nosniff`, Referrer-Policy, SAMEORIGIN / `frame-ancestors 'self'`. Не DENY (preview iframe). Без script-src CSP. |
+| 2026-09-19 | Health no-leak | GET `/api/health` → `{status: up\|down}` (503 если БД down). GET `/api/health/agent-service` → `{up}`. Ошибки canned, без DATABASE_URL / AUTH_SECRET / stack. |
+| 2026-09-20 | Next not-found / error | `src/app/not-found.tsx`, `error.tsx`, `global-error.tsx`: русский UI, ссылки `/` и `/login`, retry на error. Пользователю не показывают digest, stack и `error.message`. |
+| 2026-09-20 | robots.txt | Allow `/` и `/login`. Disallow `/w/`, `/api/`, `/admin`, `/?area=admin`. Без Sitemap воркспейсов. |
+| 2026-09-20 | noindex /w | `src/app/w/layout.tsx`: `robots: { index: false }`. Лендинг `/` без noindex. |
+| 2026-09-20 | X-Robots-Tag /api | `X-Robots-Tag: noindex` на `/api/*` (proxy + headers helper). GET `/api/health` без CORS-поломки и без смены JSON. |
+| 2026-09-20 | Cache-Control /api | `Cache-Control: no-store` на `/api/*` (proxy + headers helper). GET `/api/health` и 401 `/api/auth/me`. HTML без no-store. |
+| 2026-09-20 | JSON body 413 | `Content-Length`: 256 КБ JSON; 1 МБ file/daw/timeline/sections; 3 МБ design; 36 МБ voice/upload. Multipart zip свой 20 МБ. POST `/api/notes` 413 RU. |
+| 2026-09-20 | WS message:send cap | `parseMessageSend`: UTF-8 > 64 КБ → `error` RU, без хода агента. Пакет ≤ 96 КБ. Композер не эмитит oversized. |
+| 2026-09-20 | Composer oversize UI | Композер: RU из сокет `error`, send disabled, счётчик у капа. Без тоста успеха. |
+| 2026-09-20 | Tool-call args cap | `parseToolCall` / execute: JSON args 256 КБ; write_file/apply_patch 1 МБ. Сверх капа — RU в тред, без apply_patch/create_note. |
+
+Когда волна закрыта: чекбокс `[x]`, строка здесь, что увидел пользователь.

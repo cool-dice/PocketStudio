@@ -1,99 +1,159 @@
 "use client";
 
 /**
- * Вкладка «ИИ-помощник»: WIP-баннер, сетка будущих действий с метками
- * «скоро» и мини-история правок. Всё — визуальный слой без логики.
+ * Вкладка «ИИ-помощник»: реальная правка главы через шлюз (`/api/ai/section`).
+ * Переписать / продолжить / своя инструкция → текст в редакторе + ревизия.
  */
 
-import {
-  CornerDownRight,
-  Maximize2,
-  Minimize2,
-  PenLine,
-  Search,
-  Sparkles,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { useState } from "react";
+import { Loader2, Sparkles, Wand2 } from "lucide-react";
+import { toast } from "sonner";
 
-import { WipBanner } from "@/components/studio/shared/module-header";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { api, ApiError } from "@/lib/api";
+import { sectionAiAction } from "@/lib/ai/prompts";
+import type { DocumentSectionDto } from "@/lib/workspace-types";
 
-const AI_ACTIONS: { icon: LucideIcon; label: string; hint: string }[] = [
-  { icon: PenLine, label: "Переписать параграф", hint: "Переписать параграф — доступно на следующем этапе" },
-  { icon: Maximize2, label: "Расширить", hint: "Расширить фрагмент — доступно на следующем этапе" },
-  { icon: Minimize2, label: "Сократить", hint: "Сократить фрагмент — доступно на следующем этапе" },
-  { icon: Search, label: "Найти факты", hint: "Найти факты — доступно на следующем этапе" },
-  { icon: CornerDownRight, label: "Продолжить главу", hint: "Продолжить главу — доступно на следующем этапе" },
-  { icon: Sparkles, label: "Улучшить стиль", hint: "Улучшить стиль — доступно на следующем этапе" },
-];
+export function AiAssistantPanel({
+  section,
+  draft,
+  onBeforeGenerate,
+  onApplied,
+}: {
+  section: DocumentSectionDto | null;
+  draft: string;
+  /** Сбросить несохранённый драфт в БД до вызова ИИ. */
+  onBeforeGenerate: () => Promise<unknown>;
+  onApplied: (section: DocumentSectionDto) => void;
+}) {
+  const [instruction, setInstruction] = useState("");
+  const [busy, setBusy] = useState<"write" | "rewrite" | "continue" | "custom" | null>(
+    null,
+  );
 
-const AI_HISTORY: { icon: LucideIcon; text: string; time: string }[] = [
-  { icon: Minimize2, text: "Пролог сокращён на 18% — вода слита", time: "Сегодня, 12:41" },
-  { icon: Sparkles, text: "Метафоры в главе 3 усилены", time: "Вчера" },
-  { icon: Search, text: "Найдено 6 фактов для главы 5", time: "2 дня назад" },
-];
+  async function run(action: "write" | "rewrite" | "continue" | "custom") {
+    if (!section || busy) return;
+    if (action === "custom" && instruction.trim().length < 3) {
+      toast.error("Напишите, что изменить в главе");
+      return;
+    }
+    setBusy(action);
+    try {
+      await onBeforeGenerate();
+      const updated = await api.aiRewriteSection({
+        sectionId: section.id,
+        action,
+        instruction:
+          action === "custom" ? instruction.trim() : undefined,
+      });
+      onApplied(updated);
+      toast.success(
+        action === "continue"
+          ? "Глава продолжена"
+          : action === "custom"
+            ? "Глава переписана по инструкции"
+            : action === "write"
+              ? "Глава написана"
+              : "Глава переписана",
+        { description: "Старый текст сохранён в истории версий." },
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError
+          ? err.message
+          : "Не удалось вызвать ИИ — попробуйте ещё раз",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
 
-export function AiAssistantPanel() {
-  return (
-    <div className="vf-scroll min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-      <WipBanner
-        title="ИИ-редактор подключается на следующем этапе"
-        description="Слой интеллекта займётся вашим текстом прямо в редакторе — без переключения контекста."
-        features={["правки по выделению", "проверка фактов", "стиль книги"]}
-      />
-
-      <section aria-label="Действия ИИ над текстом">
-        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Действия с текстом
-        </h4>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {AI_ACTIONS.map((action) => (
-            <button
-              key={action.label}
-              type="button"
-              title={action.hint}
-              className="group relative flex h-[74px] flex-col items-center justify-center gap-1.5 rounded-lg border bg-background px-2 text-center transition-all hover:border-primary/40 hover:bg-accent hover:shadow-xs active:scale-[0.98]"
-            >
-              <action.icon
-                className="size-4 shrink-0 text-primary transition-transform group-hover:scale-110"
-                aria-hidden="true"
-              />
-              <span className="text-[11px] font-medium leading-tight">{action.label}</span>
-              <span
-                className="absolute right-1.5 top-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium leading-none text-amber-700 dark:text-amber-400"
-                aria-hidden="true"
-              >
-                скоро
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section aria-label="История правок">
-        <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">История правок</h4>
-        <ul className="mt-2 space-y-1.5">
-          {AI_HISTORY.map((item) => (
-            <li
-              key={item.text}
-              className="flex items-center gap-2.5 rounded-lg border bg-background px-2.5 py-2"
-            >
-              <span
-                className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-                aria-hidden="true"
-              >
-                <item.icon className="size-3.5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium">{item.text}</span>
-                <span className="block text-[11px] text-muted-foreground">{item.time}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-2 px-1 text-[11px] leading-relaxed text-muted-foreground">
-          Правки применяются к выделенному фрагменту и остаются в истории документа.
+  if (!section) {
+    return (
+      <div className="vf-scroll min-h-0 flex-1 overflow-y-auto p-4">
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Выберите главу слева — помощник перепишет или продолжит её текст.
         </p>
-      </section>
+      </div>
+    );
+  }
+
+  const empty = draft.trim().length === 0;
+  const disabled = Boolean(busy);
+
+  return (
+    <div className="vf-scroll min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="rounded-xl border bg-card p-4">
+        <span
+          aria-hidden="true"
+          className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"
+        >
+          <Sparkles className="size-4" />
+        </span>
+        <h4 className="mt-3 text-sm font-semibold">ИИ-правка главы</h4>
+        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+          {empty
+            ? `«${section.title}» пока пустая — студия напишет черновик.`
+            : `Работаем с «${section.title}». Старый текст останется в истории версий.`}
+        </p>
+
+        <div className="mt-4 flex flex-col gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={disabled}
+            onClick={() => void run(sectionAiAction(draft))}
+          >
+            {busy === "rewrite" || busy === "write" ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Wand2 className="size-4" aria-hidden="true" />
+            )}
+            {empty ? "Написать главу" : "Переписать главу"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={disabled || empty}
+            onClick={() => void run("continue")}
+          >
+            {busy === "continue" ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : null}
+            Продолжить текст
+          </Button>
+        </div>
+
+        <label htmlFor="ai-section-instruction" className="mt-4 block text-xs font-medium text-muted-foreground">
+          Своя инструкция
+        </label>
+        <Textarea
+          id="ai-section-instruction"
+          rows={3}
+          value={instruction}
+          onChange={(e) => setInstruction(e.target.value)}
+          disabled={disabled}
+          placeholder="Например: короче, от лица Марины, без метафор…"
+          className="mt-1.5 resize-none"
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="mt-2"
+          disabled={disabled || instruction.trim().length < 3}
+          onClick={() => void run("custom")}
+        >
+          {busy === "custom" ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Sparkles className="size-4" aria-hidden="true" />
+          )}
+          Применить инструкцию
+        </Button>
+      </div>
     </div>
   );
 }

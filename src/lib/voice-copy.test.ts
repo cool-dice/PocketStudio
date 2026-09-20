@@ -1,0 +1,96 @@
+import { describe, expect, test } from "bun:test";
+
+import {
+  ASR_EMPTY,
+  ASR_GENERIC,
+  ASR_UNAVAILABLE,
+  MIC_PERMISSION_DENIED,
+  MIC_START_FAILED,
+  VOICE_RECOGNIZED,
+  VOICE_REVIEW_AND_SAVE,
+  isTranscriptAlreadySaved,
+  isUsableTranscript,
+  persistableTranscription,
+  shouldShowTranscription,
+  voiceResultCopy,
+  voiceReviewCopy,
+} from "./voice-copy";
+
+const FAKE_SUCCESS = /успешно записано/i;
+
+describe("voice capture honesty", () => {
+  test("error copy is Russian and never claims a saved recording", () => {
+    const errors = [
+      MIC_PERMISSION_DENIED,
+      MIC_START_FAILED,
+      ASR_EMPTY,
+      ASR_UNAVAILABLE,
+      ASR_GENERIC,
+    ].join("\n");
+    expect(errors).toMatch(/[А-Яа-яЁё]/);
+    expect(errors).not.toMatch(FAKE_SUCCESS);
+    expect(errors).not.toMatch(/successfully recorded|saved note/i);
+  });
+
+  test("empty and stub transcripts are not success", () => {
+    expect(isUsableTranscript("")).toBe(false);
+    expect(isUsableTranscript("   ")).toBe(false);
+    expect(isUsableTranscript(null)).toBe(false);
+    expect(isUsableTranscript("успешно записано")).toBe(false);
+    expect(isUsableTranscript("Успешно записано.")).toBe(false);
+    expect(isUsableTranscript("маяк в тумане")).toBe(true);
+  });
+
+  test("voiceResultCopy only toasts success for real speech", () => {
+    expect(voiceResultCopy("")).toEqual({ ok: false, error: ASR_EMPTY });
+    expect(voiceResultCopy("успешно записано")).toEqual({
+      ok: false,
+      error: ASR_EMPTY,
+    });
+    expect(voiceResultCopy("  мысль про маяк  ")).toEqual({
+      ok: true,
+      text: "мысль про маяк",
+      toast: VOICE_RECOGNIZED,
+    });
+    expect(VOICE_RECOGNIZED).not.toMatch(FAKE_SUCCESS);
+    expect(VOICE_REVIEW_AND_SAVE).toMatch(/проверьте и сохраните/);
+    expect(voiceReviewCopy("мысль про маяк")).toEqual({
+      ok: true,
+      text: "мысль про маяк",
+      toast: VOICE_REVIEW_AND_SAVE,
+    });
+    expect(voiceReviewCopy("успешно записано")).toEqual({
+      ok: false,
+      error: ASR_EMPTY,
+    });
+  });
+
+  test("the same confirmed transcript cannot be saved again", () => {
+    expect(isTranscriptAlreadySaved("маяк", null)).toBe(false);
+    expect(isTranscriptAlreadySaved("маяк", undefined)).toBe(false);
+    expect(isTranscriptAlreadySaved("маяк", "маяк")).toBe(true);
+    expect(isTranscriptAlreadySaved("маяк в тумане", "маяк")).toBe(false);
+    expect(isTranscriptAlreadySaved("", "маяк")).toBe(false);
+  });
+
+  test("persistableTranscription keeps real ASR and drops stubs", () => {
+    expect(persistableTranscription("  маяк в тумане  ")).toBe("маяк в тумане");
+    expect(persistableTranscription("")).toBeNull();
+    expect(persistableTranscription("   ")).toBeNull();
+    expect(persistableTranscription(null)).toBeNull();
+    expect(persistableTranscription(undefined)).toBeNull();
+    expect(persistableTranscription("успешно записано")).toBeNull();
+  });
+
+  test("shouldShowTranscription only when ASR differs from edited rawText", () => {
+    expect(shouldShowTranscription("маяк", "маяк")).toBe(false);
+    expect(shouldShowTranscription("  маяк  ", "маяк")).toBe(false);
+    expect(shouldShowTranscription("маяк в тумане, проверить свет", "маяк в тумане")).toBe(
+      true,
+    );
+    expect(shouldShowTranscription("маяк", null)).toBe(false);
+    expect(shouldShowTranscription("маяк", "")).toBe(false);
+    expect(shouldShowTranscription("маяк", "успешно записано")).toBe(false);
+    expect(shouldShowTranscription(null, "маяк в тумане")).toBe(true);
+  });
+});

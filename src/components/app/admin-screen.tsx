@@ -8,9 +8,11 @@
  *  - Activity: a 14-day stacked bar chart (notes / threads / projects)
  *    rendered with plain divs — no chart lib needed at this scale;
  *  - Users: searchable, role-filterable list with per-user counters and
- *    last activity; actions — promote/demote (guarded server-side) and
- *    delete (AlertDialog + workspace dir cleanup server-side).
- *  Plus the recent audit trail (who did what, when).
+ *    last activity; own empty / error / 403 (never paints a failed fetch
+ *    as «пока нет пользователей»). Role toast only after the API; last
+ *    admin cannot be demoted (server 409). DTOs never include passwordHash.
+ *  Plus the recent audit trail (who did what, when) — own empty / error /
+ *  loading / 403 states; rows never include raw meta or API keys.
  *
  * Non-admins with a stale session see an access notice (the REST layer
  * refuses with 403 anyway — the DB role is the source of truth).
@@ -33,11 +35,17 @@ import {
   Search,
   Shield,
   ShieldAlert,
+  Sparkles,
   Trash2,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { AdminAiPanel } from "@/components/app/admin-ai-panel";
+import { AdminAuditPanel } from "@/components/app/admin-audit-panel";
+import { AdminInvitesPanel } from "@/components/app/admin-invites-panel";
+import { AdminOffersPanel } from "@/components/app/admin-offers-panel";
+import { AdminPayoutsPanel } from "@/components/app/admin-payouts-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,10 +73,21 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 import { pluralRu, relativeTime } from "@/lib/format";
 import { api, ApiError } from "@/lib/api";
+import {
+  ROLE_CHANGE_FAILED,
+  USERS_FORBIDDEN,
+  USERS_FORBIDDEN_HINT,
+  USERS_LOAD_ERROR,
+  USERS_LOAD_ERROR_HINT,
+  USERS_RETRY,
+  adminUsersEmptyCopy,
+  adminUsersListView,
+  adminUsersLoadErrorFromHttp,
+  roleChangedToast,
+} from "@/lib/admin-users-copy";
 import type {
   AdminStats,
   AdminUserListItem,
-  AuditLogEntry,
   Role,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -78,32 +97,34 @@ interface AdminScreenProps {
 }
 
 type RoleFilter = "" | "admin" | "client";
+type AdminTab = "overview" | "ai" | "invites" | "payments";
 
 export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
   const { user } = useAuth();
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
-  const [audit, setAudit] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [auditRefresh, setAuditRefresh] = useState(0);
 
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("");
   const [deleteTarget, setDeleteTarget] = useState<AdminUserListItem | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<AdminTab>("overview");
 
-  /* ── Initial load: stats + audit (users load through the filter effect) ── */
+  /* ── Initial load: stats (audit has its own panel + refreshNonce) ── */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [s, a] = await Promise.all([api.adminStats(), api.adminAudit(30)]);
+        const s = await api.adminStats();
         if (!cancelled) {
           setStats(s);
-          setAudit(a);
         }
       } catch (err) {
         if (!cancelled) {
@@ -129,10 +150,14 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
           role: role || undefined,
         });
         setUsers(list);
+        setUsersError(null);
       } catch (err) {
-        toast.error(
-          err instanceof Error ? err.message : "Не удалось загрузить пользователей",
-        );
+        setUsers([]);
+        if (err instanceof ApiError) {
+          setUsersError(adminUsersLoadErrorFromHttp(err.status, err.message));
+        } else {
+          setUsersError(USERS_LOAD_ERROR);
+        }
       } finally {
         setUsersLoading(false);
       }
@@ -149,41 +174,40 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
   const refreshAll = async () => {
     setRefreshing(true);
     try {
-      const [s, a] = await Promise.all([api.adminStats(), api.adminAudit(30)]);
+      const s = await api.adminStats();
       setStats(s);
-      setAudit(a);
+      setError(null);
+      setAuditRefresh((n) => n + 1);
       await loadUsers(query, roleFilter);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось обновить данные");
+      const message =
+        err instanceof Error ? err.message : "Не удалось обновить данные";
+      setError(message);
+      toast.error(message);
     } finally {
       setRefreshing(false);
+      setLoading(false);
     }
   };
 
   const changeRole = async (u: AdminUserListItem, role: Role) => {
     try {
-      await api.adminUpdateUserRole(u.id, role);
+      const saved = await api.adminUpdateUserRole(u.id, role);
       setUsers((prev) =>
-        prev.map((x) => (x.id === u.id ? { ...x, role } : x)),
+        prev.map((x) => (x.id === u.id ? { ...x, role: saved.role } : x)),
       );
-      toast.success(
-        role === "admin"
-          ? `${u.name} теперь администратор`
-          : `${u.name} теперь обычный пользователь`,
-      );
+      toast.success(roleChangedToast(u.name, saved.role));
       // The admins counter + audit trail changed — silently resync.
-      void Promise.all([api.adminStats(), api.adminAudit(30)])
-        .then(([s, a]) => {
+      void api.adminStats()
+        .then((s) => {
           setStats(s);
-          setAudit(a);
+          setAuditRefresh((n) => n + 1);
         })
         .catch(() => {});
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : "Не удалось изменить роль";
-      toast.error(message);
+      toast.error(
+        err instanceof ApiError ? err.message : ROLE_CHANGE_FAILED,
+      );
     }
   };
 
@@ -195,10 +219,10 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
       setUsers((prev) => prev.filter((x) => x.id !== deleteTarget.id));
       toast.success(`Пользователь ${deleteTarget.name} удалён`);
       setDeleteTarget(null);
-      void Promise.all([api.adminStats(), api.adminAudit(30)])
-        .then(([s, a]) => {
+      void api.adminStats()
+        .then((s) => {
           setStats(s);
-          setAudit(a);
+          setAuditRefresh((n) => n + 1);
         })
         .catch(() => {});
     } catch (err) {
@@ -221,6 +245,12 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
       ),
     [activity],
   );
+  const usersView = adminUsersListView(
+    usersLoading && users.length === 0,
+    usersError,
+    users.length,
+  );
+  const lastAdmin = (stats?.admins ?? 0) <= 1;
 
   /* ── Stale non-admin session → honest access notice ── */
   if (user && user.role !== "admin") {
@@ -255,12 +285,23 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
         onOpenMobileNav={onOpenMobileNav}
         onRefresh={() => void refreshAll()}
         refreshing={refreshing}
+        tab={tab}
+        onTab={setTab}
       />
 
       {/* ── Feed ── */}
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl space-y-6 p-4 sm:p-6">
-          {error ? (
+          {tab === "ai" ? (
+            <AdminAiPanel />
+          ) : tab === "invites" ? (
+            <AdminInvitesPanel />
+          ) : tab === "payments" ? (
+            <div className="space-y-8">
+              <AdminOffersPanel />
+              <AdminPayoutsPanel />
+            </div>
+          ) : error ? (
             <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card p-10 text-center">
               <span className="flex size-12 items-center justify-center rounded-full bg-destructive/10">
                 <ShieldAlert className="size-6 text-destructive" aria-hidden="true" />
@@ -298,9 +339,13 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
                 />
                 <StatCard
                   icon={Rocket}
-                  label="Проекты"
-                  value={stats.projects}
-                  sub={`${stats.categories} ${pluralRu(stats.categories, "категория", "категории", "категорий")}`}
+                  label="Воркспейсы"
+                  value={stats.workspaces}
+                  sub={
+                    stats.projects === stats.workspaces
+                      ? `${stats.categories} ${pluralRu(stats.categories, "категория", "категории", "категорий")}`
+                      : `${stats.projects} ${pluralRu(stats.projects, "проект", "проекта", "проектов")} всего`
+                  }
                   delay={0.08}
                 />
                 <StatCard
@@ -434,15 +479,43 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
                 </div>
 
                 <div className="mt-4">
-                  {usersLoading && users.length === 0 ? (
-                    <div className="space-y-2">
+                  {usersView === "loading" ? (
+                    <div className="space-y-2" role="status" aria-label="Загрузка пользователей">
                       {Array.from({ length: 3 }).map((_, i) => (
                         <Skeleton key={i} className="h-20 w-full rounded-xl" />
                       ))}
                     </div>
-                  ) : users.length === 0 ? (
+                  ) : usersView === "forbidden" ? (
+                    <div className="flex flex-col items-center gap-2 py-8 text-center">
+                      <span className="flex size-11 items-center justify-center rounded-full bg-muted">
+                        <ShieldAlert className="size-5 text-muted-foreground" aria-hidden="true" />
+                      </span>
+                      <p className="text-sm font-medium">{USERS_FORBIDDEN}</p>
+                      <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
+                        {USERS_FORBIDDEN_HINT}
+                      </p>
+                    </div>
+                  ) : usersView === "error" ? (
+                    <div className="flex flex-col items-center gap-2 py-8 text-center">
+                      <p className="text-sm font-medium">
+                        {usersError ?? USERS_LOAD_ERROR}
+                      </p>
+                      <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
+                        {USERS_LOAD_ERROR_HINT}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-1 rounded-xl"
+                        onClick={() => void loadUsers(query, roleFilter)}
+                      >
+                        <RefreshCw className="size-4" aria-hidden="true" />
+                        {USERS_RETRY}
+                      </Button>
+                    </div>
+                  ) : usersView === "empty" ? (
                     <p className="py-8 text-center text-sm text-muted-foreground">
-                      Никого не найдено — попробуйте изменить фильтр
+                      {adminUsersEmptyCopy(Boolean(query.trim() || roleFilter))}
                     </p>
                   ) : (
                     <ul className="space-y-2">
@@ -504,6 +577,7 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
                               <UserActions
                                 target={u}
                                 isSelf={isSelf}
+                                lastAdmin={lastAdmin}
                                 onChangeRole={(role) => void changeRole(u, role)}
                                 onDelete={() => setDeleteTarget(u)}
                               />
@@ -539,40 +613,7 @@ export function AdminScreen({ onOpenMobileNav }: AdminScreenProps) {
               </div>
 
               {/* ── Audit trail ── */}
-              <div className="rounded-2xl border bg-card p-4 sm:p-6">
-                <h2 className="text-sm font-semibold">Журнал событий</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  последние {audit.length} записей — входы, регистрации и
-                  действия администраторов
-                </p>
-                <ul className="mt-3">
-                  {audit.length === 0 ? (
-                    <li className="py-6 text-center text-sm text-muted-foreground">
-                      Журнал пока пуст
-                    </li>
-                  ) : (
-                    audit.map((e) => (
-                      <li
-                        key={e.id}
-                        className="flex items-center gap-2 border-b py-2.5 text-sm last:border-b-0"
-                      >
-                        <Badge
-                          variant={e.action.startsWith("admin.") ? "default" : "secondary"}
-                          className="shrink-0 rounded-full px-1.5 font-mono text-[10px]"
-                        >
-                          {e.action}
-                        </Badge>
-                        <span className="min-w-0 truncate text-xs text-muted-foreground">
-                          {e.user ? `${e.user.name} · ${e.user.email}` : "система"}
-                        </span>
-                        <span className="ml-auto shrink-0 text-[11px] text-muted-foreground/80">
-                          {relativeTime(e.createdAt)}
-                        </span>
-                      </li>
-                    ))
-                  )}
-                </ul>
-              </div>
+              <AdminAuditPanel refreshNonce={auditRefresh} />
             </>
           ) : null}
         </div>
@@ -627,10 +668,14 @@ function Header({
   onOpenMobileNav,
   onRefresh,
   refreshing,
+  tab,
+  onTab,
 }: {
   onOpenMobileNav: () => void;
   onRefresh?: () => void;
   refreshing?: boolean;
+  tab?: AdminTab;
+  onTab?: (tab: AdminTab) => void;
 }) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
@@ -646,6 +691,25 @@ function Header({
       <h1 className="truncate text-sm font-semibold sm:text-[15px]">
         🛡 Админ-панель
       </h1>
+      {onTab && (
+        <Tabs value={tab} onValueChange={(v) => onTab(v as AdminTab)}>
+          <TabsList className="vf-scroll-x h-8 max-w-full overflow-x-auto rounded-xl">
+            <TabsTrigger value="overview" className="h-6 rounded-lg text-xs">
+              Обзор
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="h-6 rounded-lg gap-1 text-xs">
+              <Sparkles className="size-3" />
+              Модели ИИ
+            </TabsTrigger>
+            <TabsTrigger value="invites" className="h-6 rounded-lg text-xs">
+              Инвайты
+            </TabsTrigger>
+            <TabsTrigger value="payments" className="h-6 rounded-lg text-xs">
+              Оплаты
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
       <div className="flex-1" />
       {onRefresh && (
         <Button
@@ -706,14 +770,17 @@ function StatCard({
 function UserActions({
   target,
   isSelf,
+  lastAdmin,
   onChangeRole,
   onDelete,
 }: {
   target: AdminUserListItem;
   isSelf: boolean;
+  lastAdmin: boolean;
   onChangeRole: (role: Role) => void;
   onDelete: () => void;
 }) {
+  const demoteBlocked = isSelf || (target.role === "admin" && lastAdmin);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -736,7 +803,10 @@ function UserActions({
             Сделать админом
           </DropdownMenuItem>
         ) : (
-          <DropdownMenuItem onSelect={() => onChangeRole("client")}>
+          <DropdownMenuItem
+            disabled={demoteBlocked}
+            onSelect={() => onChangeRole("client")}
+          >
             <ArrowDownRight className="size-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
             Сделать клиентом
           </DropdownMenuItem>

@@ -133,6 +133,9 @@ function LibraryCard({
               loading="lazy"
               decoding="async"
               className="absolute inset-0 size-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
             />
           ) : (
             <TypeIcon className="relative size-5" />

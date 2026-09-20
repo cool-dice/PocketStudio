@@ -24,6 +24,7 @@ import {
   RotateCcw,
   Wand2,
 } from "lucide-react";
+
 import { toast } from "sonner";
 
 import { ArtifactCard } from "@/components/workspaces/shared/artifact-card";
@@ -51,13 +52,21 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { invalidateWorkspaces } from "@/hooks/use-workspaces";
+import { useThreads } from "@/hooks/use-threads";
+import { overviewAskDraft } from "@/lib/overview-copy";
+import {
+  PIPELINE_STAGE_SAVE_FAILED,
+  PIPELINE_STAGE_SAVED,
+} from "@/lib/pipeline-stage";
 import { useAppUi } from "@/lib/store";
 import {
   WORKSPACE_PIPELINE_TITLE,
   WORKSPACE_STAGES,
   WORKSPACE_TAB_META,
   WORKSPACE_TYPE_META,
+  samePipelineStage,
   type WorkspaceTab,
 } from "@/lib/workspace-data";
 import type { WorkspaceDto } from "@/lib/workspace-types";
@@ -72,8 +81,16 @@ const COUNT_ITEMS = [
   { key: "files", label: "Файлы", icon: FolderKanban },
 ] as const;
 
-export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
+export function OverviewTab({
+  workspace,
+  onUpdated,
+}: {
+  workspace: WorkspaceDto;
+  onUpdated?: () => void;
+}) {
   const setWorkspaceTab = useAppUi((s) => s.setWorkspaceTab);
+  const setComposerDraft = useAppUi((s) => s.setComposerDraft);
+  const { threads, selectThread, startProjectThread } = useThreads();
 
   /** Артефакты из БД, снабжённые id воркспейса (null — грузится/сменился id). */
   const [loaded, setLoaded] = useState<{
@@ -118,7 +135,9 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
   );
 
   /** Артефакты со стадией вне пайплайна типа — отдельным бакетом. */
-  const extras = (artifacts ?? []).filter((a) => !stages.includes(a.stage));
+  const extras = (artifacts ?? []).filter(
+    (a) => !stages.some((stage) => samePipelineStage(a.stage, stage)),
+  );
 
   /** Клик по карточке артефакта → его модуль внутри воркспейса. */
   function openArtifact(artifact: ArtifactItem) {
@@ -127,9 +146,29 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
   }
 
   function askOrchestrator() {
-    toast.info("Оркестратор", {
-      description: `Запрос «${prompt.title}» отправлен — ответ появится во вкладке «Чат».`,
-    });
+    const draft = overviewAskDraft(workspace.name, stageLabel, prompt);
+    setComposerDraft(draft, { autoSendProjectId: workspace.id });
+    const existing = threads.find((t) => t.projectId === workspace.id);
+    if (existing) {
+      void selectThread(existing.id);
+    } else {
+      void startProjectThread(workspace.id, `Чат · ${workspace.name}`);
+    }
+    setWorkspaceTab("chat");
+  }
+
+  async function advanceStage(stage: string) {
+    if (stage === stageLabel) return;
+    try {
+      await api.updateWorkspace(workspace.id, { stage });
+      toast.success(PIPELINE_STAGE_SAVED);
+      invalidateWorkspaces();
+      onUpdated?.();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : PIPELINE_STAGE_SAVE_FAILED,
+      );
+    }
   }
 
   function renderArtifact(artifact: ArtifactItem) {
@@ -192,7 +231,13 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
                           i !== 0 && i <= currentIdx ? "bg-primary/50" : "bg-border",
                         )}
                       />
-                      <StageNode index={i} status={status} />
+                      <StageNode
+                        index={i}
+                        status={status}
+                        label={stage}
+                        current={status === "current"}
+                        onSelect={() => void advanceStage(stage)}
+                      />
                       <span
                         aria-hidden="true"
                         className={cn(
@@ -271,7 +316,9 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
               ) : (
                 <>
                   {stages.map((stage, i) => {
-                    const list = artifacts.filter((a) => a.stage === stage);
+                    const list = artifacts.filter((a) =>
+                      samePipelineStage(a.stage, stage),
+                    );
                     const status = stageStatusOf(i, workspace);
                     return (
                       <section key={stage} aria-label={`Стадия «${stage}»`} className="rounded-xl border bg-card">
@@ -402,14 +449,6 @@ export function OverviewTab({ workspace }: { workspace: WorkspaceDto }) {
                       <span className="min-w-0 flex-1 truncate font-medium">
                         {action.label}
                       </span>
-                      {action.wip ? (
-                        <Badge
-                          variant="outline"
-                          className="shrink-0 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-400"
-                        >
-                          В разработке
-                        </Badge>
-                      ) : null}
                       <ChevronRight
                         className="size-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5"
                         aria-hidden="true"
@@ -451,6 +490,9 @@ function ImageArtifactCard({
         alt={artifact.title}
         loading="lazy"
         className="size-9 shrink-0 rounded-lg border object-cover"
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+        }}
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
@@ -516,10 +558,31 @@ function ArtifactsError({ onRetry }: { onRetry: () => void }) {
 
 // ─────────────────────── узлы дорожки ───────────────────────
 
-function StageNode({ index, status }: { index: number; status: StageStatus }) {
+function StageNode({
+  index,
+  status,
+  label,
+  current,
+  onSelect,
+}: {
+  index: number;
+  status: StageStatus;
+  label: string;
+  current: boolean;
+  onSelect: () => void;
+}) {
+  const aria = current
+    ? `${label}, текущая стадия`
+    : `Перейти к стадии «${label}»`;
   if (status === "current") {
     return (
-      <span className="relative mx-1.5 flex size-8 shrink-0 items-center justify-center">
+      <button
+        type="button"
+        aria-current="step"
+        aria-label={aria}
+        className="relative mx-1.5 flex size-8 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        onClick={onSelect}
+      >
         <span
           className="absolute inset-0 animate-ping rounded-full bg-primary/40"
           aria-hidden="true"
@@ -527,21 +590,30 @@ function StageNode({ index, status }: { index: number; status: StageStatus }) {
         <span className="relative flex size-8 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
           {index + 1}
         </span>
-      </span>
+      </button>
     );
   }
   if (status === "done") {
     return (
-      <span className="mx-1.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground">
+      <button
+        type="button"
+        aria-label={aria}
+        className="mx-1.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        onClick={onSelect}
+      >
         <Check className="size-4" aria-hidden="true" />
-        <span className="sr-only">стадия пройдена</span>
-      </span>
+      </button>
     );
   }
   return (
-    <span className="mx-1.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-dashed bg-muted text-sm font-medium text-muted-foreground">
+    <button
+      type="button"
+      aria-label={aria}
+      className="mx-1.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-dashed bg-muted text-sm font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      onClick={onSelect}
+    >
       {index + 1}
-    </span>
+    </button>
   );
 }
 

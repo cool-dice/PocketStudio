@@ -4,16 +4,14 @@
  * ToolsScreen — «Инструменты» (PS-3-d).
  *
  * Глобальный уровень Инструментов поверх воркспейсов: Скиллы,
- * Интеграции, Монетизация (сводка) и Админ — существующие экраны
- * студии, встроенные во внутренние под-вкладки со своими
- * заголовками и внутренними скроллами (рамка WorkspaceModuleFrame).
- * Админ закрыт для не-администраторов дружелюбной карточкой-замком.
+ * Интеграции, Модели ИИ, Монетизация и Админ.
  */
 
 import { useState } from "react";
 import {
   Blocks,
   Coins,
+  KeyRound,
   ShieldCheck,
   Wand2,
   Wrench,
@@ -21,23 +19,25 @@ import {
 } from "lucide-react";
 
 import { AdminScreen } from "@/components/app/admin-screen";
+import { AiSettingsScreen } from "@/components/app/ai-settings-screen";
 import { McpScreen } from "@/components/studio/mcp/mcp-screen";
 import { MonetizeScreen } from "@/components/studio/monetize/monetize-screen";
+import { SkillsScreen } from "@/components/studio/skills/skills-screen";
 import {
   ModuleHeader,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
-import { SkillsScreen } from "@/components/studio/skills/skills-screen";
 import { WorkspaceModuleFrame } from "@/components/workspaces/workspace-tabs-ui";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 
-type ToolsTabValue = "skills" | "integrations" | "monetize" | "admin";
+type ToolsTabValue = "skills" | "integrations" | "models" | "monetize" | "admin";
 
 const TOOL_TABS: { value: ToolsTabValue; label: string; icon: LucideIcon }[] = [
   { value: "skills", label: "Скиллы", icon: Wand2 },
   { value: "integrations", label: "Интеграции", icon: Blocks },
+  { value: "models", label: "Модели ИИ", icon: KeyRound },
   { value: "monetize", label: "Монетизация", icon: Coins },
   { value: "admin", label: "Админ", icon: ShieldCheck },
 ];
@@ -83,8 +83,7 @@ export function ToolsScreen({ onOpenMobileNav }: ModuleScreenProps) {
       <ModuleHeader
         icon={Wrench}
         title="Инструменты"
-        description="Скиллы, интеграции, монетизация и администрирование"
-        stage="wip"
+        description="Скиллы, интеграции, модели ИИ, монетизация и администрирование"
         onOpenMobileNav={onOpenMobileNav}
       />
 
@@ -120,6 +119,13 @@ export function ToolsScreen({ onOpenMobileNav }: ModuleScreenProps) {
         <TabsContent value="integrations" className="mt-0 min-h-0 flex-1">
           <WorkspaceModuleFrame>
             <McpScreen onOpenMobileNav={onOpenMobileNav} />
+          </WorkspaceModuleFrame>
+        </TabsContent>
+
+        {/* ── Модели ИИ ── */}
+        <TabsContent value="models" className="mt-0 min-h-0 flex-1">
+          <WorkspaceModuleFrame>
+            <AiSettingsScreen onOpenMobileNav={onOpenMobileNav} />
           </WorkspaceModuleFrame>
         </TabsContent>
 

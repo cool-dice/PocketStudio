@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
-import { aiChatJson } from "@/lib/ai";
+import { aiChatJson, aiErrorResponse, resolveToolRoute } from "@/lib/ai";
+import { MONETIZE_SYSTEM } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { documentDto } from "@/lib/workspace-shapes";
@@ -11,8 +13,10 @@ export const maxDuration = 180;
 
 /* ── POST /api/ai/monetize — LLM-план монетизации воркспейса ──
  * Бриф = имя+тип+описание+стадия воркспейса + краткий бриф пользователя.
- * План сохраняется как Document kind="spec" с 5 секциями; прежний план
- * (title начинается с «План монетизации») удаляется и пересобирается. */
+ * Unconfigured `monetize` fails immediately with UNCONFIGURED_TOOL_MESSAGE
+ * and writes no document (no Stripe/product fantasy). План сохраняется как
+ * Document kind="spec" с 5 секциями; прежний план (title начинается с
+ * «План монетизации») удаляется только после успешного ответа модели. */
 
 const schema = z.object({
   projectId: z.string().trim().min(1),
@@ -50,19 +54,6 @@ interface MonetizePlan {
     monthly: { label: string; amount: number }[];
   };
 }
-
-const MONETIZE_SYSTEM = `Ты — продюсер карманной творческой студии. Тебе дают воркспейс (тип, название, описание, стадия, что уже готово) и, возможно, бриф пользователя.
-Составь реалистичный, конкретный план монетизации этого творческого проекта на русском языке.
-Продукты и цены — правдоподобные для российского рынка (рубли, «490 ₽», «1 990 ₽», «9 $» для зарубежных площадок). Никакой воды: каждый пункт — конкретное действие или оффер.
-Отвечай СТРОГО одним JSON-объектом (без markdown, без пояснений вокруг) точно такой структуры:
-{
-  "concept": "1-2 предложения о том, как проект зарабатывает",
-  "products": [{"name": "название продукта", "price": "цена строкой", "note": "короткое пояснение (1 предложение)"}],
-  "channels": [{"name": "название канала/площадки", "note": "что там делать"}],
-  "steps": [{"term": "Неделя 1-2", "note": "конкретное действие"}],
-  "forecast": {"assumption": "допущение прогноза (1 предложение)", "monthly": [{"label": "Месяц 1", "amount": 15000}]}
-}
-Требования: products — ровно 4-5 штук; channels — 3-4; steps — 4-6 с нарастающими сроками (Неделя 1-2, Неделя 3-4, Месяц 2, Месяц 3); forecast.monthly — ровно 3 точки (Месяц 1, Месяц 2, Месяц 3), amount — число в рублях.`;
 
 /** Строковое поле с защитой от мусора LLM. */
 function str(value: unknown, max = 300): string {
@@ -147,7 +138,9 @@ function humanBlock(lines: string[]): string {
 const ruble = (n: number) => `${new Intl.NumberFormat("ru-RU").format(n)} ₽`;
 
 export async function POST(req: Request) {
-  const parsed = schema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = schema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -158,6 +151,16 @@ export async function POST(req: Request) {
 
   const check = await ensureWorkspace(req, projectId);
   if (!check.ok) return check.response;
+
+  try {
+    await resolveToolRoute(db, check.userId, "monetize");
+  } catch (err) {
+    const mapped = aiErrorResponse(
+      err,
+      "Модель не собрала план — попробуйте ещё раз",
+    );
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+  }
 
   const project = await db.project.findFirst({
     where: { id: projectId, userId: check.userId },
@@ -197,17 +200,22 @@ export async function POST(req: Request) {
 
   let plan: MonetizePlan;
   try {
-    const normalized = normalizePlan(await aiChatJson(MONETIZE_SYSTEM, userPrompt));
+    const normalized = normalizePlan(
+      await aiChatJson(check.userId, "monetize", MONETIZE_SYSTEM, userPrompt),
+    );
     if (!normalized) {
       throw new Error("Пустой или неструктурированный ответ модели");
     }
     plan = normalized;
   } catch (err) {
-    console.error("[ai/monetize] failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Модель не собрала план — попробуйте ещё раз" },
-      { status: 502 },
+    const mapped = aiErrorResponse(
+      err,
+      "Модель не собрала план — попробуйте ещё раз",
     );
+    if (mapped.status >= 500) {
+      console.error("[ai/monetize] failed:", err instanceof Error ? err.message : err);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 
   try {

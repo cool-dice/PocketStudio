@@ -17,6 +17,13 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { formatNarrationDate, voiceLabel } from "./narration-data";
+import {
+  AUDIO_LIBRARY_EMPTY,
+  AUDIO_LIBRARY_EMPTY_HINT,
+  AUDIO_LIBRARY_LOAD_ERROR,
+  AUDIO_LIBRARY_LOAD_ERROR_HINT,
+  playableAudioSrc,
+} from "@/lib/audio-copy";
 
 /** Бейдж происхождения трека: голос / микс DAW / сэмпл. */
 function originBadge(artifact: ArtifactDto): { label: string; className: string } {
@@ -59,11 +66,11 @@ export function AudioLibraryTab({
       const list = await api.listArtifacts(projectId, "audio");
       setItems(
         list
-          .filter((a) => a.url)
+          .filter((a) => playableAudioSrc(a))
           .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
       );
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Не удалось загрузить аудиотеку");
+      setError(err instanceof ApiError ? err.message : AUDIO_LIBRARY_LOAD_ERROR);
     } finally {
       setLoading(false);
     }
@@ -136,6 +143,7 @@ export function AudioLibraryTab({
       ) : error ? (
         <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4">
           <p className="text-sm text-destructive">{error}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{AUDIO_LIBRARY_LOAD_ERROR_HINT}</p>
           <Button variant="outline" size="sm" className="mt-2" onClick={() => void load()}>
             Попробовать снова
           </Button>
@@ -143,10 +151,9 @@ export function AudioLibraryTab({
       ) : items.length === 0 ? (
         <div className="rounded-xl border border-dashed p-6 text-center">
           <AudioWaveform className="mx-auto size-6 text-muted-foreground" aria-hidden="true" />
-          <p className="mt-2 text-sm font-medium">Аудио пока нет</p>
+          <p className="mt-2 text-sm font-medium">{AUDIO_LIBRARY_EMPTY}</p>
           <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
-            Озвучьте текст во вкладке «Озвучка» или соберите трек в «Студии» —
-            готовые записи и миксы появятся здесь.
+            {AUDIO_LIBRARY_EMPTY_HINT}
           </p>
         </div>
       ) : (
@@ -232,7 +239,7 @@ export function AudioLibraryTab({
                 <audio
                   controls
                   preload="none"
-                  src={artifact.url ?? undefined}
+                  src={playableAudioSrc(artifact) ?? undefined}
                   className="mt-3 h-10 w-full"
                   aria-label={`Плеер: ${artifact.title}`}
                 />

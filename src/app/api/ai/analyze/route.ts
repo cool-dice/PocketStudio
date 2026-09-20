@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
-import { aiAnalyzeDocument } from "@/lib/ai";
+import { aiAnalyzeDocument, aiErrorResponse } from "@/lib/ai";
+import { scheduleIndexFinding } from "@/lib/rag/hooks";
 import { ensureOwned } from "@/lib/workspace-api";
 import { findingDto } from "@/lib/workspace-shapes";
 
@@ -18,7 +20,9 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
-  const parsed = schema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = schema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -45,6 +49,7 @@ export async function POST(req: Request) {
 
   try {
     const drafts = await aiAnalyzeDocument(
+      check.userId,
       filled.map((s) => ({ title: s.title, content: s.content })),
     );
 
@@ -65,16 +70,20 @@ export async function POST(req: Request) {
         }),
       ),
     );
+    for (const row of created) scheduleIndexFinding(db, row.id);
 
     return NextResponse.json(
       { findings: created.map(findingDto), replaced: drafts.length },
       { status: 201 },
     );
   } catch (err) {
-    console.error("[ai/analyze] failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { error: "Аналитик не справился — попробуйте ещё раз" },
-      { status: 502 },
+    const mapped = aiErrorResponse(
+      err,
+      "Аналитик не справился — попробуйте ещё раз",
     );
+    if (mapped.status >= 500) {
+      console.error("[ai/analyze] failed:", err instanceof Error ? err.message : err);
+    }
+    return NextResponse.json({ error: mapped.error }, { status: mapped.status });
   }
 }

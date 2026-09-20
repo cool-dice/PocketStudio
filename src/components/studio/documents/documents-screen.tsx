@@ -34,6 +34,11 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared/module-header";
 import { api } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
+import {
+  readLastWorkspaceDoc,
+  writeLastWorkspaceDoc,
+} from "@/lib/last-workspace-doc";
 import type { DocumentDto, DocumentKind, WorkspaceDto } from "@/lib/workspace-types";
 import { useDocument, useDocuments, useDocumentShelves } from "@/hooks/use-documents";
 import { AlbumTab } from "./album-tab";
@@ -57,7 +62,13 @@ export function DocumentsScreen({
 }: ModuleScreenProps & { workspaceId?: string }) {
   const [tab, setTab] = useState<ModuleTab>("manuscript");
   const [focusEntityId, setFocusEntityId] = useState<string | null>(null);
-  const [activeDocId, setActiveDocId] = useState<string | null>(null);
+  const workspaceDocId = useAppUi((s) => s.workspaceDocId);
+  const setWorkspaceDocId = useAppUi((s) => s.setWorkspaceDocId);
+  const [activeDocId, setActiveDocId] = useState<string | null>(
+    () =>
+      workspaceDocId ??
+      (workspaceId ? readLastWorkspaceDoc(workspaceId) : null),
+  );
   const [createOpen, setCreateOpen] = useState(false);
 
   const embedded = useDocuments(workspaceId ?? null);
@@ -74,20 +85,33 @@ export function DocumentsScreen({
   const loading = isEmbedded ? embedded.loading : globalShelves.loading;
   const shelves = isEmbedded ? null : globalShelves.shelves;
 
+  // Активный документ — производное значение: пока не выбрали (или
+  // выбранный исчез после удаления) — первый в списке.
+  const activeId = docs.some((candidate) => candidate.id === activeDocId)
+    ? activeDocId
+    : (docs[0]?.id ?? null);
+
   const {
     document: doc,
     loading: docLoading,
     saveSection,
     createSection,
     deleteSection,
+    applySection,
     rename,
-  } = useDocument(activeDocId);
+  } = useDocument(activeId);
 
-  // Активный документ — производное значение: пока не выбрали (или
-  // выбранный исчез после удаления) — первый в списке.
-  const activeId = docs.some((candidate) => candidate.id === activeDocId)
-    ? activeDocId
-    : (docs[0]?.id ?? null);
+  useEffect(() => {
+    if (workspaceDocId && workspaceDocId !== activeDocId) {
+      setActiveDocId(workspaceDocId);
+    }
+  }, [workspaceDocId, activeDocId]);
+
+  useEffect(() => {
+    if (!workspaceId || !activeId) return;
+    writeLastWorkspaceDoc(workspaceId, activeId);
+    if (workspaceDocId !== activeId) setWorkspaceDocId(activeId);
+  }, [workspaceId, activeId, workspaceDocId, setWorkspaceDocId]);
 
   // Воркспейс данных для вкладок Сущности/Альбом/Аналитик.
   const dataWorkspaceId = isEmbedded
@@ -143,6 +167,10 @@ export function DocumentsScreen({
 
   function handleSelectDoc(id: string) {
     setActiveDocId(id);
+    if (workspaceId) {
+      setWorkspaceDocId(id);
+      writeLastWorkspaceDoc(workspaceId, id);
+    }
   }
 
   async function handleRenameDoc(id: string, title: string) {
@@ -267,10 +295,12 @@ export function DocumentsScreen({
             saveSection={saveSection}
             createSection={createSection}
             deleteSection={deleteSection}
+            applySection={applySection}
             onDocPatched={(docId, patch) => {
               if (isEmbedded) embedded.patchLocal(docId, patch);
               else globalShelves.patchDocument(docId, patch);
             }}
+            workspaceId={dataWorkspaceId}
           />
         </TabsContent>
 

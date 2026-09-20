@@ -1,20 +1,17 @@
 /**
- * Живая озвучка (Фаза A): справочник голосов TTS и утилиты отображения.
- *
- * Идентификаторы голосов соответствуют серверному allowlistу TTS_VOICES
- * (src/lib/ai/index.ts — tongtong…luodo): фронт отправляет их в
- * POST /api/ai/tts, сервер возвращает meta.voice, библиотека ниже
- * рисует подпись через voiceLabel().
+ * Живая озвучка: справочник голосов TTS шлюза (OpenAI-совместимые имена).
+ * Старые идентификаторы z-ai (tongtong…) мапятся в alloy/nova/… на шлюзе
+ * и подписываются через voiceLabel() в библиотеке, но в панели выбора их нет.
  */
 
 export type NarrationVoiceId =
-  | "tongtong"
-  | "chuichui"
-  | "xiaochen"
-  | "jam"
-  | "kazi"
-  | "douji"
-  | "luodo";
+  | "alloy"
+  | "nova"
+  | "shimmer"
+  | "echo"
+  | "onyx"
+  | "fable"
+  | "sage";
 
 export interface NarrationVoice {
   id: NarrationVoiceId;
@@ -29,60 +26,74 @@ export interface NarrationVoice {
 
 export const NARRATION_VOICES: readonly NarrationVoice[] = [
   {
-    id: "tongtong",
-    name: "Тонгтунг",
-    note: "мягкий",
+    id: "alloy",
+    name: "Alloy",
+    note: "нейтральный",
     gradient: "linear-gradient(135deg,#34d399,#059669)",
-    initials: "Т",
+    initials: "A",
   },
   {
-    id: "chuichui",
-    name: "Чуйчуй",
-    note: "тёплый",
+    id: "nova",
+    name: "Nova",
+    note: "яркий",
     gradient: "linear-gradient(135deg,#fbbf24,#d97706)",
-    initials: "Ч",
+    initials: "N",
   },
   {
-    id: "xiaochen",
-    name: "Сяочэнь",
-    note: "женский",
+    id: "shimmer",
+    name: "Shimmer",
+    note: "мягкий",
     gradient: "linear-gradient(135deg,#fb7185,#be123c)",
-    initials: "С",
+    initials: "S",
   },
   {
-    id: "jam",
-    name: "Джэм",
-    note: "мужской",
+    id: "echo",
+    name: "Echo",
+    note: "спокойный",
     gradient: "linear-gradient(135deg,#a1a1aa,#3f3f46)",
-    initials: "Дж",
+    initials: "E",
   },
   {
-    id: "kazi",
-    name: "Кази",
+    id: "onyx",
+    name: "Onyx",
     note: "глубокий",
     gradient: "linear-gradient(135deg,#b45309,#7c2d12)",
-    initials: "К",
+    initials: "O",
   },
   {
-    id: "douji",
-    name: "Доуцзи",
-    note: "юный",
+    id: "fable",
+    name: "Fable",
+    note: "рассказчик",
     gradient: "linear-gradient(135deg,#2dd4bf,#0d9488)",
-    initials: "До",
+    initials: "F",
   },
   {
-    id: "luodo",
-    name: "Луодо",
-    note: "спокойный",
+    id: "sage",
+    name: "Sage",
+    note: "ровный",
     gradient: "linear-gradient(135deg,#a78bfa,#7c3aed)",
-    initials: "Л",
+    initials: "Sg",
   },
 ];
 
-/** Подпись голоса для карточек библиотеки: «Джэм — мужской». */
+const LEGACY_VOICE_LABELS: Record<string, string> = {
+  tongtong: "Alloy — нейтральный",
+  chuichui: "Nova — яркий",
+  xiaochen: "Shimmer — мягкий",
+  jam: "Echo — спокойный",
+  kazi: "Onyx — глубокий",
+  douji: "Fable — рассказчик",
+  luodo: "Sage — ровный",
+};
+
+/** Подпись голоса для карточек библиотеки. */
 export function voiceLabel(voice: unknown): string {
   const v = NARRATION_VOICES.find((x) => x.id === voice);
-  return v ? `${v.name} — ${v.note}` : "Голос студии";
+  if (v) return `${v.name} — ${v.note}`;
+  if (typeof voice === "string" && LEGACY_VOICE_LABELS[voice]) {
+    return LEGACY_VOICE_LABELS[voice];
+  }
+  return "Голос студии";
 }
 
 /** Лимит текста озвучки (как в REST /api/ai/tts). */

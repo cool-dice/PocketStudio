@@ -101,6 +101,21 @@ const TOOL_META: Record<string, ToolMeta> = {
     running: "Отмечаю шаг плана…",
     done: "Шаг плана выполнен",
   },
+  retrieve_canon: {
+    icon: Search,
+    running: "Ищу по канону…",
+    done: "Канон",
+  },
+  retrieve_code: {
+    icon: FileSearch,
+    running: "Ищу в коде…",
+    done: "Код",
+  },
+  deploy_project: {
+    icon: FolderGit2,
+    running: "Готовлю сборку…",
+    done: "Сборка",
+  },
 };
 
 const FALLBACK_META: ToolMeta = {
@@ -239,6 +254,38 @@ function summarizeResult(tool: string, result: unknown): string | null {
     return null;
   }
 
+  if (tool === "retrieve_canon" || tool === "retrieve_code") {
+    const hits = Array.isArray(r.hits) ? r.hits : [];
+    const scope = r.scope === "workspace" ? "по канону воркспейса" : "по канону студии";
+    if (hits.length === 0) {
+      return typeof r.message === "string" ? r.message : `${scope}: ничего не нашлось`;
+    }
+    const titles = hits
+      .slice(0, 3)
+      .map((h) => {
+        const row = h as { title?: unknown; path?: unknown; workspaceName?: unknown };
+        return String(row.path ?? row.title ?? "").trim();
+      })
+      .filter(Boolean);
+    const rest = hits.length > 3 ? " …" : "";
+    return `${scope} · ${hits.length} фрагм.${titles.length ? `: ${titles.join(", ")}${rest}` : ""}`;
+  }
+
+  if (tool === "deploy_project") {
+    if (typeof r.message === "string" && r.message.trim()) {
+      return textPreview(r.message, 280);
+    }
+    if (typeof r.log === "string" && r.log.trim()) {
+      return textPreview(r.log, 280);
+    }
+    const status = typeof r.status === "string" ? r.status : null;
+    return status ? `Статус: ${status}` : null;
+  }
+
+  if (typeof r.message === "string" && r.message.trim()) {
+    return textPreview(r.message, 240);
+  }
+
   return null;
 }
 
@@ -327,8 +374,12 @@ export const ToolCard = memo(function ToolCard({
       ? (result as Record<string, unknown>)
       : null;
   const summary = running ? null : summarizeResult(toolName, result);
+  const hideRawDump =
+    toolName === "retrieve_canon" || toolName === "retrieve_code";
   const hasDetails =
-    !running && ((args !== null && args !== undefined) || result !== null);
+    !running &&
+    !hideRawDump &&
+    ((args !== null && args !== undefined) || result !== null);
   const projectPreview =
     !running && resultObj !== null ? (
       <ProjectToolPreview tool={toolName} result={resultObj} />

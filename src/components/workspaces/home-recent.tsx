@@ -8,7 +8,7 @@
  * компактная строка (мобайл). Скелетоны на время загрузки.
  */
 
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, RotateCcw } from "lucide-react";
 
 import { timeAgo } from "@/components/workspaces/home-data";
 import { pluralRu } from "@/components/workspaces/overview-data";
@@ -18,17 +18,27 @@ import {
   workspaceSubtitle,
 } from "@/components/workspaces/workspaces-data";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useThreads } from "@/hooks/use-threads";
 import { useWorkspaces } from "@/hooks/use-workspaces";
+import { rankWorkspacesByRecency } from "@/lib/recent-workspaces";
 import { useAppUi } from "@/lib/store";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import type { WorkspaceDto } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 
 export function HomeRecent({ limit = 3 }: { limit?: number }) {
-  const { workspaces, loading } = useWorkspaces();
-  const items = workspaces.slice(0, limit);
+  const { workspaces, loading, error, load } = useWorkspaces();
+  const { threads } = useThreads();
+  const items = rankWorkspacesByRecency(workspaces, threads).slice(0, limit);
+  const previewByWs = new Map<string, string>();
+  for (const t of threads) {
+    if (!t.projectId || previewByWs.has(t.projectId)) continue;
+    if (t.lastMessage?.content) previewByWs.set(t.projectId, t.lastMessage.content);
+  }
   const showSkeleton = loading && items.length === 0;
+  const showError = error && !loading && items.length === 0;
 
   return (
     <section aria-label="Продолжить работу" className="space-y-3">
@@ -39,6 +49,16 @@ export function HomeRecent({ limit = 3 }: { limit?: number }) {
 
       {showSkeleton ? (
         <HomeRecentSkeleton />
+      ) : showError ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-5">
+          <p className="text-sm text-muted-foreground">
+            Не удалось загрузить недавние воркспейсы.
+          </p>
+          <Button variant="outline" size="sm" onClick={load}>
+            <RotateCcw className="size-3.5" aria-hidden="true" />
+            Повторить
+          </Button>
+        </div>
       ) : items.length === 0 ? (
         <p className="rounded-xl border border-dashed px-4 py-8 text-center text-xs text-muted-foreground">
           Пока нет ни одного воркспейса — создайте первый на дашборде.
@@ -48,14 +68,14 @@ export function HomeRecent({ limit = 3 }: { limit?: number }) {
           {/* Сетка вертикальных карточек (sm+) */}
           <div className="hidden gap-3 sm:grid sm:grid-cols-2 xl:grid-cols-3">
             {items.map((ws) => (
-              <GridCard key={ws.id} ws={ws} />
+              <GridCard key={ws.id} ws={ws} preview={previewByWs.get(ws.id)} />
             ))}
           </div>
 
           {/* Компактные строки (мобайл / узкий экран) */}
           <div className="grid gap-2 sm:hidden">
             {items.map((ws) => (
-              <CompactCard key={ws.id} ws={ws} />
+              <CompactCard key={ws.id} ws={ws} preview={previewByWs.get(ws.id)} />
             ))}
           </div>
         </>
@@ -100,7 +120,7 @@ function HomeRecentSkeleton() {
 
 /* ── Вертикальная карточка с баннером (сетка дашборда) ── */
 
-function GridCard({ ws }: { ws: WorkspaceDto }) {
+function GridCard({ ws, preview }: { ws: WorkspaceDto; preview?: string }) {
   const openWorkspace = useAppUi((s) => s.openWorkspace);
   const meta = WORKSPACE_TYPE_META[ws.type];
   const total = workspaceItemsTotal(ws);
@@ -138,7 +158,7 @@ function GridCard({ ws }: { ws: WorkspaceDto }) {
               {ws.name}
             </span>
             <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-              {workspaceSubtitle(ws)}
+              {preview || workspaceSubtitle(ws)}
             </span>
           </span>
           <ArrowUpRight
@@ -181,7 +201,7 @@ function GridCard({ ws }: { ws: WorkspaceDto }) {
 
 /* ── Компактная горизонтальная строка (мобайл) ── */
 
-function CompactCard({ ws }: { ws: WorkspaceDto }) {
+function CompactCard({ ws, preview }: { ws: WorkspaceDto; preview?: string }) {
   const openWorkspace = useAppUi((s) => s.openWorkspace);
   const meta = WORKSPACE_TYPE_META[ws.type];
   const total = workspaceItemsTotal(ws);
@@ -206,8 +226,8 @@ function CompactCard({ ws }: { ws: WorkspaceDto }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{ws.name}</span>
         <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-          {meta.label} · {total}{" "}
-          {pluralRu(total, "объект", "объекта", "объектов")} ·{" "}
+          {preview || `${meta.label} · ${total} ${pluralRu(total, "объект", "объекта", "объектов")}`}
+          {" · "}
           {timeAgo(ws.updatedAt)}
         </span>
         <span

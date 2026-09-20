@@ -22,31 +22,42 @@ import {
   ModuleHeader,
   type ModuleScreenProps,
 } from "@/components/studio/shared/module-header";
+import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, ApiError } from "@/lib/api";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import {
+  IMAGE_GEN_FAILED,
+  IMAGE_GEN_FAILED_HINT,
+  IMAGE_GEN_UNCONFIGURED_HINT,
+  displayableImageSrc,
+} from "@/lib/image-copy";
+import { DESIGN_MODULE_DESCRIPTION, PALETTE_GENERATE_FAILED, PALETTE_GENERATE_FAILED_HINT, PALETTE_UNCONFIGURED_HINT } from "@/lib/studio-copy";
 import { briefFromArtifact, paletteFromArtifact } from "@/lib/palette";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
-import type { ArtifactDto, WorkspaceDto } from "@/lib/workspace-types";
+import type { ArtifactDto } from "@/lib/workspace-types";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import { SelectableChip } from "../images/chip";
 import { MoodboardTab, type GeneratingInfo } from "./moodboard-tab";
 import { StyleTab, type LoadedPalette } from "./style-tab";
+import { RasterEditor } from "./raster-editor";
+import { LayoutEditor } from "./layout-editor";
 import {
   boardPresetById,
   boardTileFromArtifact,
   type FrameRequest,
 } from "./palette-data";
 
-type DesignTab = "moodboard" | "style";
+type DesignTab = "moodboard" | "style" | "raster" | "layout";
 
 export function DesignScreen({
   onOpenMobileNav,
   workspaceId,
 }: ModuleScreenProps & { workspaceId?: string }) {
-  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
-  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const { workspaces, loading: wsLoading, error: wsError, load: loadWorkspaces } =
+    useWorkspaces();
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
 
@@ -55,29 +66,18 @@ export function DesignScreen({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  /* Вкладки + генерация кадра (30–45 сек) и палитры (~10–20 сек). */
-  const [tab, setTab] = useState<DesignTab>("moodboard");
+  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
+  const designSourceUrl = useAppUi((s) => s.designSourceUrl);
+
+  const [tab, setTab] = useState<DesignTab>(
+    designSourceUrl ? "raster" : "moodboard",
+  );
   const [generating, setGenerating] = useState<GeneratingInfo | null>(null);
   const [paletteBusy, setPaletteBusy] = useState(false);
 
-  const setMainArea = useAppUi((s) => s.setMainArea);
-
-  /* Чипы воркспейсов — только на глобальном экране. */
   useEffect(() => {
-    if (workspaceId) return;
-    let cancelled = false;
-    api
-      .listWorkspaces()
-      .then((ws) => {
-        if (!cancelled) setWorkspaces(ws);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaces([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
+    if (designSourceUrl) setTab("raster");
+  }, [designSourceUrl]);
 
   /* Загрузка артефактов воркспейса. */
   const loadArtifacts = useCallback(async () => {
@@ -103,7 +103,7 @@ export function DesignScreen({
 
   useEffect(() => {
     void loadArtifacts();
-  }, [loadArtifacts]);
+  }, [loadArtifacts, workspaceVersion]);
 
   /* Производные данные: плитки мудборда + палитра стиля. */
   const boardTiles = useMemo(
@@ -154,14 +154,24 @@ export function DesignScreen({
           size: request.size,
           stage: "design",
         });
+        if (!displayableImageSrc(artifact)) {
+          toast.error(IMAGE_GEN_FAILED, { description: IMAGE_GEN_FAILED_HINT });
+          return;
+        }
         prependArtifact(artifact);
         toast.success("Кадр готов и уже в мудборде", {
           description: artifact.title,
         });
       } catch (err) {
+        const unconfigured =
+          err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
         toast.error(
-          err instanceof ApiError ? err.message : "Генерация не удалась",
-          { description: "Попробуйте ещё раз — обычно это помогает." },
+          err instanceof ApiError ? err.message : IMAGE_GEN_FAILED,
+          {
+            description: unconfigured
+              ? IMAGE_GEN_UNCONFIGURED_HINT
+              : IMAGE_GEN_FAILED_HINT,
+          },
         );
       } finally {
         setGenerating(null);
@@ -224,8 +234,13 @@ export function DesignScreen({
         });
       } catch (err) {
         toast.error(
-          err instanceof ApiError ? err.message : "Не удалось собрать палитру",
-          { description: "Попробуйте ещё раз или уточните бриф." },
+          err instanceof ApiError ? err.message : PALETTE_GENERATE_FAILED,
+          {
+            description:
+              err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE
+                ? PALETTE_UNCONFIGURED_HINT
+                : PALETTE_GENERATE_FAILED_HINT,
+          },
         );
       } finally {
         setPaletteBusy(false);
@@ -251,6 +266,14 @@ export function DesignScreen({
           <PaletteIcon className="size-4" aria-hidden="true" />
           Стиль
         </TabsTrigger>
+        <TabsTrigger value="raster">
+          <PenTool className="size-4" aria-hidden="true" />
+          Растр
+        </TabsTrigger>
+        <TabsTrigger value="layout">
+          <PenTool className="size-4" aria-hidden="true" />
+          Макет
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="moodboard" className="flex min-h-0 flex-1 flex-col">
         <MoodboardTab
@@ -269,6 +292,14 @@ export function DesignScreen({
           busy={paletteBusy}
           onGenerate={(brief) => void generatePalette(brief)}
         />
+      </TabsContent>
+      <TabsContent value="raster" className="flex min-h-0 flex-1 flex-col">
+        {effectiveId ? (
+          <RasterEditor workspaceId={effectiveId} imageUrl={designSourceUrl} />
+        ) : null}
+      </TabsContent>
+      <TabsContent value="layout" className="flex min-h-0 flex-1 flex-col">
+        {effectiveId ? <LayoutEditor workspaceId={effectiveId} /> : null}
       </TabsContent>
     </Tabs>
   );
@@ -306,7 +337,7 @@ export function DesignScreen({
       <ModuleHeader
         icon={PenTool}
         title="Дизайн"
-        description="Мудборд референсов и палитра стиля"
+        description={DESIGN_MODULE_DESCRIPTION}
         stage="beta"
         onOpenMobileNav={onOpenMobileNav}
       />
@@ -330,28 +361,13 @@ export function DesignScreen({
               Мудборд и палитра живут внутри воркспейса — выберите, где
               собираем стиль.
             </p>
-            {workspaces === null ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {Array.from({ length: 4 }, (_, i) => (
-                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
-                ))}
-              </div>
-            ) : workspaces.length === 0 ? (
-              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
-                <p className="text-sm text-muted-foreground">
-                  Пока нет ни одного воркспейса — сначала создайте его.
-                </p>
-                <Button
-                  size="sm"
-                  onClick={() => setMainArea("workspaces")}
-                >
-                  <Images className="size-4" aria-hidden="true" />
-                  К воркспейсам
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {workspaces.map((ws) => {
+            <WorkspacePickerStatus
+              loading={!workspaceId && wsLoading}
+              error={!workspaceId && wsError}
+              empty={!workspaceId && !wsLoading && !wsError && workspaces.length === 0}
+              onRetry={loadWorkspaces}
+            >
+              {workspaces.map((ws) => {
                   const Icon = WORKSPACE_TYPE_META[ws.type].icon;
                   return (
                     <SelectableChip
@@ -367,8 +383,7 @@ export function DesignScreen({
                     />
                   );
                 })}
-              </div>
-            )}
+            </WorkspacePickerStatus>
           </section>
         ) : null}
 

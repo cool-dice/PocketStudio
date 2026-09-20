@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
@@ -9,6 +10,12 @@ import {
   validateMcpConfig,
 } from "@/lib/mcp-catalog";
 import { mcpDto } from "@/lib/mcp-shapes";
+import {
+  attachMcpRuntimeStatus,
+  probeMcpRuntime,
+  resolveCommandPresence,
+  stdioCommandFromConfig,
+} from "@/lib/mcp-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +69,24 @@ export async function GET(req: Request) {
     return a.createdAt.getTime() - b.createdAt.getTime();
   });
 
-  return NextResponse.json({ servers: sorted.map(mcpDto) });
+  const runtime = await probeMcpRuntime();
+  const dtos = sorted.map(mcpDto);
+  const commandPresence = await resolveCommandPresence(
+    dtos
+      .map((dto) =>
+        dto.transport === "stdio" ? stdioCommandFromConfig(dto.config) : null,
+      )
+      .filter((cmd): cmd is string => Boolean(cmd)),
+  );
+  return NextResponse.json({
+    runtime,
+    servers: dtos.map((dto) =>
+      attachMcpRuntimeStatus(dto, {
+        agentBrowser: runtime.agentBrowser,
+        commandPresence,
+      }),
+    ),
+  });
 }
 
 /* ── POST /api/mcp — добавить свой сервер ── */
@@ -84,7 +108,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
   }
 
-  const parsed = createSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = createSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -126,5 +152,18 @@ export async function POST(req: Request) {
     },
   });
 
-  return NextResponse.json({ server: mcpDto(row) }, { status: 201 });
+  const runtime = await probeMcpRuntime();
+  const dto = mcpDto(row);
+  const command =
+    dto.transport === "stdio" ? stdioCommandFromConfig(dto.config) : null;
+  const commandPresence = await resolveCommandPresence(command ? [command] : []);
+  return NextResponse.json(
+    {
+      server: attachMcpRuntimeStatus(dto, {
+        agentBrowser: runtime.agentBrowser,
+        commandPresence,
+      }),
+    },
+    { status: 201 },
+  );
 }

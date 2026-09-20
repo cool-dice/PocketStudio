@@ -11,8 +11,12 @@
  * checkpoint and zip export (last two need a bound project).
  *
  * Voice (Stage 2): compact mic next to the send button — records via
- * useVoiceRecorder, the backend transcribes (POST /api/notes/voice) and
- * the text is appended to the message input for review before sending.
+ * useVoiceRecorder, the backend transcribes (POST /api/notes/voice → { text })
+ * and the text is appended to the message input for review before sending.
+ * Chat voice does not create a notebook note.
+ *
+ * Oversize: UTF-8 > 64 KiB shows the same Russian `error` copy as the
+ * socket event, disables send, and a byte count appears near the cap.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -43,21 +47,71 @@ import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
+import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
+import {
+  COMPOSER_TEXTAREA_MAX_CHARS,
+  composerSizeUi,
+} from "@/lib/message-send";
 
 const MAX_HEIGHT = 200;
 
-export function Composer() {
-  const { busy, sendMessage, activeThread, updateThreadMode } = useThreads();
+export function Composer({
+  locked = false,
+  scopeProjectId,
+}: {
+  locked?: boolean;
+  /** When set, chip/send stay on this workspace — never the previous one. */
+  scopeProjectId?: string | null;
+}) {
+  const { busy, sendMessage, abortTurn, activeThread, updateThreadMode, sendError, clearSendError } =
+    useThreads();
   const { getById } = useProjects();
   const openProject = useAppUi((s) => s.openProject);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const openCreateProject = useAppUi((s) => s.openCreateProject);
   const bumpProjectFiles = useAppUi((s) => s.bumpProjectFiles);
+  const composerDraft = useAppUi((s) => s.composerDraft);
+  const composerAutoSendProjectId = useAppUi((s) => s.composerAutoSendProjectId);
+  const setComposerDraft = useAppUi((s) => s.setComposerDraft);
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const pendingAutoSend = useRef<{
+    text: string;
+    projectId: string | null;
+  } | null>(null);
 
-  const boundProject = getById(activeThread?.projectId ?? null);
+  useEffect(() => {
+    if (!composerDraft) return;
+    const text = composerDraft;
+    const autoProjectId = composerAutoSendProjectId;
+    setValue(text);
+    setComposerDraft(null);
+    if (autoProjectId !== undefined) {
+      pendingAutoSend.current = { text, projectId: autoProjectId };
+    }
+    requestAnimationFrame(() => taRef.current?.focus());
+  }, [composerDraft, composerAutoSendProjectId, setComposerDraft]);
+
+  useEffect(() => {
+    const pending = pendingAutoSend.current;
+    if (!pending || busy || locked || !activeThread) return;
+    const have = activeThread.projectId ?? null;
+    if (pending.projectId !== have) return;
+    const size = composerSizeUi(pending.text);
+    if (size.disableSend) {
+      pendingAutoSend.current = null;
+      return;
+    }
+    pendingAutoSend.current = null;
+    setValue("");
+    void sendMessage(pending.text);
+  }, [activeThread, busy, locked, sendMessage]);
+
+  const threadProjectId = activeThread?.projectId ?? null;
+  const scoped =
+    scopeProjectId === undefined || threadProjectId === scopeProjectId;
+  const boundProject = scoped ? getById(threadProjectId) : null;
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
@@ -174,7 +228,7 @@ export function Composer() {
               const objectUrl = URL.createObjectURL(blob);
               const anchor = document.createElement("a");
               anchor.href = objectUrl;
-              anchor.download = `vibeflow-${boundProject.name}.zip`;
+              anchor.download = `pocketstudio-${boundProject.name}.zip`;
               document.body.append(anchor);
               anchor.click();
               anchor.remove();
@@ -208,6 +262,7 @@ export function Composer() {
   useEffect(() => {
     setSlashIndex(0);
   }, [token]);
+  const submittingRef = useRef(false);
 
   const executeCommand = (cmd: SlashCommand) => {
     setValue("");
@@ -219,28 +274,28 @@ export function Composer() {
     finalizingRef.current = true;
     try {
       const clip = clipArg ?? (await recorder.stop());
-      const note = await api.createVoiceNote({
+      const text = await api.transcribeVoice({
         audioBase64: clip.audioBase64,
         mime: clip.mime,
       });
-      const text = (note.rawText ?? note.transcription ?? "").trim();
-      if (!text) {
-        toast.error("Не удалось распознать речь — попробуйте записать ещё раз");
+      const result = voiceResultCopy(text);
+      if (!result.ok) {
+        toast.error(result.error);
       } else {
         // Append to whatever is already typed — the user reviews and sends.
         setValue((prev) => {
           const base = prev.trim();
-          const merged = base ? `${base} ${text}` : text;
+          const merged = base ? `${base} ${result.text}` : result.text;
           return merged.slice(0, MAX_MESSAGE_LENGTH);
         });
         taRef.current?.focus();
-        toast.success("Голос распознан — проверьте текст");
+        toast.success(result.toast);
       }
     } catch (err) {
       toast.error(
         err instanceof ApiError || err instanceof Error
           ? err.message
-          : "Не удалось распознать голос",
+          : ASR_GENERIC,
       );
     } finally {
       finalizingRef.current = false;
@@ -258,7 +313,7 @@ export function Composer() {
     try {
       await recorder.start();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось начать запись");
+      toast.error(err instanceof Error ? err.message : MIC_START_FAILED);
     }
   };
 
@@ -270,13 +325,24 @@ export function Composer() {
     ta.style.height = `${Math.min(ta.scrollHeight, MAX_HEIGHT)}px`;
   }, [value]);
 
-  const canSend = !busy && !isRecording && value.trim().length > 0;
+  const blocked = busy || locked || !scoped;
+  const size = composerSizeUi(value, sendError);
+  const canSend =
+    !blocked &&
+    !isRecording &&
+    value.trim().length > 0 &&
+    !size.disableSend;
 
   const submit = async () => {
-    if (!canSend) return;
+    if (!canSend || submittingRef.current || size.disableSend) return;
+    submittingRef.current = true;
     const text = value;
     setValue("");
-    await sendMessage(text);
+    try {
+      await sendMessage(text);
+    } finally {
+      submittingRef.current = false;
+    }
     taRef.current?.focus();
   };
 
@@ -317,14 +383,14 @@ export function Composer() {
   return (
     <div className="border-t bg-background">
       <form
-        className="relative mx-auto w-full max-w-3xl px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        className="relative mx-auto w-full min-w-0 max-w-3xl px-3 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-4"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
         <SlashCommandsMenu
-          open={slashOpen && filteredCommands.length > 0 && !busy && !isRecording}
+          open={slashOpen && filteredCommands.length > 0 && !blocked && !isRecording}
           commands={filteredCommands}
           selectedIndex={slashIndex}
           onSelectIndex={setSlashIndex}
@@ -342,7 +408,7 @@ export function Composer() {
             <span className="truncate">Проект: {boundProject.name}</span>
           </button>
         )}
-        <div className="flex items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
+        <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
           <label htmlFor="composer" className="sr-only">
             Сообщение
           </label>
@@ -351,18 +417,27 @@ export function Composer() {
             ref={taRef}
             rows={1}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              if (sendError) clearSendError();
+              setValue(e.target.value);
+            }}
             onKeyDown={handleKeyDown}
+            aria-invalid={Boolean(size.error)}
+            aria-describedby={
+              size.showCount ? "composer-hint composer-count" : "composer-hint"
+            }
             placeholder={
               isRecording
                 ? "Слушаем вас…"
-                : busy
-                  ? "Студия печатает…"
-                  : "Напишите сообщение… или / для команд"
+                : locked && !busy
+                  ? "Подключаем чат воркспейса…"
+                  : blocked
+                    ? "Студия печатает…"
+                    : "Напишите сообщение… или / для команд"
             }
-            disabled={busy || isRecording}
-            maxLength={MAX_MESSAGE_LENGTH}
-            className="vf-scroll max-h-[200px] min-h-11 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={blocked || isRecording}
+            maxLength={COMPOSER_TEXTAREA_MAX_CHARS}
+            className="vf-scroll max-h-[200px] min-h-11 min-w-0 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
 
           {supported && voiceState === "idle" && (
@@ -371,7 +446,7 @@ export function Composer() {
               variant="ghost"
               size="icon"
               onClick={() => void startRecording()}
-              disabled={busy}
+              disabled={blocked}
               className="size-11 shrink-0 self-center rounded-xl text-muted-foreground transition-colors duration-150 hover:text-foreground"
               aria-label="Записать голос"
               aria-pressed={false}
@@ -431,6 +506,18 @@ export function Composer() {
             </span>
           )}
 
+          {busy ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="secondary"
+              aria-label="Остановить генерацию"
+              onClick={() => abortTurn()}
+              className="size-11 shrink-0 rounded-xl"
+            >
+              <Square className="size-3.5 fill-current" aria-hidden="true" />
+            </Button>
+          ) : (
           <Button
             type="submit"
             size="icon"
@@ -440,16 +527,44 @@ export function Composer() {
           >
             <ArrowUp className="size-4" aria-hidden="true" />
           </Button>
+          )}
         </div>
-        <p className="mt-2 px-1 text-center text-xs text-muted-foreground">
-          {isRecording
-            ? "Идёт запись голоса"
-            : voiceState === "processing"
-              ? "Распознаём голос…"
-              : busy
-                ? "Агент отвечает — подождите немного"
-                : "Enter — отправить · Shift+Enter — новая строка · / — команды"}
-        </p>
+        <div className="mt-2 flex items-start justify-between gap-2 px-1">
+          <p
+            id="composer-hint"
+            className={`min-w-0 flex-1 text-xs ${
+              size.error ? "text-destructive" : "text-muted-foreground"
+            }`}
+            role={size.error ? "alert" : undefined}
+          >
+            {size.error
+              ? size.error
+              : isRecording
+                ? "Идёт запись голоса"
+                : voiceState === "processing"
+                  ? "Распознаём голос…"
+                  : locked && !busy
+                    ? "Подключаем чат воркспейса…"
+                    : busy
+                      ? "Стоп — прервать ответ агента"
+                      : blocked
+                        ? "Агент отвечает — подождите немного"
+                        : "Enter — отправить · Shift+Enter — новая строка · / — команды"}
+          </p>
+          {size.showCount ? (
+            <span
+              id="composer-count"
+              className={`shrink-0 text-[11px] tabular-nums ${
+                size.oversized
+                  ? "text-destructive"
+                  : "text-amber-600 dark:text-amber-400"
+              }`}
+              aria-live="polite"
+            >
+              {size.countLabel}
+            </span>
+          ) : null}
+        </div>
       </form>
     </div>
   );

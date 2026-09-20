@@ -7,6 +7,7 @@ import {
   checkpointProject,
   projectRoot,
 } from "@/lib/workspace";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -37,12 +38,9 @@ export async function POST(
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    body = {};
-  }
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -60,6 +58,7 @@ export async function POST(
       where: { id: project.id },
       data: { updatedAt: new Date() },
     });
+    // Git commit is the snapshot. File embeddings stay live on disk — no-op.
     return NextResponse.json({ checkpoint });
   } catch (err) {
     if (err instanceof WorkspaceError) {

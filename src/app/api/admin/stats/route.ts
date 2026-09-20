@@ -1,8 +1,8 @@
 // GET /api/admin/stats — platform overview for the admin panel (Stage 4b).
 //
 // Honest scope: personal-scale counts + a 14-day activity sparkline built
-// from createdAt timestamps bucketed in JS (SQLite groupBy can't bucket
-// dates, and the row counts are bounded anyway).
+// from createdAt timestamps bucketed in JS (date buckets stay in process;
+// the row counts are bounded anyway).
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -24,39 +24,67 @@ export async function GET(req: Request) {
   since.setUTCDate(since.getUTCDate() - (ACTIVITY_DAYS - 1));
   since.setUTCHours(0, 0, 0, 0);
 
-  const [
-    users,
-    admins,
-    notes,
-    notesProcessed,
-    notesError,
-    categories,
-    projects,
-    threads,
-    messages,
-    notifications,
-    newUsers7d,
-    noteDates,
-    threadDates,
-    projectDates,
-  ] = await Promise.all([
-    db.user.count(),
-    db.user.count({ where: { role: "admin" } }),
-    db.note.count(),
-    db.note.count({ where: { status: "processed" } }),
-    db.note.count({ where: { status: "error" } }),
-    db.category.count(),
-    db.project.count(),
-    db.thread.count(),
-    db.message.count(),
-    db.notification.count(),
-    db.user.count({
-      where: { createdAt: { gte: new Date(Date.now() - 7 * 24 * 3600 * 1000) } },
-    }),
-    db.note.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } }),
-    db.thread.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } }),
-    db.project.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } }),
-  ]);
+  let users: number;
+  let admins: number;
+  let notes: number;
+  let notesProcessed: number;
+  let notesError: number;
+  let categories: number;
+  let projects: number;
+  let workspaces: number;
+  let threads: number;
+  let messages: number;
+  let notifications: number;
+  let newUsers7d: number;
+  let noteDates: { createdAt: Date }[];
+  let threadDates: { createdAt: Date }[];
+  let projectDates: { createdAt: Date }[];
+  try {
+    [
+      users,
+      admins,
+      notes,
+      notesProcessed,
+      notesError,
+      categories,
+      projects,
+      workspaces,
+      threads,
+      messages,
+      notifications,
+      newUsers7d,
+      noteDates,
+      threadDates,
+      projectDates,
+    ] = await Promise.all([
+      db.user.count(),
+      db.user.count({ where: { role: "admin" } }),
+      db.note.count(),
+      db.note.count({ where: { status: "processed" } }),
+      db.note.count({ where: { status: "error" } }),
+      db.category.count(),
+      db.project.count(),
+      db.project.count({ where: { origin: "workspace" } }),
+      db.thread.count(),
+      db.message.count(),
+      db.notification.count(),
+      db.user.count({
+        where: { createdAt: { gte: new Date(Date.now() - 7 * 24 * 3600 * 1000) } },
+      }),
+      db.note.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } }),
+      db.thread.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } }),
+      db.project.findMany({
+        where: { createdAt: { gte: since }, origin: "workspace" },
+        select: { createdAt: true },
+      }),
+    ]);
+  } catch {
+    console.error("[admin/stats] failed");
+    return NextResponse.json(
+      { error: "Не удалось загрузить статистику" },
+      { status: 500 },
+    );
+  }
 
   // Build the 14-day activity series (all zero-filled days included).
   const buckets = new Map<string, { date: string; notes: number; threads: number; projects: number }>();
@@ -89,6 +117,7 @@ export async function GET(req: Request) {
       notesError,
       categories,
       projects,
+      workspaces,
       threads,
       messages,
       notifications,

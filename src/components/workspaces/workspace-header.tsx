@@ -9,12 +9,11 @@
  * обновления + мобильная компоновка с гамбургером.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Archive,
   ArrowLeft,
   AudioWaveform,
-  BellRing,
   BookOpenText,
   Check,
   ChevronRight,
@@ -22,13 +21,13 @@ import {
   Copy,
   FolderKanban,
   ImagePlus,
-  Library,
   Menu,
   MoreHorizontal,
   NotebookPen,
   Pencil,
-  Save,
+  RefreshCw,
   Settings2,
+  Star,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -40,6 +39,16 @@ import {
 } from "@/components/workspaces/workspaces-data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -55,9 +64,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { api, ApiError } from "@/lib/api";
+import { invalidateWorkspaces } from "@/hooks/use-workspaces";
+import { useAppUi } from "@/lib/store";
 import {
-  WORKSPACE_STAGES,
+  WORKSPACES_ARCHIVE_ACTION,
+  WORKSPACES_FAVORITE_FAILED,
+  WORKSPACES_UNARCHIVE_ACTION,
+  workspaceArchiveToast,
+} from "@/lib/workspace-copy";
+import {
   WORKSPACE_TAB_META,
   WORKSPACE_TYPE_META,
   type WorkspaceTab,
@@ -82,10 +99,14 @@ export interface WorkspaceHeaderProps {
   onOpenMobileNav: () => void;
   /** Назад к списку воркспейсов. */
   onBack: () => void;
-  /** Мок-диалог «Настроить» (открытием управляет оболочка). */
+  /** Диалог названия/описания (открытием управляет оболочка). */
   settingsOpen: boolean;
   onOpenSettings: () => void;
   onCloseSettings: () => void;
+  /** После PATCH — перезагрузить оболочку. */
+  onUpdated?: () => void;
+  /** После удаления — назад к списку. */
+  onDeleted?: () => void;
 }
 
 export function WorkspaceHeader({
@@ -96,20 +117,126 @@ export function WorkspaceHeader({
   settingsOpen,
   onOpenSettings,
   onCloseSettings,
+  onUpdated,
+  onDeleted,
 }: WorkspaceHeaderProps) {
   const meta = WORKSPACE_TYPE_META[workspace.type];
   const stage = stageLabelOf(workspace);
   const updatedAgo = timeAgo(workspace.updatedAt);
   const tabLabel = WORKSPACE_TAB_META[tab].label;
 
-  const [notifyStage, setNotifyStage] = useState(true);
-  const [autosave, setAutosave] = useState(true);
-  const [inLibrary, setInLibrary] = useState(true);
+  const [name, setName] = useState(workspace.name);
+  const [description, setDescription] = useState(workspace.description ?? "");
+  const [saving, setSaving] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  function handleMenuAction(action: string) {
-    toast.info(action, {
-      description: "Демо-режим: действие заработает вместе с реальным хранением воркспейсов.",
-    });
+  useEffect(() => {
+    if (settingsOpen) {
+      setName(workspace.name);
+      setDescription(workspace.description ?? "");
+    }
+  }, [settingsOpen, workspace.name, workspace.description]);
+
+  async function reindexWorkspace() {
+    setReindexing(true);
+    try {
+      const res = await api.reindexRag({ projectId: workspace.id });
+      toast.success(res.message ?? "Воркспейс переиндексирован");
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось переиндексировать",
+      );
+    } finally {
+      setReindexing(false);
+    }
+  }
+
+  async function saveMeta() {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      toast.error("Название не может быть пустым");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.updateWorkspace(workspace.id, {
+        name: trimmed,
+        description: description.trim() || null,
+      });
+      toast.success("Воркспейс обновлён");
+      onCloseSettings();
+      invalidateWorkspaces();
+      onUpdated?.();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось сохранить",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmDelete() {
+    setDeleting(true);
+    try {
+      await api.deleteWorkspace(workspace.id);
+      toast.success("Воркспейс удалён");
+      setDeleteOpen(false);
+      invalidateWorkspaces();
+      onDeleted?.();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось удалить воркспейс",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function duplicateWorkspace() {
+    try {
+      const copy = await api.duplicateWorkspace(workspace.id);
+      toast.success("Создана копия воркспейса");
+      invalidateWorkspaces();
+      useAppUi.getState().openWorkspace(copy.id);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось дублировать",
+      );
+    }
+  }
+
+  async function toggleArchive() {
+    const next = !workspace.archived;
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        archived: next,
+      });
+      const result = workspaceArchiveToast(true, updated.archived);
+      toast.success(result.message);
+      invalidateWorkspaces();
+      if (updated.archived) onDeleted?.();
+      else onUpdated?.();
+    } catch (err) {
+      const failed = workspaceArchiveToast(false, next);
+      toast.error(
+        err instanceof ApiError ? err.message : failed.message,
+      );
+    }
+  }
+
+  async function toggleFavorite() {
+    try {
+      await api.updateWorkspace(workspace.id, { favorite: !workspace.favorite });
+      invalidateWorkspaces();
+      onUpdated?.();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : WORKSPACES_FAVORITE_FAILED,
+      );
+    }
   }
 
   return (
@@ -253,6 +380,22 @@ export function WorkspaceHeader({
               variant="ghost"
               size="icon"
               className="size-9"
+              onClick={() => void toggleFavorite()}
+              aria-label={workspace.favorite ? "Убрать из избранного" : "В избранное"}
+              title="Избранное"
+            >
+              <Star
+                className={cn(
+                  "size-4.5",
+                  workspace.favorite && "fill-amber-400 text-amber-400",
+                )}
+                aria-hidden="true"
+              />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9"
               onClick={onOpenSettings}
               aria-label="Настройки воркспейса"
               title="Настроить воркспейс"
@@ -272,22 +415,28 @@ export function WorkspaceHeader({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem onClick={() => handleMenuAction("Переименовать")}>
+                <DropdownMenuItem onClick={onOpenSettings}>
                   <Pencil aria-hidden="true" />
                   Переименовать
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleMenuAction("Дублировать")}>
+                <DropdownMenuItem
+                  onClick={() => void duplicateWorkspace()}
+                >
                   <Copy aria-hidden="true" />
                   Дублировать
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleMenuAction("Архивировать")}>
+                <DropdownMenuItem
+                  onClick={() => void toggleArchive()}
+                >
                   <Archive aria-hidden="true" />
-                  Архивировать
+                  {workspace.archived
+                    ? WORKSPACES_UNARCHIVE_ACTION
+                    : WORKSPACES_ARCHIVE_ACTION}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   variant="destructive"
-                  onClick={() => handleMenuAction("Удалить")}
+                  onClick={() => setDeleteOpen(true)}
                 >
                   <Trash2 aria-hidden="true" />
                   Удалить
@@ -298,101 +447,85 @@ export function WorkspaceHeader({
         </div>
       </div>
 
-      {/* ── Мок-диалог «Настроить воркспейс» ── */}
+      {/* ── Название и описание ── */}
       <Dialog open={settingsOpen} onOpenChange={(open) => (open ? onOpenSettings() : onCloseSettings())}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Настройки воркспейса
-              <Badge
-                variant="outline"
-                className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-              >
-                В разработке
-              </Badge>
-            </DialogTitle>
+            <DialogTitle>Воркспейс</DialogTitle>
             <DialogDescription>
-              Пока демо: переключатели живут только в этом сеансе. Реальное
-              хранение настроек появится вместе с бэкендом воркспейсов.
+              Название и описание хранятся в базе. Тип пайплайна сейчас не меняется.
             </DialogDescription>
           </DialogHeader>
-
-          <div className="space-y-1">
-            <SettingSwitchRow
-              icon={BellRing}
-              label="Уведомления о смене стадии"
-              hint="Присылать сообщение, когда пайплайн переходит на новый этап"
-              checked={notifyStage}
-              onCheckedChange={setNotifyStage}
-            />
-            <SettingSwitchRow
-              icon={Save}
-              label="Автосохранение черновиков"
-              hint="Сохранять открытые документы и заметки каждые 30 секунд"
-              checked={autosave}
-              onCheckedChange={setAutosave}
-            />
-            <SettingSwitchRow
-              icon={Library}
-              label="Показывать в Библиотеке"
-              hint="Артефакты воркспейса видны в общем каталоге контента"
-              checked={inLibrary}
-              onCheckedChange={setInLibrary}
-            />
+          <div className="space-y-3">
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Название</span>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={80}
+                aria-label="Название воркспейса"
+              />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Описание</span>
+              <Input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={500}
+                aria-label="Описание воркспейса"
+              />
+            </label>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full justify-center gap-1.5"
+              disabled={reindexing}
+              onClick={() => void reindexWorkspace()}
+            >
+              <RefreshCw className={cn("size-3.5", reindexing && "animate-spin")} />
+              {reindexing ? "Индексируем…" : "Переиндексировать"}
+            </Button>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Обновить RAG только этого воркспейса. Нужна модель инструмента «Эмбеддинги».
+            </p>
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            Тип «{meta.label}» · пайплайн из {WORKSPACE_STAGES[workspace.type].length}{" "}
-            стадий · создан {timeAgo(workspace.createdAt)}
-          </p>
-
           <DialogFooter>
             <Button variant="outline" onClick={onCloseSettings}>
-              Закрыть
+              Отмена
             </Button>
-            <Button
-              onClick={() => {
-                onCloseSettings();
-                toast.success("Настройки сохранены", {
-                  description: "Демо-режим: изменения действуют до перезагрузки страницы.",
-                });
-              }}
-            >
+            <Button onClick={() => void saveMeta()} disabled={saving || !name.trim()}>
               <Check aria-hidden="true" />
-              Сохранить
+              {saving ? "Сохраняем…" : "Сохранить"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить воркспейс?</AlertDialogTitle>
+            <AlertDialogDescription>
+              «{workspace.name}», документы, сущности и артефакты будут удалены
+              безвозвратно.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDelete();
+              }}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleting ? "Удаляем…" : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </header>
   );
 }
 
-function SettingSwitchRow({
-  icon: Icon,
-  label,
-  hint,
-  checked,
-  onCheckedChange,
-}: {
-  icon: typeof BellRing;
-  label: string;
-  hint: string;
-  checked: boolean;
-  onCheckedChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-card/50 p-3 transition-colors hover:bg-accent/50">
-      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <Icon className="size-4" aria-hidden="true" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium">{label}</span>
-        <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-          {hint}
-        </span>
-      </span>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
-    </label>
-  );
-}

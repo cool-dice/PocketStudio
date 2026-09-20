@@ -19,14 +19,17 @@ import { toast } from "sonner";
 
 import { useSocket, type NoteEvent } from "@/hooks/use-socket";
 import { api } from "@/lib/api";
+import { NOTEBOOK_LOAD_ERROR } from "@/lib/note-analysis";
 import { useAppUi } from "@/lib/store";
-import type { Category, Note } from "@/lib/types";
+import type { Category, Note, Tag } from "@/lib/types";
 
 const PAGE_SIZE = 20;
 
 export interface NotesFilters {
   categoryId: string | null;
   favorite: boolean;
+  reminders: boolean;
+  tagId: string | null;
 }
 
 export function useNotes() {
@@ -37,11 +40,15 @@ export function useNotes() {
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [filters, setFilters] = useState<NotesFilters>({
     categoryId: null,
     favorite: false,
+    reminders: false,
+    tagId: null,
   });
   const [tick, setTick] = useState(0);
 
@@ -67,16 +74,22 @@ export function useNotes() {
   const loadFirstPage = useCallback(
     async (f: NotesFilters, silent: boolean) => {
       const seq = ++seqRef.current;
-      if (!silent) setLoading(true);
+      if (!silent) {
+        setLoading(true);
+        setLoadError(null);
+      }
       try {
-        const [list, cats] = await Promise.all([
+        const [list, cats, tagList] = await Promise.all([
           api.listNotes({
             categoryId: f.categoryId ?? undefined,
             favorite: f.favorite || undefined,
+            reminders: f.reminders || undefined,
+            tagId: f.tagId ?? undefined,
             page: 1,
             limit: PAGE_SIZE,
           }),
           api.listCategories(),
+          api.listTags(),
         ]);
         if (seq !== seqRef.current) return;
         pageRef.current = 1;
@@ -84,9 +97,17 @@ export function useNotes() {
         setTotal(list.total);
         setHasMore(list.hasMore);
         setCategories(cats);
+        setTags(tagList);
+        setLoadError(null);
       } catch {
         if (seq === seqRef.current) {
-          toast.error("Не удалось загрузить заметки");
+          if (!silent) {
+            setNotes([]);
+            setTotal(0);
+            setHasMore(false);
+            setLoadError(NOTEBOOK_LOAD_ERROR);
+          }
+          toast.error(NOTEBOOK_LOAD_ERROR);
         }
       } finally {
         if (seq === seqRef.current) setLoading(false);
@@ -114,7 +135,12 @@ export function useNotes() {
   const setFilter = useCallback((patch: Partial<NotesFilters>) => {
     setFilters((prev) => {
       const next = { ...prev, ...patch };
-      if (next.categoryId === prev.categoryId && next.favorite === prev.favorite) {
+      if (
+        next.categoryId === prev.categoryId &&
+        next.favorite === prev.favorite &&
+        next.reminders === prev.reminders &&
+        next.tagId === prev.tagId
+      ) {
         return prev;
       }
       return next;
@@ -125,6 +151,10 @@ export function useNotes() {
   const refresh = useCallback(() => {
     setTick((t) => t + 1);
   }, []);
+
+  const retryLoad = useCallback(() => {
+    void loadFirstPage(filtersRef.current, false);
+  }, [loadFirstPage]);
 
   /** Patch a note in the cached list in place (WS live updates). */
   const patchNoteLocally = useCallback(
@@ -168,6 +198,8 @@ export function useNotes() {
       const list = await api.listNotes({
         categoryId: f.categoryId ?? undefined,
         favorite: f.favorite || undefined,
+        reminders: f.reminders || undefined,
+        tagId: f.tagId ?? undefined,
         page,
         limit: PAGE_SIZE,
       });
@@ -181,7 +213,7 @@ export function useNotes() {
       setTotal(list.total);
       setHasMore(list.hasMore);
     } catch {
-      toast.error("Не удалось загрузить заметки");
+      toast.error(NOTEBOOK_LOAD_ERROR);
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
@@ -234,12 +266,15 @@ export function useNotes() {
     total,
     hasMore,
     categories,
+    tags,
     loading,
+    loadError,
     loadingMore,
     filters,
     setFilter,
     loadMore,
     refresh,
+    retryLoad,
     patchNoteLocally,
     toggleFavorite,
     deleteNote,

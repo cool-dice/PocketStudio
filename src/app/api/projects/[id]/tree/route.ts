@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import {
   WorkspaceError,
+  ensureCodeWorkspace,
   hasUncommittedChanges,
   listWorkspaceTree,
   projectRoot,
@@ -30,6 +31,15 @@ export async function GET(
   }
 
   try {
+    if (project.type === "app") {
+      const root = await ensureCodeWorkspace(project.id);
+      if (!project.rootPath) {
+        await db.project.update({
+          where: { id: project.id },
+          data: { rootPath: root },
+        });
+      }
+    }
     const root = projectRoot(project.id);
     const [{ entries, truncated }, dirty] = await Promise.all([
       listWorkspaceTree(root),

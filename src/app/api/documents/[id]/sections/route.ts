@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { ensureOwned } from "@/lib/workspace-api";
 import { sectionDto } from "@/lib/workspace-shapes";
+import { scheduleIndexSection } from "@/lib/rag";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +31,9 @@ export async function POST(req: Request, { params }: Params) {
   if (!check.ok) return check.response;
   const document = check.row;
 
-  const parsed = createSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = createSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -45,6 +49,8 @@ export async function POST(req: Request, { params }: Params) {
       order,
     },
   });
+
+  scheduleIndexSection(db, section.id);
 
   return NextResponse.json({ section: sectionDto(section) }, { status: 201 });
 }

@@ -163,7 +163,7 @@ export async function GET(req: Request, { params }: Params) {
       "",
       `Изображений: ${byType.image ?? 0} · аудио: ${byType.audio ?? 0} · видео: ${byType.video ?? 0}`,
       "",
-      "Экспорт создан студией VibeFlow (карманная студия творчества).",
+      "Экспорт создан студией PocketStudio (карманная студия творчества).",
       `Дата экспорта: ${new Date().toLocaleString("ru-RU")}`,
       "",
     ].join("\n"),

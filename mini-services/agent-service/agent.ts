@@ -1,14 +1,30 @@
 // PocketStudio agent — LLM access layer + tool-call parsing.
-// LLM access via z-ai-web-dev-sdk (backend-only). The SDK has no native
-// streaming and no native function calling, so:
-//   - the full reply is fetched here and chunked by the transport layer
-//     (server.ts) for a streaming feel;
+// Chat goes through the shared OpenAI/Anthropic gateway (src/lib/ai).
+// Native provider function-calling is not used, so:
+//   - replies stream over SSE (`stream: true`) and server.ts forwards
+//     tokens on the existing `message:delta` socket event;
 //   - tools are called through a JSON protocol: the system prompt
 //     (prompts.ts) tells the model to answer with a single JSON object
 //     {"tool":"<name>","args":{...}} when it wants a tool, and parseToolCall
-//     below detects that shape. The tool-calling loop lives in server.ts.
+//     below detects that shape. Partial JSON is never executed — wait until
+//     a complete object is parseable. Payloads over 256 KiB (1 MiB for
+//     write_file/apply_patch) are rejected with a Russian error — no execute.
+//     The tool-calling loop lives in server.ts.
 
-import ZAI from "z-ai-web-dev-sdk";
+import { sleepAbortable } from "../../src/lib/abort-flag";
+import { chatCompletionStream } from "../../src/lib/ai/stream";
+import {
+  isUnconfiguredToolError,
+  resolveToolRoute,
+} from "../../src/lib/ai/resolve";
+import type { AiToolId } from "../../src/lib/ai/tools";
+import { recordChatUsage } from "../../src/lib/ai/usage-log";
+import { db } from "./db-client";
+import {
+  candidateOverLimit,
+  gateToolPayload,
+  peekToolName,
+} from "./tool-args-limit";
 
 /** LLM conversation turn (system prompt is passed separately). */
 export interface LlmMessage {
@@ -22,30 +38,22 @@ export interface ToolCall {
   args: Record<string, unknown>;
 }
 
-type ZaiInstance = Awaited<ReturnType<typeof ZAI.create>>;
+/**
+ * parseToolCallResult: a real call, an oversized dump (do not execute),
+ * or not a tool JSON at all (plain-text answer).
+ */
+export type ToolCallParse =
+  | { status: "call"; call: ToolCall }
+  | { status: "oversized"; tool: string; error: string; limitBytes: number }
+  | { status: "none" };
 
-// Module-level cached instance (one SDK client per process).
-let zaiInstance: ZaiInstance | null = null;
-
-export async function getZai(): Promise<ZaiInstance> {
-  if (!zaiInstance) zaiInstance = await ZAI.create();
-  return zaiInstance;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Extract text from an OpenAI-shaped chat completion response. */
-function extractContent(completion: unknown): string {
-  const c = completion as {
-    choices?: Array<{ message?: { content?: unknown } }>;
-    content?: unknown;
-  };
-  const fromChoices = c?.choices?.[0]?.message?.content;
-  if (typeof fromChoices === "string" && fromChoices.trim()) return fromChoices;
-  if (typeof c?.content === "string" && c.content.trim()) return c.content;
-  return "";
+export interface GenerateOpts {
+  userId: string;
+  toolId?: AiToolId;
+  jsonMode?: boolean;
+  signal?: AbortSignal;
+  /** Live token callback. JSON tool-only turns (jsonMode) skip SSE. */
+  onDelta?: (delta: string) => void | Promise<void>;
 }
 
 const MAX_ATTEMPTS = 3; // initial call + 2 retries
@@ -54,35 +62,81 @@ const RETRY_BACKOFF_MS = 800;
 /**
  * One raw LLM call: [systemPrompt, ...history] → reply text (may be either a
  * plain-text answer or a JSON tool call — parsing is the caller's job).
- * Retries up to 2 times with 800ms backoff. Throws on final failure.
+ * Native SSE when the provider supports it; jsonMode stays one-shot so a
+ * partial `{"tool"` object cannot fire. Retries up to 2 times with 800ms
+ * backoff unless tokens were already emitted. Throws on final failure.
  */
 export async function generateLLMResponse(
   systemPrompt: string,
   history: LlmMessage[],
+  opts: GenerateOpts,
 ): Promise<string> {
   let lastError: unknown = null;
+  const toolId = opts.toolId ?? "agent";
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let emitted = false;
     try {
-      const zai = await getZai();
-      const completion = await zai.chat.completions.create({
-        messages: [{ role: "system", content: systemPrompt }, ...history],
-        thinking: { type: "disabled" },
+      const route = await resolveToolRoute(db, opts.userId, toolId);
+      const messages = [
+        { role: "system" as const, content: systemPrompt },
+        ...history.map((m) => ({ role: m.role, content: m.content })),
+      ];
+      const result = await chatCompletionStream(route, messages, {
+        jsonMode: opts.jsonMode,
+        allowStream: !opts.jsonMode,
+        signal: opts.signal,
+        onDelta: opts.onDelta
+          ? async (delta) => {
+              emitted = true;
+              await opts.onDelta!(delta);
+            }
+          : undefined,
       });
-      const content = extractContent(completion);
-      if (!content) throw new Error("LLM returned empty content");
-      return content;
+      if (!result.text) throw new Error("LLM returned empty content");
+      void recordChatUsage(db, {
+        userId: opts.userId,
+        toolId,
+        route,
+        usage: result.usage,
+      }).catch((err) => {
+        console.warn(
+          "[agent] usage log failed:",
+          err instanceof Error ? err.message : String(err),
+        );
+      });
+      return result.text;
     } catch (err) {
+      if (isUnconfiguredToolError(err)) throw err;
       lastError = err;
       console.warn(
         `[agent] LLM attempt ${attempt}/${MAX_ATTEMPTS} failed:`,
         err instanceof Error ? err.message : String(err),
       );
-      if (attempt < MAX_ATTEMPTS) await sleep(RETRY_BACKOFF_MS);
+      const status = (err as { status?: number })?.status;
+      if (opts.signal?.aborted || status === 499) break;
+      if (emitted) break;
+      if (typeof status === "number" && status < 500) break;
+      if (attempt < MAX_ATTEMPTS) await sleepAbortable(RETRY_BACKOFF_MS, opts.signal);
     }
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/** True when the reply is still (or already) a JSON/fence tool candidate. */
+export function looksLikeToolStart(text: string): boolean {
+  const t = text.trimStart();
+  if (!t) return false;
+  if (t.startsWith("{")) return true;
+  if (t.startsWith("```")) return true;
+  if (/^\[TOOL_CALL\b/i.test(t)) return true;
+  return false;
+}
+
+function extractFencedBlock(text: string): string | null {
+  const m = text.match(/```(?:json|javascript|js)?\s*\r?\n?([\s\S]*?)```/i);
+  return m ? m[1]!.trim() : null;
 }
 
 /** Strip a leading ```lang fence and trailing ``` if present. */
@@ -132,30 +186,99 @@ function splitTopLevelObjects(text: string): string[] {
   return objects;
 }
 
-/** Parse one JSON string as a tool-call object, null when not shaped right. */
-function tryParseToolObject(raw: string): ToolCall | null {
-  let parsed: unknown;
+function parseJsonLenient(raw: string): unknown | undefined {
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch {
+    /* trailing commas are a frequent model slip */
+  }
+  try {
+    return JSON.parse(raw.replace(/,\s*([}\]])/g, "$1"));
+  } catch {
+    return undefined;
+  }
+}
+
+function coerceArgs(value: unknown): Record<string, unknown> | null {
+  if (typeof value === "string") {
+    const nested = parseJsonLenient(value);
+    if (typeof nested === "object" && nested !== null && !Array.isArray(nested)) {
+      return nested as Record<string, unknown>;
+    }
     return null;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return null;
-  }
-  const obj = parsed as Record<string, unknown>;
-  if (typeof obj.tool === "string" && obj.tool.trim()) {
-    if (typeof obj.args === "object" && obj.args !== null && !Array.isArray(obj.args)) {
-      return { tool: obj.tool.trim(), args: obj.args as Record<string, unknown> };
-    }
-    // Flat form observed in the wild: {"tool":"write_file","path":…,…} —
-    // the model forgot the args wrapper; treat the other keys as args.
-    if (obj.args === undefined) {
-      const { tool, ...rest } = obj;
-      return { tool: tool.trim(), args: rest as Record<string, unknown> };
-    }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
   }
   return null;
+}
+
+function oversizedResult(
+  over: { error: string; tool: string; limitBytes: number },
+): ToolCallParse {
+  return {
+    status: "oversized",
+    tool: over.tool,
+    error: over.error,
+    limitBytes: over.limitBytes,
+  };
+}
+
+function finishParsedCall(call: ToolCall): ToolCallParse {
+  const gate = gateToolPayload(call);
+  if (!gate.ok) return oversizedResult(gate);
+  return { status: "call", call };
+}
+
+/** Parse one JSON string as a tool-call object; skip JSON.parse past the cap. */
+function tryParseToolObject(raw: string): ToolCallParse {
+  const looksObject = raw.trimStart().startsWith("{");
+  const peeked = looksObject ? peekToolName(raw) : null;
+  if (looksObject) {
+    const over = candidateOverLimit(raw, peeked);
+    if (over) return oversizedResult(over);
+  }
+
+  const parsed = parseJsonLenient(raw);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { status: "none" };
+  }
+  const obj = parsed as Record<string, unknown>;
+  const nestedFn =
+    typeof obj.function === "object" && obj.function !== null && !Array.isArray(obj.function)
+      ? (obj.function as Record<string, unknown>)
+      : null;
+  const toolRaw =
+    (typeof obj.tool === "string" && obj.tool) ||
+    (typeof obj.name === "string" && obj.name) ||
+    (typeof nestedFn?.name === "string" && nestedFn.name) ||
+    "";
+  const tool = toolRaw.trim();
+  if (!tool) return { status: "none" };
+
+  const argsCandidate =
+    obj.args ?? obj.arguments ?? nestedFn?.arguments ?? nestedFn?.args;
+  const wrapped = coerceArgs(argsCandidate);
+  if (wrapped) return finishParsedCall({ tool, args: wrapped });
+
+  // Flat form observed in the wild: {"tool":"write_file","path":…,…} —
+  // the model forgot the args wrapper; treat the other keys as args.
+  if (argsCandidate === undefined) {
+    const rest = { ...obj };
+    delete rest.tool;
+    delete rest.name;
+    delete rest.function;
+    return finishParsedCall({ tool, args: rest });
+  }
+  return { status: "none" };
+}
+
+function firstToolParse(objects: string[]): ToolCallParse {
+  for (const obj of objects) {
+    const parsed = tryParseToolObject(obj);
+    if (parsed.status !== "none") return parsed;
+  }
+  return { status: "none" };
 }
 
 /**
@@ -167,21 +290,40 @@ function tryParseToolObject(raw: string): ToolCall | null {
  *      follow-up calls resurface naturally on the next loop iteration
  *      (the model re-emits them after each [TOOL_RESULT])
  *   4. fallback: plain JSON.parse of the whole reply / outermost {...} slice
- * Anything else is a plain-text answer → null.
+ * Oversized `{"tool","args"}` is `status: "oversized"` (Russian error, no execute).
+ * Anything else is a plain-text answer → none.
  */
-export function parseToolCall(text: string): ToolCall | null {
-  if (typeof text !== "string") return null;
-  let trimmed = stripFences(text.trim());
-  if (!trimmed) return null;
+export function parseToolCallResult(text: string): ToolCallParse {
+  if (typeof text !== "string") return { status: "none" };
+  let trimmed = text.trim();
+  if (!trimmed) return { status: "none" };
+
+  const fenced = extractFencedBlock(trimmed);
+  if (fenced) {
+    const fromFence = tryParseToolObject(fenced);
+    if (fromFence.status !== "none") return fromFence;
+    const fromFencedObjs = firstToolParse(splitTopLevelObjects(fenced));
+    if (fromFencedObjs.status !== "none") return fromFencedObjs;
+  }
+
+  trimmed = stripFences(trimmed);
+  if (!trimmed) return { status: "none" };
 
   // Fallback: the model occasionally mimics the legacy bracket format
   // "[TOOL_CALL name] {json}" — normalize it to pure JSON first.
   const bracket = trimmed.match(/^\s*\[TOOL_CALL\s+([a-zA-Z_]+)\s*\]\s*([\s\S]+)$/i);
   if (bracket) {
+    const tool = bracket[1];
+    const jsonPart = bracket[2].trim();
+    const over = candidateOverLimit(jsonPart, tool);
+    if (over) return oversizedResult(over);
     try {
-      const args = JSON.parse(bracket[2].trim());
+      const args = JSON.parse(jsonPart);
       if (typeof args === "object" && args !== null && !Array.isArray(args)) {
-        return { tool: bracket[1], args: args as Record<string, unknown> };
+        return finishParsedCall({
+          tool,
+          args: args as Record<string, unknown>,
+        });
       }
     } catch {
       // fall through to the regular candidates
@@ -191,10 +333,8 @@ export function parseToolCall(text: string): ToolCall | null {
   // Reply starts with an object → walk brace depth, try each top-level
   // object (handles chained calls AND single object + trailing prose).
   if (trimmed.startsWith("{")) {
-    for (const obj of splitTopLevelObjects(trimmed)) {
-      const call = tryParseToolObject(obj);
-      if (call) return call;
-    }
+    const fromTop = firstToolParse(splitTopLevelObjects(trimmed));
+    if (fromTop.status !== "none") return fromTop;
   }
 
   const candidates: string[] = [trimmed];
@@ -204,12 +344,12 @@ export function parseToolCall(text: string): ToolCall | null {
     if (first !== -1 && last > first) candidates.push(trimmed.slice(first, last + 1));
   }
 
-  for (const candidate of candidates) {
-    const call = tryParseToolObject(candidate);
-    if (call) return call;
-  }
+  return firstToolParse(candidates);
+}
 
-  return null;
+export function parseToolCall(text: string): ToolCall | null {
+  const parsed = parseToolCallResult(text);
+  return parsed.status === "call" ? parsed.call : null;
 }
 
 /**
@@ -248,43 +388,4 @@ export function parsePlannerSteps(raw: string): string[] | null {
     if (cleaned.length >= 2) return cleaned;
   }
   return null;
-}
-
-/**
- * Split a full reply into chunks of ~4–10 words for simulated streaming.
- * Concatenating the chunks reproduces the original text exactly
- * (whitespace preserved).
- */
-export function chunkText(
-  text: string,
-  opts: { minWords?: number; maxWords?: number } = {},
-): string[] {
-  const minWords = opts.minWords ?? 4;
-  const maxWords = opts.maxWords ?? 10;
-
-  // Split keeping the whitespace separators so concatenation is lossless.
-  const parts = text.split(/(\s+)/).filter((p) => p.length > 0);
-  const chunks: string[] = [];
-
-  let i = 0;
-  while (i < parts.length) {
-    const target =
-      minWords + Math.floor(Math.random() * (maxWords - minWords + 1));
-    let words = 0;
-    let chunk = "";
-    while (i < parts.length && words < target) {
-      const part = parts[i];
-      chunk += part;
-      if (!/^\s+$/.test(part)) words++;
-      i++;
-    }
-    // Attach trailing whitespace to the current chunk.
-    while (i < parts.length && /^\s+$/.test(parts[i])) {
-      chunk += parts[i];
-      i++;
-    }
-    if (chunk.length > 0) chunks.push(chunk);
-  }
-
-  return chunks;
 }

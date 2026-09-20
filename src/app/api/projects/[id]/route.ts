@@ -8,6 +8,7 @@ import {
   projectStats,
   removeProjectDir,
 } from "@/lib/workspace";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -97,12 +98,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    body = {};
-  }
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Ошибка валидации" }, { status: 400 });

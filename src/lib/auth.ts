@@ -1,7 +1,13 @@
 // Server-only auth helpers: password hashing + JWT sessions (jose HS256).
 import * as bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-import { AUTH_SECRET, SESSION_COOKIE, type SessionPayload } from "./auth-shared";
+import {
+  AUTH_SECRET,
+  LEGACY_SESSION_COOKIE,
+  SESSION_COOKIE,
+  type SessionPayload,
+} from "./auth-shared";
+import { db } from "./db";
 
 const secretKey = new TextEncoder().encode(AUTH_SECRET);
 
@@ -16,26 +22,59 @@ export async function verifyPassword(pw: string, hash: string): Promise<boolean>
   return bcrypt.compare(pw, hash);
 }
 
-export async function signSession(payload: SessionPayload): Promise<string> {
-  return new SignJWT({
+export function sessionPayloadFromUser(user: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  tokenVersion: number;
+}): SessionPayload {
+  return {
+    sub: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    tokenVersion: user.tokenVersion,
+  };
+}
+
+function jwtClaims(payload: SessionPayload) {
+  return {
     email: payload.email,
     name: payload.name,
     role: payload.role,
-  })
+    tokenVersion: embedTokenVersion(payload.tokenVersion),
+  };
+}
+
+function embedTokenVersion(value: unknown): number {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  return 0;
+}
+
+function readTokenVersion(value: unknown): number | null {
+  if (value === undefined) return 0;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  return null;
+}
+
+export async function signSession(payload: SessionPayload): Promise<string> {
+  return new SignJWT(jwtClaims(payload))
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)
     .setIssuedAt()
+    .setJti(crypto.randomUUID())
     .setAudience("session")
     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
     .sign(secretKey);
 }
 
 export async function signWsToken(payload: SessionPayload): Promise<string> {
-  return new SignJWT({
-    email: payload.email,
-    name: payload.name,
-    role: payload.role,
-  })
+  return new SignJWT(jwtClaims(payload))
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)
     .setIssuedAt()
@@ -54,11 +93,14 @@ export async function verifyToken(
       secretKey,
       expectedAud ? { audience: expectedAud } : undefined
     );
+    const tokenVersion = readTokenVersion(payload.tokenVersion);
+    if (tokenVersion === null) return null;
     return {
       sub: typeof payload.sub === "string" ? payload.sub : "",
       email: typeof payload.email === "string" ? payload.email : "",
       name: typeof payload.name === "string" ? payload.name : "",
       role: typeof payload.role === "string" ? payload.role : "client",
+      tokenVersion,
     };
   } catch {
     return null;
@@ -83,10 +125,46 @@ function parseCookies(header: string | null): Record<string, string> {
   return out;
 }
 
+/** First session token on the request: Bearer, then ps_session, then vf_session. */
+export function readSessionToken(req: Request): string | null {
+  const authHeader = req.headers.get("authorization");
+  if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+    const token = authHeader.slice(7).trim();
+    if (token) return token;
+  }
+  const cookies = parseCookies(req.headers.get("cookie"));
+  for (const name of [SESSION_COOKIE, LEGACY_SESSION_COOKIE]) {
+    const cookieToken = cookies[name];
+    if (cookieToken) return cookieToken;
+  }
+  return null;
+}
+
+async function matchLiveSession(
+  payload: SessionPayload,
+): Promise<SessionPayload | null> {
+  if (!payload.sub) return null;
+  const user = await db.user.findUnique({
+    where: { id: payload.sub },
+    select: { tokenVersion: true },
+  });
+  if (!user) return null;
+  if (user.tokenVersion !== payload.tokenVersion) return null;
+  return payload;
+}
+
+async function verifyLiveSessionToken(token: string): Promise<SessionPayload | null> {
+  const payload = await verifyToken(token, "session");
+  if (!payload) return null;
+  return matchLiveSession(payload);
+}
+
 /**
  * Resolve the current user from a request:
  * 1) `Authorization: Bearer <token>` header
- * 2) `vf_session` cookie
+ * 2) `ps_session` cookie (PocketStudio)
+ * 3) `vf_session` cookie (legacy VibeFlow — dual-read until sessions expire)
+ * Signature-valid tokens still fail when User.tokenVersion does not match.
  * Returns null when unauthenticated.
  */
 export async function getUserFromRequest(req: Request): Promise<SessionPayload | null> {
@@ -94,34 +172,56 @@ export async function getUserFromRequest(req: Request): Promise<SessionPayload |
   if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
     const token = authHeader.slice(7).trim();
     if (token) {
-      const payload = await verifyToken(token, "session");
+      const payload = await verifyLiveSessionToken(token);
       if (payload) return payload;
     }
   }
 
   const cookies = parseCookies(req.headers.get("cookie"));
-  const cookieToken = cookies[SESSION_COOKIE];
-  if (cookieToken) {
-    return verifyToken(cookieToken, "session");
+  for (const name of [SESSION_COOKIE, LEGACY_SESSION_COOKIE]) {
+    const cookieToken = cookies[name];
+    if (cookieToken) {
+      const payload = await verifyLiveSessionToken(cookieToken);
+      if (payload) return payload;
+    }
   }
   return null;
 }
 
-export function sessionCookieOptions() {
+/** Write the PocketStudio session cookie and expire the legacy VibeFlow one. */
+export function attachSessionCookie(res: { cookies: { set: (name: string, value: string, opts: ReturnType<typeof sessionCookieOptions>) => void } }, token: string) {
+  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  res.cookies.set(LEGACY_SESSION_COOKIE, "", clearSessionCookieOptions());
+}
+
+export function clearSessionCookies(res: { cookies: { set: (name: string, value: string, opts: ReturnType<typeof clearSessionCookieOptions>) => void } }) {
+  res.cookies.set(SESSION_COOKIE, "", clearSessionCookieOptions());
+  res.cookies.set(LEGACY_SESSION_COOKIE, "", clearSessionCookieOptions());
+}
+
+/**
+ * `ps_session` is httpOnly. The iframe sandbox still authenticates via Bearer
+ * `ps_token` in localStorage — dual-read in getUserFromRequest / api.ts.
+ */
+export function sessionCookieSecure(nodeEnv = process.env.NODE_ENV): boolean {
+  return nodeEnv === "production";
+}
+
+export function sessionCookieOptions(nodeEnv = process.env.NODE_ENV) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: false,
+    secure: sessionCookieSecure(nodeEnv),
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
   };
 }
 
-export function clearSessionCookieOptions() {
+export function clearSessionCookieOptions(nodeEnv = process.env.NODE_ENV) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: false,
+    secure: sessionCookieSecure(nodeEnv),
     path: "/",
     maxAge: 0,
   };

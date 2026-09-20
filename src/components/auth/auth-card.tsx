@@ -2,37 +2,86 @@
 
 /**
  * AuthCard — tabs «Вход» / «Регистрация».
- * Used inside a Dialog (from the landing hero) and as a standalone view.
+ * Used on `/login` (landing CTAs go there instead of an inline dialog).
  */
 
-import { useState } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useState,
+  type ReactElement,
+} from "react";
 import { Loader2, LogIn, UserPlus } from "lucide-react";
 
-import { ApiError } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import {
+  inviteRegisterCopy,
+  inviteRoleLabel,
+  type InviteLifecycle,
+} from "@/lib/invite-status";
+import { useFirstUserBecomesAdmin } from "@/hooks/use-auth-bootstrap";
+import { firstUserAdminHint } from "@/lib/landing-copy";
 
 type AuthTab = "login" | "register";
 
 interface AuthCardProps {
   defaultTab?: AuthTab;
   className?: string;
+  inviteToken?: string;
 }
 
-export function AuthCard({ defaultTab = "login", className }: AuthCardProps) {
+export function AuthCard({
+  defaultTab = "login",
+  className,
+  inviteToken,
+}: AuthCardProps) {
   const { login, register } = useAuth();
+  const firstUserBecomesAdmin = useFirstUserBecomesAdmin();
 
-  const [tab, setTab] = useState<AuthTab>(defaultTab);
+  const [tab, setTab] = useState<AuthTab>(
+    inviteToken ? "register" : defaultTab,
+  );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [inviteStatus, setInviteStatus] = useState<InviteLifecycle | null>(
+    inviteToken ? null : "invalid",
+  );
+  const [inviteRole, setInviteRole] = useState<"admin" | "client" | null>(null);
+
+  useEffect(() => {
+    if (!inviteToken) {
+      setInviteStatus("invalid");
+      return;
+    }
+    let cancelled = false;
+    void api
+      .peekInvite(inviteToken)
+      .then((peek) => {
+        if (cancelled) return;
+        setInviteStatus(peek.status);
+        if (peek.role) setInviteRole(peek.role);
+        if (peek.email && peek.status === "ok") {
+          setEmail((current) => current || peek.email || "");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setInviteStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteToken]);
 
   const resetErrors = () => {
     setError(null);
@@ -64,16 +113,23 @@ export function AuthCard({ defaultTab = "login", className }: AuthCardProps) {
       setFieldErrors({ password: "Пароль должен содержать минимум 8 символов" });
       return;
     }
+    if (
+      tab === "register" &&
+      inviteToken &&
+      inviteStatus &&
+      inviteStatus !== "ok"
+    ) {
+      setError(inviteRegisterCopy(inviteStatus));
+      return;
+    }
 
     setLoading(true);
     try {
       if (tab === "login") {
         await login(trimmedEmail, password);
       } else {
-        await register(trimmedName, trimmedEmail, password);
+        await register(trimmedName, trimmedEmail, password, inviteToken);
       }
-      // On success the AuthProvider user is set and the view switches —
-      // no manual close needed.
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -95,7 +151,18 @@ export function AuthCard({ defaultTab = "login", className }: AuthCardProps) {
         <p className="mt-1 text-sm text-muted-foreground">
           {tab === "login"
             ? "Войдите, чтобы продолжить работу"
-            : "Пара шагов — и мысли потекут"}
+            : inviteToken
+              ? inviteStatus && inviteStatus !== "ok"
+                ? inviteRegisterCopy(inviteStatus)
+                : inviteRole
+                  ? `Вас пригласили как ${inviteRoleLabel(inviteRole)}. Email должен совпадать с приглашением.`
+                  : inviteRegisterCopy("ok")
+              : [
+                  "Пара шагов — и мысли потекут.",
+                  firstUserAdminHint(firstUserBecomesAdmin),
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
         </p>
       </div>
 
@@ -144,7 +211,12 @@ export function AuthCard({ defaultTab = "login", className }: AuthCardProps) {
 
             {error && <ErrorBanner message={error} />}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading}
+              aria-busy={loading}
+            >
               {loading ? (
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
               ) : (
@@ -213,7 +285,15 @@ export function AuthCard({ defaultTab = "login", className }: AuthCardProps) {
 
             {error && <ErrorBanner message={error} />}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={
+                loading ||
+                Boolean(inviteToken && inviteStatus && inviteStatus !== "ok")
+              }
+              aria-busy={loading}
+            >
               {loading ? (
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
               ) : (
@@ -243,12 +323,20 @@ function FieldRow({
   error?: string;
   children: React.ReactNode;
 }) {
+  const errorId = `${id}-error`;
+  const control =
+    isValidElement(children)
+      ? cloneElement(children as ReactElement<{ "aria-describedby"?: string; "aria-invalid"?: boolean }>, {
+          "aria-describedby": error ? errorId : undefined,
+          "aria-invalid": !!error,
+        })
+      : children;
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      {children}
+      {control}
       {error && (
-        <p className="text-xs text-destructive" role="alert">
+        <p id={errorId} className="text-xs text-destructive" role="alert">
           {error}
         </p>
       )}

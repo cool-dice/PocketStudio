@@ -8,7 +8,7 @@
 exec 9>/tmp/next-supervisor.lock
 flock -n 9 || exit 0   # single instance only
 
-cd /home/z/my-project
+cd "$(dirname "$0")/../.."
 
 rotate() {
   if [ -f /tmp/next-dev.log ]; then

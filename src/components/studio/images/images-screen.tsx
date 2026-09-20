@@ -13,11 +13,23 @@ import { ImagePlus, Images, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared/module-header";
+import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-picker-status";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
+import {
+  IMAGE_GALLERY_EMPTY,
+  IMAGE_GALLERY_EMPTY_HINT,
+  IMAGE_GALLERY_FILTER_EMPTY,
+  IMAGE_GALLERY_LOAD_ERROR,
+  IMAGE_GALLERY_LOAD_ERROR_HINT,
+  IMAGE_GEN_FAILED,
+  IMAGE_GEN_FAILED_HINT,
+  IMAGE_GEN_UNCONFIGURED_HINT,
+  displayableImageSrc,
+} from "@/lib/image-copy";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { useAppUi } from "@/lib/store";
-import type { WorkspaceDto } from "@/lib/workspace-types";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import { FilterBar, type GalleryFilter, type GallerySort } from "./filter-bar";
 import { GalleryGrid } from "./gallery-grid";
@@ -35,8 +47,8 @@ export function ImagesScreen({
   onOpenMobileNav,
   workspaceId,
 }: ModuleScreenProps & { workspaceId?: string }) {
-  /* Глобальный экран без воркспейса: список воркспейсов для чипов. */
-  const [workspaces, setWorkspaces] = useState<WorkspaceDto[] | null>(null);
+  const { workspaces, loading: wsLoading, error: wsError, load: loadWorkspaces } =
+    useWorkspaces();
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
 
@@ -61,24 +73,7 @@ export function ImagesScreen({
   const [drawerTileId, setDrawerTileId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const setMainArea = useAppUi((s) => s.setMainArea);
-
-  /* Загрузка списка воркспейсов для глобального экрана. */
-  useEffect(() => {
-    if (workspaceId) return;
-    let cancelled = false;
-    api
-      .listWorkspaces()
-      .then((ws) => {
-        if (!cancelled) setWorkspaces(ws);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaces([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
+  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
 
   /* Загрузка галереи воркспейса: image + portrait. */
   const loadGallery = useCallback(async () => {
@@ -100,7 +95,7 @@ export function ImagesScreen({
     } catch (err) {
       setTiles([]);
       setLoadError(
-        err instanceof ApiError ? err.message : "Не удалось загрузить галерею",
+        err instanceof ApiError ? err.message : IMAGE_GALLERY_LOAD_ERROR,
       );
     } finally {
       setLoading(false);
@@ -109,7 +104,7 @@ export function ImagesScreen({
 
   useEffect(() => {
     void loadGallery();
-  }, [loadGallery]);
+  }, [loadGallery, workspaceVersion]);
 
   /* РЕАЛЬНАЯ генерация → api.aiGenerateImage. */
   const runGenerate = useCallback(
@@ -124,6 +119,11 @@ export function ImagesScreen({
           title: title || undefined,
           size,
         });
+        const src = displayableImageSrc(artifact);
+        if (!src) {
+          toast.error(IMAGE_GEN_FAILED, { description: IMAGE_GEN_FAILED_HINT });
+          return;
+        }
         setTiles((prev) => [
           tileFromArtifact(artifact, preset.aspect),
           ...prev.filter((t) => t.status !== "generating"),
@@ -133,9 +133,15 @@ export function ImagesScreen({
         });
       } catch (err) {
         setTiles((prev) => prev.filter((t) => t.status !== "generating"));
+        const unconfigured =
+          err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
         toast.error(
-          err instanceof ApiError ? err.message : "Генерация не удалась",
-          { description: "Попробуйте ещё раз — обычно это помогает." },
+          err instanceof ApiError ? err.message : IMAGE_GEN_FAILED,
+          {
+            description: unconfigured
+              ? IMAGE_GEN_UNCONFIGURED_HINT
+              : IMAGE_GEN_FAILED_HINT,
+          },
         );
       } finally {
         setGenerating(null);
@@ -223,6 +229,11 @@ export function ImagesScreen({
     return sorted;
   }, [tiles, generating, filter, query, sort]);
 
+  const galleryEmpty =
+    tiles.length === 0 && !query.trim() && filter === "all"
+      ? `${IMAGE_GALLERY_EMPTY} — ${IMAGE_GALLERY_EMPTY_HINT}`
+      : IMAGE_GALLERY_FILTER_EMPTY;
+
   const counts = useMemo(
     () => ({
       all: tiles.length,
@@ -270,25 +281,13 @@ export function ImagesScreen({
             <p className="mt-1 text-xs text-muted-foreground">
               Генерация и галерея живут внутри воркспейса — выберите, куда рисуем.
             </p>
-            {workspaces === null ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {Array.from({ length: 4 }, (_, i) => (
-                  <Skeleton key={i} className="h-8 w-36 rounded-full" />
-                ))}
-              </div>
-            ) : workspaces.length === 0 ? (
-              <div className="mt-4 flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
-                <p className="text-sm text-muted-foreground">
-                  Пока нет ни одного воркспейса — сначала создайте его.
-                </p>
-                <Button size="sm" onClick={() => setMainArea("workspaces")}>
-                  <Images className="size-4" aria-hidden="true" />
-                  К воркспейсам
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {workspaces.map((ws) => {
+            <WorkspacePickerStatus
+              loading={!workspaceId && wsLoading}
+              error={!workspaceId && wsError}
+              empty={!workspaceId && !wsLoading && !wsError && workspaces.length === 0}
+              onRetry={loadWorkspaces}
+            >
+              {workspaces.map((ws) => {
                   const Meta = WORKSPACE_TYPE_META[ws.type];
                   const Icon = Meta.icon;
                   return (
@@ -303,8 +302,7 @@ export function ImagesScreen({
                     />
                   );
                 })}
-              </div>
-            )}
+            </WorkspacePickerStatus>
           </section>
           {effectiveId ? (
             <>
@@ -319,14 +317,23 @@ export function ImagesScreen({
                 count={visibleTiles.length}
                 disabled={loading}
               />
-              <GalleryGrid
-                tiles={visibleTiles}
-                loading={loading}
-                onOpen={openTile}
-                onVariations={makeVariations}
-                onToggleFavorite={(id) => void toggleFavorite(id)}
-                onDelete={(id) => void removeTile(id)}
-              />
+              {loadError ? (
+                <GalleryLoadError
+                  message={loadError}
+                  hint={IMAGE_GALLERY_LOAD_ERROR_HINT}
+                  onRetry={() => void loadGallery()}
+                />
+              ) : (
+                <GalleryGrid
+                  tiles={visibleTiles}
+                  loading={loading}
+                  emptyLabel={galleryEmpty}
+                  onOpen={openTile}
+                  onVariations={makeVariations}
+                  onToggleFavorite={(id) => void toggleFavorite(id)}
+                  onDelete={(id) => void removeTile(id)}
+                />
+              )}
             </>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center">
@@ -384,17 +391,16 @@ export function ImagesScreen({
           disabled={loading}
         />
         {loadError ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
-            <p className="text-sm text-muted-foreground">{loadError}</p>
-            <Button size="sm" variant="outline" onClick={() => void loadGallery()}>
-              <RefreshCw className="size-4" aria-hidden="true" />
-              Повторить
-            </Button>
-          </div>
+          <GalleryLoadError
+            message={loadError}
+            hint={IMAGE_GALLERY_LOAD_ERROR_HINT}
+            onRetry={() => void loadGallery()}
+          />
         ) : (
           <GalleryGrid
             tiles={visibleTiles}
             loading={loading}
+            emptyLabel={galleryEmpty}
             onOpen={openTile}
             onVariations={makeVariations}
             onToggleFavorite={(id) => void toggleFavorite(id)}
@@ -412,6 +418,27 @@ export function ImagesScreen({
         onDelete={(id) => void removeTile(id)}
       />
     </section>
+  );
+}
+
+function GalleryLoadError({
+  message,
+  hint,
+  onRetry,
+}: {
+  message: string;
+  hint: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
+      <p className="text-sm text-muted-foreground">{message}</p>
+      <p className="text-xs text-muted-foreground">{hint}</p>
+      <Button size="sm" variant="outline" onClick={onRetry}>
+        <RefreshCw className="size-4" aria-hidden="true" />
+        Повторить
+      </Button>
+    </div>
   );
 }
 

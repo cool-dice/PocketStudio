@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { detachSectionMentions } from "@/lib/entity-mentions";
 import { ensureOwned } from "@/lib/workspace-api";
 import { snapshotSection } from "@/lib/section-revisions";
 import { sectionDto } from "@/lib/workspace-shapes";
+import { scheduleIndexEntity, scheduleIndexSection, scheduleRemove } from "@/lib/rag";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +31,9 @@ const patchSchema = z.object({
 });
 
 export async function PATCH(req: Request, { params }: Params) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const { id } = await params;
   const section = await loadSection(id);
   if (!section) {
@@ -37,7 +43,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!check.ok) return check.response;
   const documentRow = check.row;
 
-  const parsed = patchSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = patchSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -62,6 +70,8 @@ export async function PATCH(req: Request, { params }: Params) {
     }),
   ]);
 
+  scheduleIndexSection(db, updated.id);
+
   return NextResponse.json({ section: sectionDto(updated) });
 }
 
@@ -82,5 +92,8 @@ export async function DELETE(req: Request, { params }: Params) {
       data: { updatedAt: new Date() },
     }),
   ]);
+  const detached = await detachSectionMentions(db, documentRow.projectId, [id]);
+  for (const entityId of detached) scheduleIndexEntity(db, entityId);
+  scheduleRemove(db, check.userId, "section", id);
   return NextResponse.json({ ok: true });
 }

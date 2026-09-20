@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { saveGeneratedFile } from "@/lib/ai";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { artifactDto } from "@/lib/workspace-shapes";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -43,11 +44,16 @@ const schema = z.object({
 });
 
 export async function POST(req: Request, { params }: Params) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const { id } = await params;
   const check = await ensureWorkspace(req, id);
   if (!check.ok) return check.response;
 
-  const parsed = schema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = schema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },

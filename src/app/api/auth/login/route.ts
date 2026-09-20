@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { signSession, verifyPassword, sessionCookieOptions } from "@/lib/auth";
-import { SESSION_COOKIE } from "@/lib/auth-shared";
+import {
+  attachSessionCookie,
+  sessionPayloadFromUser,
+  signSession,
+  verifyPassword,
+} from "@/lib/auth";
 import { ensureAdminSeed } from "@/lib/seed";
+import { consumeRateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +23,9 @@ const loginSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON в запросе" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
 
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {
@@ -35,6 +38,18 @@ export async function POST(req: Request) {
   }
 
   const { email, password } = parsed.data;
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "local";
+  const rateKey = `login:${email}:${ip}`;
+  const gated = consumeRateLimit(rateKey, 8, 15 * 60 * 1000);
+  if (!gated.ok) {
+    return NextResponse.json(
+      { error: "Слишком много попыток входа. Подождите и попробуйте снова." },
+      { status: 429, headers: { "retry-after": String(gated.retryAfterSec) } },
+    );
+  }
 
   // Ensure seeded admin exists so it can log in.
   await ensureAdminSeed();
@@ -43,6 +58,7 @@ export async function POST(req: Request) {
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     return NextResponse.json({ error: "Неверный email или пароль" }, { status: 401 });
   }
+  resetRateLimit(rateKey);
 
   // Best-effort audit log.
   try {
@@ -58,12 +74,7 @@ export async function POST(req: Request) {
     console.error("[audit] auth.login failed:", err);
   }
 
-  const token = await signSession({
-    sub: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-  });
+  const token = await signSession(sessionPayloadFromUser(user));
 
   const res = NextResponse.json({
     user: {
@@ -78,6 +89,6 @@ export async function POST(req: Request) {
     // the Authorization header with this token.
     token,
   });
-  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  attachSessionCookie(res, token);
   return res;
 }

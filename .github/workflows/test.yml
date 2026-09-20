@@ -1,0 +1,36 @@
+name: test
+
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: pocketstudio
+          POSTGRES_PASSWORD: pocketstudio
+          POSTGRES_DB: pocketstudio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pocketstudio -d pocketstudio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://pocketstudio:pocketstudio@127.0.0.1:5432/pocketstudio
+      AUTH_SECRET: ci-auth-secret-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bunx prisma generate
+      - run: bun run db:push
+      - run: bun run test

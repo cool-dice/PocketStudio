@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { workspaceCounts, workspaceDto } from "@/lib/workspace-shapes";
-import { WORKSPACE_STAGES } from "@/lib/workspace-data";
+import { resolvePipelineStagePatch } from "@/lib/pipeline-stage";
 import type { WorkspaceKind } from "@/lib/workspace-types";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,8 @@ const patchSchema = z.object({
   stage: z.string().trim().max(40).optional(),
   stageIndex: z.number().int().min(1).max(12).optional(),
   progress: z.number().int().min(0).max(100).optional(),
+  favorite: z.boolean().optional(),
+  archived: z.boolean().optional(),
 });
 
 export async function PATCH(req: Request, { params }: Params) {
@@ -49,7 +52,9 @@ export async function PATCH(req: Request, { params }: Params) {
   }
   const { id } = await params;
 
-  const parsed = patchSchema.safeParse(await req.json().catch(() => ({})));
+  const jsonRead = await readJsonBody(req, { fallback: {} });
+  if (!jsonRead.ok) return jsonRead.response;
+  const parsed = patchSchema.safeParse(jsonRead.value);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
@@ -65,16 +70,12 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   const type = existing.type as WorkspaceKind;
-  const stages = WORKSPACE_STAGES[type] ?? WORKSPACE_STAGES.universal;
-
-  // stageIndex по названию стадии — согласованно с пайплайном типа.
-  let { stage, stageIndex } = parsed.data;
-  if (stage !== undefined && stageIndex === undefined) {
-    const idx = stages.indexOf(stage);
-    stageIndex = idx >= 0 ? idx + 1 : undefined;
-  }
-  if (stageIndex !== undefined && stage === undefined) {
-    stage = stages[Math.min(stageIndex, stages.length) - 1];
+  const stagePatch = resolvePipelineStagePatch(type, {
+    stage: parsed.data.stage,
+    stageIndex: parsed.data.stageIndex,
+  });
+  if (!stagePatch.ok) {
+    return NextResponse.json({ error: stagePatch.error }, { status: 400 });
   }
 
   const project = await db.project.update({
@@ -84,10 +85,17 @@ export async function PATCH(req: Request, { params }: Params) {
       ...(parsed.data.description !== undefined
         ? { description: parsed.data.description }
         : {}),
-      ...(stage !== undefined ? { stage } : {}),
-      ...(stageIndex !== undefined ? { stageIndex } : {}),
+      ...(!stagePatch.skip
+        ? { stage: stagePatch.stage, stageIndex: stagePatch.stageIndex }
+        : {}),
       ...(parsed.data.progress !== undefined
         ? { progress: parsed.data.progress }
+        : {}),
+      ...(parsed.data.favorite !== undefined
+        ? { favorite: parsed.data.favorite }
+        : {}),
+      ...(parsed.data.archived !== undefined
+        ? { archived: parsed.data.archived }
         : {}),
     },
   });

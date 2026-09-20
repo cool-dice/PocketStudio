@@ -8,6 +8,7 @@
  */
 
 import type { ArtifactDto, DocumentSectionDto } from "@/lib/workspace-types";
+import { playableAudioSrc } from "@/lib/audio-copy";
 
 /** Сцена раскадровки: секция сценария + готовые кадр/озвучка (если есть). */
 export interface VideoScene {
@@ -75,7 +76,7 @@ export function buildScenes(
       imageArtifact: image,
       imageUrl: image?.url ?? null,
       voiceArtifact: voice,
-      voiceUrl: voice?.url ?? null,
+      voiceUrl: playableAudioSrc(voice),
     };
   });
 }
@@ -85,13 +86,13 @@ export function sceneReady(scene: VideoScene): boolean {
   return Boolean(scene.imageUrl && scene.voiceUrl);
 }
 
-/** Голоса TTS — allowlist сервера (TTS_VOICES в src/lib/ai/index.ts). */
+/** Голоса TTS — OpenAI-совместимые id (шлюз мапит старые z-ai имена). */
 export const VOICES: ReadonlyArray<{ id: string; label: string }> = [
-  { id: "tongtong", label: "Тонгтунг · мягкий" },
-  { id: "chuichui", label: "Чуйчуй · тёплый" },
-  { id: "xiaochen", label: "Сяочэнь · женский" },
-  { id: "jam", label: "Джэм · мужской" },
-  { id: "kazi", label: "Кази · глубокий" },
-  { id: "douji", label: "Доуцзи · юный" },
-  { id: "luodo", label: "Луодо · спокойный" },
+  { id: "alloy", label: "Alloy · нейтральный" },
+  { id: "nova", label: "Nova · яркий" },
+  { id: "shimmer", label: "Shimmer · мягкий" },
+  { id: "echo", label: "Echo · спокойный" },
+  { id: "onyx", label: "Onyx · глубокий" },
+  { id: "fable", label: "Fable · рассказчик" },
+  { id: "sage", label: "Sage · ровный" },
 ];

@@ -20,6 +20,10 @@ import {
 } from "@/components/ui/sheet";
 import { useAppUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import {
+  IMAGE_MISSING_FILE,
+  IMAGE_MISSING_FILE_HINT,
+} from "@/lib/image-copy";
 import { formatTileDate, type GalleryTile } from "./gallery-data";
 import { TileArt } from "./tile-art";
 
@@ -66,7 +70,11 @@ export function TileDrawer({
                 iconClassName="size-20"
               />
 
-              {tile.url ? (
+              {tile.fileMissing ? (
+                <p className="text-xs text-destructive">
+                  {IMAGE_MISSING_FILE}. {IMAGE_MISSING_FILE_HINT}
+                </p>
+              ) : tile.url ? (
                 <a
                   href={tile.url}
                   target="_blank"
@@ -100,7 +108,16 @@ export function TileDrawer({
                 <MetaRow label="Размер" value={tile.sizeLabel} />
                 {tile.stage ? <MetaRow label="Стадия" value={tile.stage} /> : null}
                 <MetaRow label="Создано" value={formatTileDate(tile.createdAt)} />
-                <MetaRow label="Файл" value={tile.url ? "сгенерирован" : "нет (концепт)"} />
+                <MetaRow
+                  label="Файл"
+                  value={
+                    tile.fileMissing
+                      ? IMAGE_MISSING_FILE
+                      : tile.url
+                        ? "сгенерирован"
+                        : "нет (концепт)"
+                  }
+                />
               </dl>
 
               <div className="grid grid-cols-2 gap-2">
@@ -108,13 +125,15 @@ export function TileDrawer({
                   variant="outline"
                   onClick={() => {
                     onOpenChange(false);
-                    useAppUi.getState().setMainArea("design");
+                    useAppUi.getState().openDesignEditor({
+                      imageUrl: tile.fileMissing ? null : tile.url,
+                    });
                   }}
                 >
                   <PenTool className="size-4" aria-hidden="true" />
-                  Открыть в Дизайне
+                  Редактировать
                 </Button>
-                {tile.url ? (
+                {tile.url && !tile.fileMissing ? (
                   <Button variant="outline" asChild>
                     <a href={tile.url} download>
                       <Download className="size-4" aria-hidden="true" />
@@ -125,7 +144,11 @@ export function TileDrawer({
                   <Button
                     variant="outline"
                     disabled
-                    title="У этой работы пока нет файла"
+                    title={
+                      tile.fileMissing
+                        ? IMAGE_MISSING_FILE
+                        : "У этой работы пока нет файла"
+                    }
                   >
                     <Download className="size-4" aria-hidden="true" />
                     Скачать

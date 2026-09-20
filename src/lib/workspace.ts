@@ -14,13 +14,18 @@ import { promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { isDeletableRelPath } from "./rel-path";
+
+export { isDeletableRelPath } from "./rel-path";
+
 // ─────────────────────────── roots ───────────────────────────
 
 export const WORKSPACE_ROOT =
-  process.env.VIBEFLOW_WORKSPACE_ROOT ?? "/home/z/my-project/workspace";
+  process.env.VIBEFLOW_WORKSPACE_ROOT ?? path.resolve(process.cwd(), "workspace");
 
 export const TEMPLATE_ROOT =
-  process.env.VIBEFLOW_TEMPLATE_ROOT ?? "/home/z/my-project/templates/nextjs-basic";
+  process.env.VIBEFLOW_TEMPLATE_ROOT ??
+  path.resolve(process.cwd(), "templates/nextjs-basic");
 
 const GIT_IDENTITY = [
   "-c",
@@ -145,6 +150,47 @@ export function safeJoin(root: string, relPath: string): string {
   return abs;
 }
 
+/**
+ * After safeJoin: reject symlink hops (even if the lexical path is inside
+ * root) so write/delete cannot follow a link to /etc or another project.
+ */
+export async function assertInsideRoot(root: string, abs: string): Promise<void> {
+  let rootReal: string;
+  try {
+    rootReal = await fsp.realpath(root);
+  } catch {
+    // First write: the project dir is not on disk yet. safeJoin already
+    // bound the path lexically; there is no symlink to follow.
+    return;
+  }
+  const rootWithSep = rootReal.endsWith(path.sep) ? rootReal : rootReal + path.sep;
+
+  let probe = abs;
+  for (;;) {
+    let st;
+    try {
+      st = await fsp.lstat(probe);
+    } catch {
+      const parent = path.dirname(probe);
+      if (parent === probe) return;
+      probe = parent;
+      continue;
+    }
+    if (st.isSymbolicLink()) {
+      throw new WorkspaceError("Путь вне проекта запрещён");
+    }
+    try {
+      const real = await fsp.realpath(probe);
+      if (real !== rootReal && !real.startsWith(rootWithSep)) {
+        throw new WorkspaceError("Путь вне проекта запрещён");
+      }
+    } catch (err) {
+      if (err instanceof WorkspaceError) throw err;
+    }
+    return;
+  }
+}
+
 /** POSIX-style relative path for display/transport. */
 export function toRel(root: string, abs: string): string {
   const rel = path.relative(root, abs);
@@ -160,6 +206,7 @@ export async function readWorkspaceFile(
   maxBytes = MAX_FILE_BYTES,
 ): Promise<{ path: string; content: string; size: number }> {
   const abs = safeJoin(root, relPath);
+  await assertInsideRoot(root, abs);
   let stat;
   try {
     stat = await fsp.stat(abs);
@@ -194,6 +241,7 @@ export async function writeWorkspaceFile(
     throw new WorkspaceError(`Файл больше ${maxBytes} байт`, 413);
   }
   const abs = safeJoin(root, relPath);
+  await assertInsideRoot(root, abs);
   const segments = toRel(root, abs).split("/");
   if (segments.length === 0) {
     throw new WorkspaceError("Путь должен указывать на файл");
@@ -218,8 +266,17 @@ export async function deleteWorkspacePath(
   root: string,
   relPath: string,
 ): Promise<{ deleted: true; path: string }> {
+  if (!isDeletableRelPath(relPath)) {
+    throw new WorkspaceError("Нельзя удалить корень проекта");
+  }
   const abs = safeJoin(root, relPath);
+  await assertInsideRoot(root, abs);
   if (abs === root) throw new WorkspaceError("Нельзя удалить корень проекта");
+  try {
+    await fsp.lstat(abs);
+  } catch {
+    throw new WorkspaceError("Файл не найден", 404);
+  }
   await fsp.rm(abs, { recursive: true, force: true });
   return { deleted: true as const, path: toRel(root, abs) };
 }
@@ -539,6 +596,32 @@ async function lastCommitAt(root: string, hash: string): Promise<CommitInfo | nu
   }
 }
 
+export interface RestoreCheckpointResult {
+  commit: CommitInfo;
+  discardedUncommitted: boolean;
+}
+
+/**
+ * Reset THIS repo to a commit that already exists in it.
+ * Hashes from another project do not resolve here → 404.
+ * Uncommitted files are discarded (caller should confirm in the UI).
+ */
+export async function restoreProjectCheckpoint(
+  root: string,
+  hash: string,
+): Promise<RestoreCheckpointResult> {
+  if (!/^[0-9a-f]{6,40}$/i.test(hash)) {
+    throw new WorkspaceError("Некорректный хеш коммита", 400);
+  }
+  const commit = await lastCommitAt(root, hash);
+  if (!commit) {
+    throw new WorkspaceError("Чекпоинт не найден в этом проекте", 404);
+  }
+  const discardedUncommitted = await hasUncommittedChanges(root);
+  await git(root, ["reset", "--hard", commit.hash]);
+  return { commit, discardedUncommitted };
+}
+
 // ─────────────────────────── zip export (Stage 4) ───────────────────────────
 
 const PY_ZIP = `
@@ -567,7 +650,7 @@ print(count)
 export async function exportProjectZip(root: string): Promise<string> {
   const zipPath = path.join(
     os.tmpdir(),
-    `vibeflow-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.zip`,
+    `pocketstudio-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.zip`,
   );
 
   let printedCount = "0";
@@ -601,6 +684,26 @@ export async function exportProjectZip(root: string): Promise<string> {
 export async function createFromTemplate(dest: string): Promise<void> {
   await fsp.mkdir(path.dirname(dest), { recursive: true });
   await fsp.cp(TEMPLATE_ROOT, dest, { recursive: true });
+}
+
+/**
+ * Ensure a workspace (type=app) has files on disk so the code tab can open it.
+ * Existing non-empty dirs are left alone.
+ */
+export async function ensureCodeWorkspace(projectId: string): Promise<string> {
+  const root = projectRoot(projectId);
+  try {
+    const st = await fsp.stat(root);
+    if (st.isDirectory()) {
+      const entries = await fsp.readdir(root);
+      if (entries.some((name) => name !== ".git")) return root;
+    }
+  } catch {
+    // missing dir — provision below
+  }
+  await createFromTemplate(root);
+  await initProjectGit(root);
+  return root;
 }
 
 /**

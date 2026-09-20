@@ -7,7 +7,12 @@ import {
   projectRoot,
   readWorkspaceFile,
   writeWorkspaceFile,
+  deleteWorkspacePath,
 } from "@/lib/workspace";
+import { isDeletableRelPath } from "@/lib/rel-path";
+import { removeFileChunks, scheduleIndexFile } from "@/lib/rag";
+import { shouldSkipPath } from "@/lib/rag/skip";
+import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +70,9 @@ export async function PUT(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const blocked = oversizedJsonResponse(req);
+  if (blocked) return blocked;
+
   const session = await getUserFromRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
@@ -78,12 +86,9 @@ export async function PUT(
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Некорректный JSON" }, { status: 400 });
-  }
+  const jsonRead = await readJsonBody(req);
+  if (!jsonRead.ok) return jsonRead.response;
+  const body = jsonRead.value;
   const parsed = putSchema.safeParse(body);
   if (!parsed.success) {
     const fields: Record<string, string> = {};
@@ -104,7 +109,55 @@ export async function PUT(
       where: { id: project.id },
       data: { updatedAt: new Date() },
     });
+    if (!shouldSkipPath(result.path)) {
+      scheduleIndexFile(db, {
+        userId: session.sub,
+        projectId: project.id,
+        relPath: result.path,
+        content: parsed.data.content,
+      });
+    }
     return NextResponse.json(result);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/* ── DELETE /api/projects/[id]/file?path=… — remove file/dir + RAG chunks ── */
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await getUserFromRequest(req);
+  if (!session) {
+    return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
+  }
+  const { id } = await params;
+
+  const project = await db.project.findFirst({
+    where: { id, userId: session.sub },
+  });
+  if (!project) {
+    return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+  }
+
+  const filePath = new URL(req.url).searchParams.get("path");
+  if (!filePath) {
+    return NextResponse.json({ error: "Параметр path обязателен" }, { status: 400 });
+  }
+  if (!isDeletableRelPath(filePath)) {
+    return NextResponse.json({ error: "Нельзя удалить корень проекта" }, { status: 400 });
+  }
+
+  try {
+    const deleted = await deleteWorkspacePath(projectRoot(project.id), filePath);
+    await db.project.update({
+      where: { id: project.id },
+      data: { updatedAt: new Date() },
+    });
+    await removeFileChunks(db, session.sub, project.id, deleted.path);
+    return NextResponse.json(deleted);
   } catch (err) {
     return errorResponse(err);
   }

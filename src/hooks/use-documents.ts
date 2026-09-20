@@ -17,6 +17,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import { useAppUi } from "@/lib/store";
+import { isStaleSectionSave, nextSaveSeq } from "@/lib/section-save-race";
 import type {
   DocumentDto,
   DocumentKind,
@@ -39,6 +41,7 @@ export function useDocuments(workspaceId?: string | null) {
   const [loadError, setLoadError] = useState(false);
   const seqRef = useRef(0);
   const documentsRef = useRef<DocumentDto[]>([]);
+  const workspaceVersion = useAppUi((s) => s.workspaceVersion);
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -62,7 +65,7 @@ export function useDocuments(workspaceId?: string | null) {
   useEffect(() => {
     const seq = ++seqRef.current;
     if (workspaceId) void fetchList(seq, workspaceId);
-  }, [workspaceId, fetchList]);
+  }, [workspaceId, fetchList, workspaceVersion]);
 
   // Без воркспейса — пустой список без запроса (селектор, не эффект).
   const list = workspaceId ? documents : EMPTY_DOCS;
@@ -138,6 +141,7 @@ export function useDocument(documentId?: string | null) {
   const [loadError, setLoadError] = useState(false);
   const seqRef = useRef(0);
   const documentRef = useRef<DocumentDto | null>(null);
+  const saveSeqRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     documentRef.current = document;
@@ -189,10 +193,14 @@ export function useDocument(documentId?: string | null) {
 
   /** Автосейв секции: оптимистичный патч + API; ошибка — откат и toast. */
   const saveSection = useCallback(async (id: string, patch: SectionPatch) => {
+    const requestSeq = nextSaveSeq(saveSeqRef.current, id);
     const snapshot = documentRef.current;
     patchSectionLocal(id, patch);
     try {
       const section = await api.updateSection(id, patch);
+      if (isStaleSectionSave(saveSeqRef.current, id, requestSeq)) {
+        return section;
+      }
       setDocument((prev) => {
         if (!prev?.sections) return prev;
         return {
@@ -208,6 +216,9 @@ export function useDocument(documentId?: string | null) {
       });
       return section;
     } catch {
+      if (isStaleSectionSave(saveSeqRef.current, id, requestSeq)) {
+        return null;
+      }
       setDocument(snapshot);
       toast.error("Не удалось сохранить секцию", {
         description: "Проверьте соединение — правки остались в поле ввода.",
@@ -255,6 +266,22 @@ export function useDocument(documentId?: string | null) {
     }
   }, []);
 
+  /** Применить секцию, уже сохранённую на сервере (ИИ-правка). */
+  const applySection = useCallback((section: DocumentSectionDto) => {
+    setDocument((prev) => {
+      if (!prev?.sections) return prev;
+      const sections = prev.sections.map((s) =>
+        s.id === section.id ? section : s,
+      );
+      return {
+        ...prev,
+        sections,
+        wordsCount: sections.reduce((acc, s) => acc + s.wordsCount, 0),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }, []);
+
   /** Переименовать документ (API + локальный патч). */
   const rename = useCallback(async (title: string) => {
     if (!documentId) return null;
@@ -275,6 +302,7 @@ export function useDocument(documentId?: string | null) {
     saveSection,
     createSection,
     deleteSection,
+    applySection,
     rename,
   };
 }

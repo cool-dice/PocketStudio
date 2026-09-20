@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { NoteTranscriptionBlock } from "@/components/app/note-transcription";
 import { useThreads } from "@/hooks/use-threads";
 import { formatNoteDate, textPreview } from "@/lib/format";
 import { useAppUi } from "@/lib/store";
@@ -53,7 +54,14 @@ import {
   CategoryGlyph,
   categoryColorStyle,
 } from "@/lib/category-style";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import {
+  ANALYSIS_FAILED_FALLBACK,
+  EMPTY_ANALYSIS_BLOCKS_MESSAGE,
+  hasUsableAnalysisBlocks,
+  NOTE_ANALYSIS_UNCONFIGURED_HINT,
+} from "@/lib/note-analysis";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
 import type { Note, NoteProjectLink, NoteStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -324,6 +332,82 @@ function LinkedProjects({ noteId }: { noteId: string }) {
   );
 }
 
+function NoteInboxControls({ note }: { note: Note }) {
+  const updateContextNote = useAppUi((s) => s.updateContextNote);
+  const bumpNotes = useAppUi((s) => s.bumpNotes);
+  const [tagDraft, setTagDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const remindLocal = note.remindAt
+    ? note.remindAt.slice(0, 16)
+    : "";
+
+  async function saveTags() {
+    const names = tagDraft
+      .split(/[,\s]+/)
+      .map((t) => t.replace(/^#/, "").trim())
+      .filter(Boolean);
+    if (names.length === 0) return;
+    setBusy(true);
+    try {
+      const updated = await api.updateNote(note.id, {
+        tags: [...(note.tags ?? []).map((t) => t.name), ...names],
+      });
+      updateContextNote(updated);
+      bumpNotes();
+      setTagDraft("");
+    } catch {
+      toast.error("Не удалось сохранить теги");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRemind(value: string) {
+    setBusy(true);
+    try {
+      const iso = value ? new Date(value).toISOString() : null;
+      const updated = await api.updateNote(note.id, { remindAt: iso });
+      updateContextNote(updated);
+      bumpNotes();
+    } catch {
+      toast.error("Не удалось сохранить напоминание");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <label className="block text-[11px] font-medium text-muted-foreground">
+        Теги (через пробел)
+        <input
+          value={tagDraft}
+          onChange={(e) => setTagDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void saveTags();
+            }
+          }}
+          placeholder="идея клип"
+          disabled={busy}
+          className="mt-1 w-full rounded-md border bg-background px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="block text-[11px] font-medium text-muted-foreground">
+        Напоминание
+        <input
+          type="datetime-local"
+          defaultValue={remindLocal}
+          onBlur={(e) => void saveRemind(e.target.value)}
+          disabled={busy}
+          className="mt-1 w-full rounded-md border bg-background px-2 py-1 text-sm"
+        />
+      </label>
+    </div>
+  );
+}
+
 /* ── NoteDetail ── */
 
 export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
@@ -404,19 +488,36 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
       const updated = await api.reanalyzeNote(note.id);
       updateContextNote(updated);
       bumpNotes(); // notebook feed: status chip → «Анализ в очереди»
-    } catch {
-      updateContextNote(note);
-      toast.error("Не удалось перезапустить анализ");
+    } catch (err) {
+      const unconfigured =
+        err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
+      if (unconfigured) {
+        updateContextNote({
+          ...note,
+          status: "error",
+          positive: null,
+          negative: null,
+          final: null,
+          recommendations: null,
+          analyzedAt: null,
+          errorMessage: UNCONFIGURED_TOOL_MESSAGE,
+        });
+        bumpNotes();
+        toast.error(UNCONFIGURED_TOOL_MESSAGE, {
+          description: NOTE_ANALYSIS_UNCONFIGURED_HINT,
+        });
+      } else {
+        updateContextNote(note);
+        toast.error(
+          err instanceof ApiError ? err.message : "Не удалось перезапустить анализ",
+        );
+      }
     } finally {
       setReanalyzeBusy(false);
     }
   };
 
-  const hasBlocks =
-    !!note.positive ||
-    !!note.negative ||
-    !!note.final ||
-    (note.recommendations?.length ?? 0) > 0;
+  const hasBlocks = hasUsableAnalysisBlocks(note);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -435,11 +536,28 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
             </span>
           )}
           <StatusChip status={note.status} />
+          {(note.tags ?? []).map((tag) => (
+            <span
+              key={tag.id}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                categoryColorStyle(tag.color).chip,
+              )}
+            >
+              #{tag.name}
+            </span>
+          ))}
         </div>
+        <NoteInboxControls note={note} />
 
         <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap">
           {note.rawText || ""}
         </p>
+
+        <NoteTranscriptionBlock
+          rawText={note.rawText}
+          transcription={note.transcription}
+        />
 
         {/* ── Analysis pipeline states (live via WS) ── */}
         <AnimatePresence initial={false} mode="wait">
@@ -465,7 +583,7 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
               <p className="mt-2.5 text-sm leading-relaxed text-foreground/80">
                 {note.errorMessage
                   ? textPreview(note.errorMessage, 220)
-                  : "Анализ завершился с ошибкой. Попробуйте запустить его ещё раз."}
+                  : ANALYSIS_FAILED_FALLBACK}
               </p>
               <Button
                 variant="outline"
@@ -625,8 +743,7 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
                     variants={blockVariants}
                     className="rounded-xl border border-dashed bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground"
                   >
-                    Анализ завершился, но блоки пусты. Попробуйте
-                    переанализировать заметку.
+                    {EMPTY_ANALYSIS_BLOCKS_MESSAGE}
                   </motion.p>
                 )}
               </motion.div>

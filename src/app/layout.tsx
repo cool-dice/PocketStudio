@@ -3,6 +3,9 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AppProviders } from "@/components/app/providers";
+import { LANDING_META_DESCRIPTION } from "@/lib/landing-copy";
+import { THEME_STORAGE_KEY } from "@/lib/theme-pref";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,13 +17,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Guest `/` is the public landing — do not set robots.index false here.
+// Authenticated `/w/*` uses appRouteMetadata from `src/app/w/layout.tsx`.
 export const metadata: Metadata = {
   title: "PocketStudio — идея → продукт → доход",
-  description:
-    "PocketStudio — карманная творческая студия: диалог с ИИ превращает идею в тексты, изображения, аудио и видео, собирает приложение и публикует его. Один оркестратор на весь творческий конвейер.",
+  description: LANDING_META_DESCRIPTION,
   keywords: ["PocketStudio", "ИИ", "творческая студия", "генерация", "аудио", "видео", "деплой", "агент"],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
   },
   openGraph: {
     title: "PocketStudio",
@@ -49,10 +53,13 @@ export default function RootLayout({
           attribute="class"
           defaultTheme="system"
           enableSystem
+          storageKey={THEME_STORAGE_KEY}
           disableTransitionOnChange
         >
-          {children}
-          <Toaster position="top-right" closeButton />
+          <AppProviders>
+            {children}
+            <Toaster position="top-right" closeButton />
+          </AppProviders>
         </ThemeProvider>
       </body>
     </html>

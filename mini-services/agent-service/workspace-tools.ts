@@ -8,9 +8,8 @@
 //
 // Паттерн повторяет tools.ts 1:1: ToolDef + ручная валидация аргументов
 // (невалидные → {error: "..."} вместо throw), userId-scoped, БД напрямую
-// через db-client. Медиа генерируется СВОИМ z-ai-web-dev-sdk (getZai из
-// agent.ts — у мини-сервиса нет пользовательского JWT для Next REST), файлы
-// кладутся в /home/z/my-project/public/gen и раздаются Next'ом как /gen/…
+// через db-client. Медиа генерируется шлюзом src/lib/ai (OpenAI/Anthropic),
+// файлы кладутся в public/gen и раздаются Next'ом как /gen/…
 // (абсолютный путь: сервис запущен с cwd mini-services/agent-service).
 //
 // Авторизация инструментов = userId оркестратора (так же, как create_note
@@ -19,15 +18,61 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import { db } from "./db-client";
-import { generateLLMResponse, getZai } from "./agent";
+import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
+import { generateLLMResponse } from "./agent";
+import {
+  generateImage as gatewayGenerateImage,
+  mapTtsVoice,
+  synthesizeSpeech,
+  chatCompletion,
+  type ResolvedRoute,
+} from "../../src/lib/ai/connector";
+import { GatewayError } from "../../src/lib/ai/errors";
+import { UNCONFIGURED_TOOL_MESSAGE } from "../../src/lib/ai/tools";
+import {
+  isUnconfiguredToolError,
+  resolveToolRoute,
+} from "../../src/lib/ai/resolve";
+import {
+  composeImagePrompt,
+  DOCUMENT_ANALYST_SYSTEM,
+  sectionSystemFor,
+} from "../../src/lib/ai/prompts";
+import { parseAnalystFindings } from "../../src/lib/finding-quotes";
+import {
+  scheduleIndexArtifact,
+  scheduleIndexEntity,
+  scheduleIndexFinding,
+  scheduleIndexSection,
+} from "../../src/lib/rag/hooks";
+import {
+  DEPLOY_ZIP_HINT,
+  DOCKER_BUILD_LOCAL_ONLY,
+  EMPTY_APP_BUILD_ERROR,
+  deployWrongTypeMessage,
+  hasBuildableAppFiles,
+  hasDockerfile,
+} from "../../src/lib/docker-copy";
+import { generateWorkspaceDockerfile } from "../../src/lib/docker-file";
+import { dockerBuildWorkspace } from "../../src/lib/docker-deploy";
+import {
+  exportProjectZip,
+  listWorkspaceTree,
+  projectRoot,
+} from "../../src/lib/workspace";
 import type { ToolContext, ToolDef } from "./tools";
 
 // ─────────────────────────── shared helpers ───────────────────────────
 
-/** Абсолютный путь до public/gen основного Next-приложения. */
-const GEN_DIR = "/home/z/my-project/public/gen";
+/** Абсолютный путь до public/gen основного Next-приложения (корень репо). */
+const REPO_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const GEN_DIR = path.join(REPO_ROOT, "public", "gen");
 
 /** Сохранить бинарник в public/gen и вернуть публичный URL. */
 function saveGenFile(data: Buffer, ext: "png" | "wav"): string {
@@ -45,14 +90,15 @@ interface WorkspaceRow {
 
 /**
  * Найти воркспейс пользователя: по id (workspaceId/projectId) или по
- * названию (SQLite не умеет регистронезависимый LIKE для кириллицы —
- * фильтруем в JS, как findCategoryByName в tools.ts). Приоритет: точное
+ * названию (регистр и кириллица — через JS, как findCategoryByName). Приоритет: точное
  * совпадение → «начинается с» → «содержит».
  */
 async function resolveWorkspace(
   userId: string,
   args: Record<string, unknown>,
+  ctx?: ToolContext,
 ): Promise<WorkspaceRow | { error: string }> {
+  throwIfAborted(ctx?.signal);
   const idArg = pickString(args, ["workspaceId", "projectId"]);
   if (idArg) {
     const byId = await db.project.findFirst({
@@ -64,26 +110,34 @@ async function resolveWorkspace(
   }
 
   const name = pickString(args, ["workspaceName", "projectName"]);
-  if (!name) {
+  if (name) {
+    const all = await db.project.findMany({
+      where: { userId },
+      select: { id: true, name: true, type: true },
+      orderBy: { updatedAt: "desc" },
+    });
+    const lower = name.toLowerCase();
+    const found =
+      all.find((p) => p.name.toLowerCase() === lower) ??
+      all.find((p) => p.name.toLowerCase().startsWith(lower)) ??
+      all.find((p) => p.name.toLowerCase().includes(lower));
+    if (found) return found;
     return {
-      error:
-        "Укажите воркспейс: передайте workspaceId или workspaceName (название)",
+      error: `Воркспейс «${name}» не найден — проверьте название или передайте workspaceId`,
     };
   }
 
-  const all = await db.project.findMany({
-    where: { userId, origin: "workspace" },
-    select: { id: true, name: true, type: true },
-    orderBy: { updatedAt: "desc" },
-  });
-  const lower = name.toLowerCase();
-  const found =
-    all.find((p) => p.name.toLowerCase() === lower) ??
-    all.find((p) => p.name.toLowerCase().startsWith(lower)) ??
-    all.find((p) => p.name.toLowerCase().includes(lower));
-  if (found) return found;
+  if (ctx?.projectId) {
+    const byCtx = await db.project.findFirst({
+      where: { id: ctx.projectId, userId },
+      select: { id: true, name: true, type: true },
+    });
+    if (byCtx) return byCtx;
+  }
+
   return {
-    error: `Воркспейс «${name}» не найден — проверьте название или передайте workspaceId`,
+    error:
+      "Укажите воркспейс: откройте чат внутри воркспейса или передайте workspaceId / workspaceName",
   };
 }
 
@@ -165,7 +219,7 @@ const createEntity: ToolDef = {
     setId: "идентификатор набора сущностей (необязательно, по умолчанию main)",
     setName: "название набора (необязательно)",
   },
-  async execute(args: any, userId: string, _ctx: ToolContext) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -194,7 +248,7 @@ const createEntity: ToolDef = {
     const setId = optString(args.setId, 60);
     const setName = optString(args.setName, 120);
 
-    const ws = await resolveWorkspace(userId, args);
+    const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
 
     const entity = await db.entity.create({
@@ -211,8 +265,11 @@ const createEntity: ToolDef = {
       },
     });
 
+    scheduleIndexEntity(db, entity.id);
+
     return {
       message: `Сущность создана: ${entity.name} (${entity.kind})`,
+      workspaceId: ws.id,
       entity: {
         id: entity.id,
         name: entity.name,
@@ -220,6 +277,7 @@ const createEntity: ToolDef = {
         domain: entity.domain,
         setName: entity.setName,
         workspace: ws.name,
+        workspaceId: ws.id,
       },
     };
   },
@@ -227,15 +285,7 @@ const createEntity: ToolDef = {
 
 // ─────────────────────────── tool: check_document ───────────────────────────
 
-/** Промпт Аналитика — копия ANALYST_SYSTEM из src/lib/ai/index.ts (Фаза A). */
-const ANALYST_SYSTEM = `Ты — редактор-аналитик текста (Аналитик студии). Тебе дают документ с главами/разделами.
-Найди до 8 самых важных проблем трёх видов:
-- contradiction — противоречие (факт А противоречит факту Б в другом месте);
-- omission — недосказанность (обещано, но не раскрыто; сцена/требование без развития);
-- inconsistency — расхождение (числа, возраст, имена, формулировки расходятся между местами).
-Отвечай СТРОГО JSON-массивом (без markdown), каждый элемент:
-{"type":"contradiction|omission|inconsistency","severity":"info|warning|critical","title":"краткое описание проблемы на русском","quote":"точная цитата из текста (если есть)","advice":"конкретный совет, что сделать","sourceRef":"глава/раздел, напр. «гл. 2 · гл. 7»"}
-Если проблем нет — верни [].`;
+/** Промпт Аналитика — src/lib/ai/prompts.ts DOCUMENT_ANALYST_SYSTEM. */
 
 /** Вытащить первый JSON-массив/объект из ответа модели (как src/lib/ai). */
 function extractJson(text: string): unknown {
@@ -249,32 +299,8 @@ function extractJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-interface FindingDraft {
-  type: string;
-  severity: string;
-  title: string;
-  quote: string | null;
-  advice: string | null;
-  sourceRef: string | null;
-}
-
-function parseFindings(raw: string): FindingDraft[] {
-  const parsed = extractJson(raw);
-  if (!Array.isArray(parsed)) return [];
-  const types = ["contradiction", "omission", "inconsistency"];
-  const severities = ["info", "warning", "critical"];
-  return parsed
-    .filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null)
-    .map((f) => ({
-      type: types.includes(String(f.type)) ? String(f.type) : "inconsistency",
-      severity: severities.includes(String(f.severity)) ? String(f.severity) : "warning",
-      title: String(f.title ?? "").slice(0, 300),
-      quote: f.quote ? String(f.quote).slice(0, 600) : null,
-      advice: f.advice ? String(f.advice).slice(0, 600) : null,
-      sourceRef: f.sourceRef ? String(f.sourceRef).slice(0, 200) : null,
-    }))
-    .filter((f) => f.title.length > 0)
-    .slice(0, 8);
+function parseFindings(raw: string, documentText: string) {
+  return parseAnalystFindings(extractJson(raw), documentText);
 }
 
 const checkDocument: ToolDef = {
@@ -287,7 +313,7 @@ const checkDocument: ToolDef = {
     workspaceName: "название воркспейса, если id нет",
     documentTitle: "название документа (с workspaceId/workspaceName)",
   },
-  async execute(args: any, userId: string, _ctx: ToolContext) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -317,7 +343,7 @@ const checkDocument: ToolDef = {
       const lower = title.toLowerCase();
       const candidates: { id: string; projectId: string }[] = [];
 
-      const ws = await resolveWorkspace(userId, args);
+      const ws = await resolveWorkspace(userId, args, ctx);
       if (!("error" in ws)) {
         const docs = await db.document.findMany({
           where: { projectId: ws.id },
@@ -366,14 +392,15 @@ const checkDocument: ToolDef = {
       .join("\n\n")
       .slice(0, 60_000);
 
-    // 3. LLM-анализ (свой SDK, промпт как у Аналитика Next-стороны).
-    let drafts: FindingDraft[];
+    // 3. LLM-анализ через шлюз (промпт как у Аналитика Next-стороны).
+    let drafts: ReturnType<typeof parseFindings>;
     try {
-      const raw = await generateLLMResponse(ANALYST_SYSTEM, [
+      const raw = await generateLLMResponse(DOCUMENT_ANALYST_SYSTEM, [
         { role: "user", content: docText },
-      ]);
-      drafts = parseFindings(raw);
+      ], { userId, toolId: "document_check", jsonMode: true, signal: ctx.signal });
+      drafts = parseFindings(raw, docText);
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
       return {
         error:
           "Аналитик не справился: " +
@@ -397,6 +424,7 @@ const checkDocument: ToolDef = {
         }),
       ),
     );
+    for (const f of created) scheduleIndexFinding(db, f.id);
 
     return {
       message:
@@ -404,6 +432,7 @@ const checkDocument: ToolDef = {
         (created.length === 0
           ? "проблем не найдено"
           : `нашёл ${created.length} ${created.length === 1 ? "находку" : "находок"}`),
+      workspaceId: document.projectId,
       document: { id: document.id, title: document.title },
       findings: created.map((f) => ({
         type: f.type,
@@ -431,7 +460,7 @@ const generateImage: ToolDef = {
     title: "название артефакта (необязательно)",
     size: "размер: 1024x1024|1152x864|864x1152|1440x720|720x1440 (по умолчанию 1024x1024)",
   },
-  async execute(args: any, userId: string, _ctx: ToolContext) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -444,19 +473,20 @@ const generateImage: ToolDef = {
     const sizeRaw = optString(args.size, 20);
     const size = sizeRaw && IMAGE_SIZES.has(sizeRaw) ? sizeRaw : "1024x1024";
 
-    const ws = await resolveWorkspace(userId, args);
+    const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
 
     try {
-      const zai = await getZai();
-      const response = await zai.images.generations.create({
-        prompt,
-        size: size as "1024x1024",
+      const route = await resolveToolRoute(db, userId, "image");
+      const { buffer } = await gatewayGenerateImage(route, {
+        prompt: composeImagePrompt(prompt),
+        size,
+        signal: ctx.signal,
       });
-      const base64 = response.data[0]?.base64;
-      if (!base64) return { error: "Генерация вернула пустой результат — попробуйте ещё раз" };
-
-      const url = saveGenFile(Buffer.from(base64, "base64"), "png");
+      if (buffer.length === 0) {
+        return { error: "Генерация вернула пустой файл — попробуйте ещё раз" };
+      }
+      const url = saveGenFile(buffer, "png");
       const artifact = await db.artifact.create({
         data: {
           projectId: ws.id,
@@ -466,13 +496,19 @@ const generateImage: ToolDef = {
           url,
         },
       });
+      scheduleIndexArtifact(db, artifact.id);
       return {
         message: `Изображение готово: ${artifact.title}`,
         url,
+        workspaceId: ws.id,
         artifact: { id: artifact.id, title: artifact.title, type: "image" },
         workspace: ws.name,
       };
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
+      if (err instanceof GatewayError && err.message === UNCONFIGURED_TOOL_MESSAGE) {
+        return { error: UNCONFIGURED_TOOL_MESSAGE };
+      }
       return {
         error:
           "Не удалось сгенерировать изображение: " +
@@ -484,10 +520,6 @@ const generateImage: ToolDef = {
 
 // ─────────────────────────── tool: tts_narration ───────────────────────────
 
-const TTS_VOICES = [
-  "tongtong", "chuichui", "xiaochen", "jam", "kazi", "douji", "luodo",
-] as const;
-
 const ttsNarration: ToolDef = {
   name: "tts_narration",
   description:
@@ -498,9 +530,9 @@ const ttsNarration: ToolDef = {
     workspaceName: "название воркспейса, если id нет",
     text: "текст озвучки (обязательно, 3–4000 символов)",
     title: "название озвучки (необязательно)",
-    voice: "голос: tongtong|chuichui|xiaochen|jam|kazi|douji|luodo (по умолчанию tongtong)",
+    voice: "голос OpenAI: alloy|nova|shimmer|echo|onyx|fable|sage (по умолчанию alloy)",
   },
-  async execute(args: any, userId: string, _ctx: ToolContext) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -510,24 +542,19 @@ const ttsNarration: ToolDef = {
       return { error: "Аргумент text обязателен (текст озвучки, 3–4000 символов)" };
     }
     const title = optString(args.title, 160);
-    const voiceRaw = optString(args.voice, 20);
-    const voice = (TTS_VOICES as readonly string[]).includes(voiceRaw ?? "")
-      ? voiceRaw!
-      : "tongtong";
+    const voice = mapTtsVoice(optString(args.voice, 20) ?? undefined);
 
-    const ws = await resolveWorkspace(userId, args);
+    const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
 
     try {
-      const zai = await getZai();
-      const response = await zai.audio.tts.create({
-        input: text,
-        voice: voice as (typeof TTS_VOICES)[number],
+      const route = await resolveToolRoute(db, userId, "tts");
+      const buffer = await synthesizeSpeech(route, {
+        text,
+        voice,
         speed: 1.0,
-        response_format: "wav",
-        stream: false,
+        signal: ctx.signal,
       });
-      const buffer = Buffer.from(new Uint8Array(await response.arrayBuffer()));
       if (buffer.length === 0) {
         return { error: "Озвучка вернула пустой файл — попробуйте ещё раз" };
       }
@@ -544,19 +571,415 @@ const ttsNarration: ToolDef = {
           meta: JSON.stringify({ voice, chars: text.length }),
         },
       });
+      scheduleIndexArtifact(db, artifact.id);
       return {
         message: `Озвучка готова: ${artifact.title}`,
         url,
+        workspaceId: ws.id,
         artifact: { id: artifact.id, title: artifact.title, type: "audio" },
         workspace: ws.name,
       };
     } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
+      if (err instanceof GatewayError && err.message === UNCONFIGURED_TOOL_MESSAGE) {
+        return { error: UNCONFIGURED_TOOL_MESSAGE };
+      }
       return {
         error:
           "Не удалось озвучить текст: " +
           (err instanceof Error ? err.message : String(err)),
       };
     }
+  },
+};
+
+const DOC_KINDS = ["manuscript", "spec", "article", "script"] as const;
+
+const createDocument: ToolDef = {
+  name: "create_document",
+  description:
+    "Создать документ (рукопись/спека/статья/сценарий) в воркспейсе с первой главой. Если чат открыт внутри воркспейса, id можно не передавать.",
+  argsSchema: {
+    title: "название документа (обязательно, 1–120 символов)",
+    content: "текст первой главы (необязательно)",
+    sectionTitle: "заголовок первой главы (необязательно, по умолчанию Глава 1)",
+    kind: "manuscript|spec|article|script (необязательно)",
+    workspaceId: "id воркспейса, если чат не привязан",
+    workspaceName: "название воркспейса",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    const title = optString(args.title, 120);
+    if (!title) return { error: "Аргумент title обязателен (название документа)" };
+    const kindRaw = optString(args.kind, 20);
+    const kind =
+      kindRaw && (DOC_KINDS as readonly string[]).includes(kindRaw)
+        ? kindRaw
+        : null;
+    const sectionTitle = optString(args.sectionTitle, 120) ?? "Глава 1";
+    const content = optString(args.content, 50_000) ?? "";
+
+    const ws = await resolveWorkspace(userId, args, ctx);
+    if ("error" in ws) return { error: ws.error };
+
+    const document = await db.document.create({
+      data: {
+        projectId: ws.id,
+        title,
+        kind: kind ?? (ws.type === "app" ? "spec" : ws.type === "film" ? "script" : "manuscript"),
+        sections: {
+          create: { title: sectionTitle, order: 0, content },
+        },
+      },
+      include: { sections: { orderBy: { order: "asc" } } },
+    });
+    const first = document.sections[0];
+    return {
+      message: `Документ создан: ${document.title}`,
+      workspaceId: ws.id,
+      document: {
+        id: document.id,
+        title: document.title,
+        kind: document.kind,
+        sectionId: first?.id ?? null,
+      },
+    };
+  },
+};
+
+const appendSection: ToolDef = {
+  name: "append_section",
+  description:
+    "Добавить главу/раздел в существующий документ воркспейса.",
+  argsSchema: {
+    documentId: "id документа (обязательно, если нет title)",
+    documentTitle: "название документа, если id неизвестен",
+    title: "заголовок главы (обязательно)",
+    content: "текст главы (необязательно)",
+    workspaceId: "id воркспейса, если чат не привязан",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    const sectionTitle = optString(args.title, 120);
+    if (!sectionTitle) return { error: "Аргумент title обязателен (заголовок главы)" };
+    const content = optString(args.content, 50_000) ?? "";
+
+    let documentId = pickString(args, ["documentId"]);
+    if (!documentId) {
+      const ws = await resolveWorkspace(userId, args, ctx);
+      if ("error" in ws) return { error: ws.error };
+      const want = pickString(args, ["documentTitle"]);
+      const docs = await db.document.findMany({
+        where: { projectId: ws.id },
+        select: { id: true, title: true },
+        orderBy: { updatedAt: "desc" },
+      });
+      const found = want
+        ? docs.find((d) => d.title.toLowerCase().includes(want.toLowerCase()))
+        : docs[0];
+      if (!found) return { error: "В воркспейсе нет документа — сначала create_document" };
+      documentId = found.id;
+    }
+
+    const document = await db.document.findFirst({
+      where: { id: documentId },
+      include: { project: { select: { userId: true } }, sections: { select: { order: true } } },
+    });
+    if (!document || document.project.userId !== userId) {
+      return { error: "Документ не найден" };
+    }
+    const nextOrder =
+      document.sections.reduce((m, s) => Math.max(m, s.order), -1) + 1;
+    const section = await db.documentSection.create({
+      data: {
+        documentId: document.id,
+        title: sectionTitle,
+        order: nextOrder,
+        content,
+      },
+    });
+    scheduleIndexSection(db, section.id);
+    return {
+      message: `Глава добавлена: ${section.title}`,
+      workspaceId: document.projectId,
+      section: { id: section.id, title: section.title, documentId: document.id },
+    };
+  },
+};
+
+const rewriteSection: ToolDef = {
+  name: "rewrite_section",
+  description:
+    "Переписать, продолжить или написать главу документа. Старый текст сохраняется в истории версий.",
+  argsSchema: {
+    documentId: "id документа (необязательно, если чат в воркспейсе)",
+    documentTitle: "название документа, если id неизвестен",
+    sectionTitle: "заголовок главы, если не первая",
+    action: "write|rewrite|continue (по умолчанию rewrite; пустая глава → write)",
+    instruction: "своя инструкция правки (необязательно)",
+    workspaceId: "id воркспейса, если чат не привязан",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+    const actionRaw = optString(args.action, 20) ?? "rewrite";
+    const action =
+      actionRaw === "continue"
+        ? "continue"
+        : actionRaw === "write"
+          ? "write"
+          : actionRaw === "custom"
+            ? "custom"
+            : "rewrite";
+    const instruction = optString(args.instruction, 2_000);
+
+    let route: ResolvedRoute;
+    try {
+      route = await resolveToolRoute(db, userId, "rewrite_section");
+    } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
+      if (isUnconfiguredToolError(err)) {
+        return { error: UNCONFIGURED_TOOL_MESSAGE };
+      }
+      const msg = err instanceof Error ? err.message : "Не удалось переписать главу";
+      return { error: msg };
+    }
+
+    let documentId = pickString(args, ["documentId"]);
+    if (!documentId) {
+      const ws = await resolveWorkspace(userId, args, ctx);
+      if ("error" in ws) return { error: ws.error };
+      const want = pickString(args, ["documentTitle"]);
+      const docs = await db.document.findMany({
+        where: { projectId: ws.id },
+        select: { id: true, title: true },
+        orderBy: { updatedAt: "desc" },
+      });
+      const found = want
+        ? docs.find((d) => d.title.toLowerCase().includes(want.toLowerCase()))
+        : docs[0];
+      if (!found) return { error: "В воркспейсе нет документа — сначала create_document" };
+      documentId = found.id;
+    }
+
+    const document = await db.document.findFirst({
+      where: { id: documentId },
+      include: {
+        project: { select: { userId: true } },
+        sections: { orderBy: { order: "asc" } },
+      },
+    });
+    if (!document || document.project.userId !== userId) {
+      return { error: "Документ не найден" };
+    }
+    const wantSection = pickString(args, ["sectionTitle", "title"]);
+    const section = wantSection
+      ? document.sections.find((s) =>
+          s.title.toLowerCase().includes(wantSection.toLowerCase()),
+        )
+      : document.sections[0];
+    if (!section) return { error: "В документе нет глав" };
+
+    const system = sectionSystemFor(
+      action,
+      !section.content.trim(),
+    );
+    const user = [
+      `Глава: ${section.title}`,
+      "",
+      section.content.trim() || "(пусто — напиши с нуля)",
+      instruction ? `\nИнструкция: ${instruction}` : "",
+    ].join("\n");
+
+    try {
+      const result = await chatCompletion(route, [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ], { signal: ctx.signal });
+      const generated = result.text.trim();
+      if (!generated) return { error: "Модель вернула пустой текст" };
+      const nextContent =
+        action === "continue"
+          ? [section.content.trim(), generated].filter(Boolean).join("\n\n")
+          : generated;
+      if (nextContent !== section.content) {
+        await db.documentSectionRevision
+          .create({
+            data: {
+              sectionId: section.id,
+              content: section.content,
+              source: "ai",
+              size: section.content.length,
+            },
+          })
+          .catch(() => {});
+      }
+      await db.documentSection.update({
+        where: { id: section.id },
+        data: { content: nextContent },
+      });
+      scheduleIndexSection(db, section.id);
+      await db.document.update({
+        where: { id: document.id },
+        data: { updatedAt: new Date() },
+      });
+      return {
+        message: action === "continue" ? `Глава продолжена: ${section.title}` : `Глава переписана: ${section.title}`,
+        workspaceId: document.projectId,
+        section: { id: section.id, title: section.title, documentId: document.id },
+      };
+    } catch (err) {
+      if (isAbortFlag(err)) return abortedToolResult();
+      if (isUnconfiguredToolError(err)) {
+        return { error: UNCONFIGURED_TOOL_MESSAGE };
+      }
+      const msg = err instanceof Error ? err.message : "Не удалось переписать главу";
+      return { error: msg };
+    }
+  },
+};
+
+const FAKE_PUBLISH = /опубликовано на|published to registry|push succeeded|деплой завершён/i;
+
+function neverPublished<T extends Record<string, unknown>>(result: T): T & { published: false } {
+  const blob = JSON.stringify(result);
+  if (FAKE_PUBLISH.test(blob) || /"published":true/.test(blob)) {
+    return {
+      ...result,
+      published: false,
+      message:
+        typeof result.message === "string"
+          ? result.message
+          : "Локальная сборка. Образ не опубликован.",
+    };
+  }
+  return { ...result, published: false };
+}
+
+const deployProject: ToolDef = {
+  name: "deploy_project",
+  description:
+    "Подготовить приложение к локальной сборке: ZIP, Dockerfile и docker build. Только воркспейс типа app. Пустой проект не «собрано». Без Docker — честный unavailable. Никогда не публикация в реестр.",
+  argsSchema: {
+    workspaceId: "id воркспейса-приложения (или workspaceName)",
+    workspaceName: "название воркспейса, если id нет",
+    overwriteDockerfile: "перезаписать Dockerfile, если уже есть (по умолчанию нет)",
+  },
+  async execute(args: any, userId: string, ctx: ToolContext) {
+    if (typeof args !== "object" || args === null) {
+      return { error: "Некорректные аргументы инструмента" };
+    }
+
+    const ws = await resolveWorkspace(userId, args, ctx);
+    if ("error" in ws) return { error: ws.error };
+    if (ws.type !== "app") {
+      return neverPublished({
+        error: deployWrongTypeMessage(ws.type),
+        status: "refused",
+        published: false,
+        imageTag: null,
+        message: deployWrongTypeMessage(ws.type),
+      });
+    }
+
+    const project = await db.project.findFirst({
+      where: { id: ws.id, userId },
+      select: { id: true, name: true, type: true, rootPath: true },
+    });
+    if (!project) return { error: "Воркспейс не найден" };
+
+    const root = project.rootPath || projectRoot(project.id);
+    let files: { path: string; type: string }[] = [];
+    try {
+      files = (await listWorkspaceTree(root)).entries;
+    } catch {
+      files = [];
+    }
+
+    const overwrite =
+      args.overwriteDockerfile === true || args.overwrite === true;
+
+    const packZip = async (): Promise<{ zipReady: boolean; zipBytes: number | null }> => {
+      try {
+        const zipPath = await exportProjectZip(root);
+        try {
+          const st = await fs.promises.stat(zipPath);
+          return { zipReady: true, zipBytes: st.size };
+        } finally {
+          await fs.promises.rm(zipPath, { force: true }).catch(() => {});
+        }
+      } catch {
+        return { zipReady: false, zipBytes: null };
+      }
+    };
+
+    const emptyTree = !hasBuildableAppFiles(files);
+
+    if (emptyTree) {
+      const zip = await packZip();
+      return neverPublished({
+        status: "empty",
+        published: false,
+        imageTag: null,
+        message: EMPTY_APP_BUILD_ERROR,
+        log: EMPTY_APP_BUILD_ERROR,
+        zipHint: DEPLOY_ZIP_HINT,
+        zipReady: zip.zipReady,
+        zipBytes: zip.zipBytes,
+        workspace: { id: project.id, name: project.name, type: project.type },
+      });
+    }
+
+    let dockerfileKind: string | null = null;
+    if (!hasDockerfile(files) || overwrite) {
+      const generated = await generateWorkspaceDockerfile(root, overwrite || !hasDockerfile(files));
+      if (generated.ok) {
+        dockerfileKind = generated.kind;
+      } else if (!generated.conflict) {
+        return neverPublished({
+          error: generated.error,
+          status: "failed",
+          published: false,
+          imageTag: null,
+          message: generated.error,
+        });
+      }
+    }
+
+    const build = await dockerBuildWorkspace(project.id, root);
+    const zip = await packZip();
+
+    let message: string;
+    if (build.status === "empty") {
+      message = build.error ?? EMPTY_APP_BUILD_ERROR;
+    } else if (build.status === "unavailable") {
+      message = build.log;
+    } else if (build.status === "built") {
+      message = DOCKER_BUILD_LOCAL_ONLY;
+    } else {
+      message = build.log || "docker build не удался. Образ не опубликован.";
+    }
+    if (!message.includes(DEPLOY_ZIP_HINT)) {
+      message = `${message}\n${DEPLOY_ZIP_HINT}`;
+    }
+
+    return neverPublished({
+      status: build.status,
+      published: false,
+      imageTag: build.imageTag,
+      log: build.log,
+      message,
+      dockerfileKind,
+      zipHint: DEPLOY_ZIP_HINT,
+      zipReady: zip.zipReady,
+      zipBytes: zip.zipBytes,
+      workspace: { id: project.id, name: project.name, type: project.type },
+    });
   },
 };
 
@@ -568,4 +991,8 @@ export const WORKSPACE_TOOLS: ToolDef[] = [
   checkDocument,
   generateImage,
   ttsNarration,
+  createDocument,
+  appendSection,
+  rewriteSection,
+  deployProject,
 ];

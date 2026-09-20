@@ -1,5 +1,5 @@
 /**
- * VibeFlow shared client types — mirror the REST/WS API shapes
+ * PocketStudio shared client types — mirror the REST/WS API shapes
  * (see worklog Task 1 contracts, 2-a auth routes, 2-b agent-service).
  */
 
@@ -11,6 +11,7 @@ export interface User {
   name: string;
   role: Role;
   createdAt: string;
+  onboardingDone?: boolean;
 }
 
 export type ThreadMode = "ask" | "plan" | "act" | "review";
@@ -92,9 +93,18 @@ export interface Note extends NoteAnalysis {
   transcription?: string | null;
   errorMessage?: string | null;
   category: NoteCategoryRef | null;
+  tags?: { id: string; name: string; color: string }[];
+  remindAt?: string | null;
 }
 
 export interface Category extends NoteCategoryRef {
+  noteCount: number;
+}
+
+export interface Tag {
+  id: string;
+  name: string;
+  color: string;
   noteCount: number;
 }
 
@@ -176,6 +186,14 @@ export interface WsTurnPhasePayload {
   label: string | null;
 }
 
+export interface WsCanonPrefetchPayload {
+  threadId: string;
+  scope: "studio" | "workspace";
+  hitCount: number;
+  mode?: "vector" | "keyword";
+  notice?: string | null;
+}
+
 /* ── Note analysis pipeline events (Stage 2, worklog Task 2-ctr) ── */
 
 export interface WsNoteAnalyzingPayload {
@@ -252,7 +270,7 @@ export interface WsProjectCreatedPayload {
 
 export interface WsProjectUpdatedPayload {
   projectId: string;
-  reason: "files" | "checkpoint";
+  reason: "files" | "checkpoint" | "workspace";
 }
 
 /* ── Checkpoint diff (Stage 4) ── */
@@ -280,6 +298,7 @@ export type NotificationType =
   | "analysis_ready"
   | "project_created"
   | "checkpoint"
+  | "reminder"
   | "system";
 
 export interface Notification {
@@ -288,6 +307,7 @@ export interface Notification {
   title: string;
   body: string | null;
   entityId: string | null;
+  dedupeKey?: string | null;
   read: boolean;
   createdAt: string;
 }
@@ -307,6 +327,7 @@ export interface AdminStats {
   notesError: number;
   categories: number;
   projects: number;
+  workspaces: number;
   threads: number;
   messages: number;
   notifications: number;
@@ -337,6 +358,75 @@ export interface AuditLogEntry {
   user: { name: string; email: string } | null;
 }
 
+export interface AuditLogPage {
+  entries: AuditLogEntry[];
+  hasMore: boolean;
+}
+
+/* ── AI providers (admin + user settings) ── */
+
+export type AiProviderKind = "openai_compatible" | "anthropic_compatible";
+
+export interface AiModelDto {
+  id: string;
+  providerId: string;
+  modelId: string;
+  displayName: string;
+  capChat: boolean;
+  capImage: boolean;
+  capTts: boolean;
+  capAsr: boolean;
+  capEmbeddings: boolean;
+  enabled: boolean;
+}
+
+export interface AiProviderDto {
+  id: string;
+  kind: AiProviderKind | string;
+  name: string;
+  baseUrl: string;
+  apiKeyMasked: string;
+  enabled: boolean;
+  visibleToUsers: boolean;
+  markupPercent: number | null;
+  markupMultiplier: number | null;
+  extraHeaders: string | null;
+  isPlatform: boolean;
+  createdAt: string;
+  updatedAt: string;
+  models: AiModelDto[];
+}
+
+export interface AiToolDefaultDto {
+  toolId: string;
+  label: string;
+  description?: string;
+  capability: string;
+  modelId: string | null;
+  model: {
+    id: string;
+    modelId: string;
+    displayName: string;
+    providerId: string;
+    providerName: string;
+  } | null;
+}
+
+export interface UserAiToolChoice {
+  id: string;
+  label: string;
+  description: string;
+  capability: string;
+  modelId: string | null;
+  useStudioDefault: boolean;
+}
+
+export interface UserAiSettingsDto {
+  tools: UserAiToolChoice[];
+  platformProviders: AiProviderDto[];
+  ownProviders: AiProviderDto[];
+}
+
 /* ── Global search (Stage 4) ── */
 
 export interface SearchThreadHit {
@@ -365,10 +455,43 @@ export interface SearchProjectHit {
   updatedAt: string;
 }
 
+/** Document title hit — href opens `/w/{id}?tab=documents&doc=`. */
+export interface SearchDocumentHit {
+  id: string;
+  title: string;
+  snippet: string;
+  kind: string;
+  projectId: string;
+  href: string;
+}
+
+/** Entity name hit — documents tab when the workspace has it, else `/w/{id}?q=`. */
+export interface SearchEntityHit {
+  id: string;
+  name: string;
+  snippet: string;
+  kind: string;
+  projectId: string;
+  href: string;
+}
+
+/** Artifact title/kind hit — images tab or library, never a dump of prompt/url. */
+export interface SearchArtifactHit {
+  id: string;
+  title: string;
+  snippet: string;
+  kind: string;
+  projectId: string;
+  href: string;
+}
+
 export interface SearchResults {
   threads: SearchThreadHit[];
   notes: SearchNoteHit[];
   projects: SearchProjectHit[];
+  documents: SearchDocumentHit[];
+  entities: SearchEntityHit[];
+  artifacts: SearchArtifactHit[];
   total: number;
 }
 

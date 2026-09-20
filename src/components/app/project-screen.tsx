@@ -17,6 +17,7 @@ import {
   ArrowLeft,
   ChevronRight,
   Download,
+  Eye,
   File,
   FileCode2,
   FileDiff,
@@ -30,11 +31,13 @@ import {
   Pencil,
   Save,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { DiffDialog } from "@/components/app/diff-dialog";
 import { MonacoEditor } from "@/components/app/monaco-editor";
+import { PreviewInspector } from "@/components/app/preview-inspector";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -68,8 +71,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
+import { PREVIEW_HTML_HINT, PREVIEW_LISTING_HINT } from "@/lib/studio-copy";
 import { pluralFiles, relativeTime } from "@/lib/format";
 import { languageFromPath, OriginBadge, fileDotStyle } from "@/lib/project-style";
+import { isDeletableRelPath } from "@/lib/rel-path";
 import { useAppUi } from "@/lib/store";
 import type { CommitInfo, FileEntry, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -159,8 +164,15 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [fileDeletePath, setFileDeletePath] = useState<string | null>(null);
+  const [deletingFile, setDeletingFile] = useState(false);
+  const [fileDeleteArmed, setFileDeleteArmed] = useState(false);
+  const [deleteArmed, setDeleteArmed] = useState(false);
   const [discussing, setDiscussing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [previewHint, setPreviewHint] = useState<string | null>(null);
 
   // Version-bump bookkeeping: the first render does the initial load itself.
   const versionSeenRef = useRef(projectFilesVersion);
@@ -168,6 +180,24 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
   // so they must not invalidate each other's responses.
   const projectSeqRef = useRef(0);
   const treeSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (!deleteOpen) {
+      setDeleteArmed(false);
+      return;
+    }
+    const t = window.setTimeout(() => setDeleteArmed(true), 400);
+    return () => window.clearTimeout(t);
+  }, [deleteOpen]);
+
+  useEffect(() => {
+    if (fileDeletePath === null) {
+      setFileDeleteArmed(false);
+      return;
+    }
+    const t = window.setTimeout(() => setFileDeleteArmed(true), 400);
+    return () => window.clearTimeout(t);
+  }, [fileDeletePath]);
 
   const activeFile = openFiles.find((f) => f.path === activePath) ?? null;
   const activeDirty = activeFile !== null && activeFile.content !== activeFile.original;
@@ -192,7 +222,7 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
       const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
       const fileName = match
         ? decodeURIComponent(match[1])
-        : `vibeflow-project-${projectId}.zip`;
+        : `pocketstudio-project-${projectId}.zip`;
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
@@ -210,6 +240,25 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
       setExporting(false);
     }
   }, [projectId, exporting]);
+
+  const openPreview = useCallback(async () => {
+    try {
+      const preview = await api.projectPreview(projectId);
+      setPreviewSrc(preview.src);
+      setPreviewHint(
+        preview.hint ??
+          (preview.kind === "html" ? PREVIEW_HTML_HINT : PREVIEW_LISTING_HINT),
+      );
+      setPreviewOpen(true);
+      if (!preview.src) {
+        toast.message("Превью без index.html", {
+          description: (preview.files ?? []).slice(0, 8).join(", ") || preview.hint,
+        });
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось открыть превью");
+    }
+  }, [projectId]);
 
 
   const loadProject = useCallback(async () => {
@@ -405,6 +454,34 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
     }
   };
 
+  const doDeleteFile = async () => {
+    if (!fileDeletePath || deletingFile) return;
+    if (!isDeletableRelPath(fileDeletePath)) {
+      toast.error("Нельзя удалить корень проекта");
+      setFileDeletePath(null);
+      return;
+    }
+    setDeletingFile(true);
+    try {
+      const deleted = await api.deleteProjectFile(projectId, fileDeletePath);
+      const gone = deleted.path;
+      setOpenFiles((prev) =>
+        prev.filter((f) => f.path !== gone && !f.path.startsWith(`${gone}/`)),
+      );
+      setActivePath((cur) =>
+        cur && (cur === gone || cur.startsWith(`${gone}/`)) ? null : cur,
+      );
+      setFileDeletePath(null);
+      toast.success("Файл удалён", { description: deleted.path });
+      void loadTree(true);
+      useAppUi.getState().bumpProjectFiles();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Не удалось удалить файл");
+    } finally {
+      setDeletingFile(false);
+    }
+  };
+
   const treeNodes = useMemo(() => buildTree(tree), [tree]);
   const dirtyPaths = useMemo(
     () =>
@@ -492,6 +569,17 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             variant="outline"
             size="sm"
             className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
+            onClick={() => void openPreview()}
+            aria-label="Превью проекта"
+            title="Статический iframe-превью"
+          >
+            <Eye className="size-4" aria-hidden="true" />
+            <span className="hidden md:inline">Превью</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 rounded-xl px-2.5 sm:px-3"
             onClick={() => void discuss()}
             disabled={!project || discussing}
             aria-label="Обсудить проект в чате"
@@ -565,6 +653,13 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             activePath={activePath}
             dirtyPaths={dirtyPaths}
             onOpenFile={(path) => void openFile(path)}
+            onDeleteFile={(path) => {
+              if (!isDeletableRelPath(path)) {
+                toast.error("Нельзя удалить корень проекта");
+                return;
+              }
+              setFileDeletePath(path);
+            }}
           />
         </nav>
 
@@ -607,6 +702,13 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
                 activePath={activePath}
                 dirtyPaths={dirtyPaths}
                 onOpenFile={(path) => void openFile(path)}
+                onDeleteFile={(path) => {
+              if (!isDeletableRelPath(path)) {
+                toast.error("Нельзя удалить корень проекта");
+                return;
+              }
+              setFileDeletePath(path);
+            }}
               />
             </div>
           </SheetContent>
@@ -614,12 +716,12 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
 
         {/* Editor area */}
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Mobile tree trigger */}
-          <div className="flex h-10 shrink-0 items-center gap-1.5 border-b px-2 md:hidden">
+          {/* File actions (tree sheet on mobile + save/delete) */}
+          <div className="flex h-10 shrink-0 items-center gap-1.5 border-b px-2">
             <Button
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+              className="h-8 gap-1.5 rounded-lg px-2.5 text-xs md:hidden"
               onClick={() => setMobileTreeOpen(true)}
               aria-label="Показать файлы проекта"
             >
@@ -633,21 +735,40 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             )}
             <div className="flex-1" />
             {activeFile && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
-                onClick={() => void saveActiveFile()}
-                disabled={!activeDirty || saving}
-                aria-label="Сохранить файл"
-              >
-                {saving ? (
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Save className="size-3.5" aria-hidden="true" />
-                )}
-                Сохранить
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-lg px-2.5 text-xs"
+                  onClick={() => void saveActiveFile()}
+                  disabled={!activeDirty || saving}
+                  aria-label="Сохранить файл"
+                >
+                  {saving ? (
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Save className="size-3.5" aria-hidden="true" />
+                  )}
+                  Сохранить
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-lg px-2.5 text-xs text-destructive hover:text-destructive"
+                  onClick={() => {
+                    if (!isDeletableRelPath(activeFile.path)) {
+                      toast.error("Нельзя удалить корень проекта");
+                      return;
+                    }
+                    setFileDeletePath(activeFile.path);
+                  }}
+                  disabled={deletingFile}
+                  aria-label={`Удалить файл ${activeFile.path}`}
+                >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
+                  Удалить
+                </Button>
+              </>
             )}
           </div>
 
@@ -757,6 +878,37 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
         </div>
       </div>
 
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Превью проекта</DialogTitle>
+            <DialogDescription>
+              {previewHint ?? PREVIEW_HTML_HINT} Кликните
+              элемент, чтобы инспектировать.
+            </DialogDescription>
+          </DialogHeader>
+          {previewSrc ? (
+            <div className="flex flex-col gap-3 md:flex-row">
+              <iframe
+                title="Превью проекта"
+                src={previewSrc}
+                sandbox="allow-scripts allow-same-origin"
+                className="h-[60vh] w-full rounded-lg border bg-white"
+              />
+              <PreviewInspector
+                iframeSrc={previewSrc}
+                projectName={project?.name ?? "проект"}
+                projectId={projectId}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {PREVIEW_LISTING_HINT}
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* ── Checkpoint dialog ── */}
       <CheckpointDialog
         open={checkpointOpen}
@@ -772,6 +924,9 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
         open={commitsOpen}
         onOpenChange={setCommitsOpen}
         projectId={projectId}
+        onRestored={() => {
+          useAppUi.getState().bumpProjectFiles();
+        }}
       />
 
       {/* ── Rename dialog ── */}
@@ -789,7 +944,14 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
           if (!open && !deleting) setDeleteOpen(false);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement)
+              .querySelector<HTMLElement>("[data-alert-cancel]")
+              ?.focus();
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить проект?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -797,15 +959,58 @@ export function ProjectScreen({ projectId, onOpenMobileNav }: ProjectScreenProps
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Отмена</AlertDialogCancel>
+            <AlertDialogCancel data-alert-cancel disabled={deleting}>
+              Отмена
+            </AlertDialogCancel>
             <AlertDialogAction
+              disabled={!deleteArmed || deleting}
               onClick={(e) => {
                 e.preventDefault();
+                if (!deleteArmed) return;
                 void doDelete();
               }}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
               {deleting ? "Удаляем…" : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={fileDeletePath !== null}
+        onOpenChange={(open) => {
+          if (!open && !deletingFile) setFileDeletePath(null);
+        }}
+      >
+        <AlertDialogContent
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement)
+              .querySelector<HTMLElement>("[data-alert-cancel]")
+              ?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить файл?</AlertDialogTitle>
+            <AlertDialogDescription>
+              «{fileDeletePath}» будет удалён с диска, а его фрагменты исчезнут из поиска по канону.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-alert-cancel disabled={deletingFile}>
+              Отмена
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!fileDeleteArmed || deletingFile}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!fileDeleteArmed) return;
+                void doDeleteFile();
+              }}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deletingFile ? "Удаляем…" : "Удалить"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -826,6 +1031,7 @@ function FileTreeBody({
   activePath,
   dirtyPaths,
   onOpenFile,
+  onDeleteFile,
 }: {
   nodes: TreeNode[];
   truncated: boolean;
@@ -835,6 +1041,7 @@ function FileTreeBody({
   activePath: string | null;
   dirtyPaths: Set<string>;
   onOpenFile: (path: string) => void;
+  onDeleteFile: (path: string) => void;
 }) {
   if (loading) {
     return (
@@ -864,6 +1071,7 @@ function FileTreeBody({
             activePath={activePath}
             dirtyPaths={dirtyPaths}
             onOpenFile={onOpenFile}
+            onDeleteFile={onDeleteFile}
           />
         </li>
       ))}
@@ -884,6 +1092,7 @@ function TreeNodeRow({
   activePath,
   dirtyPaths,
   onOpenFile,
+  onDeleteFile,
 }: {
   node: TreeNode;
   depth: number;
@@ -892,6 +1101,7 @@ function TreeNodeRow({
   activePath: string | null;
   dirtyPaths: Set<string>;
   onOpenFile: (path: string) => void;
+  onDeleteFile: (path: string) => void;
 }) {
   const isOpen = !collapsed.has(node.path);
 
@@ -899,28 +1109,40 @@ function TreeNodeRow({
     const Icon = isOpen ? FolderOpen : Folder;
     return (
       <div>
-        <button
-          type="button"
-          onClick={() => onToggleFolder(node.path)}
-          aria-expanded={isOpen}
-          aria-label={`Папка ${node.name}`}
-          className="flex min-h-9 w-full items-center gap-1 rounded-lg pr-2 text-left text-xs text-foreground/90 transition-colors duration-150 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60"
+        <div
+          className="group flex min-h-9 w-full items-center gap-1 rounded-lg pr-1 text-xs text-foreground/90 hover:bg-accent/60"
           style={{ paddingLeft: `${6 + depth * 14}px` }}
         >
-          <motion.span
-            animate={{ rotate: isOpen ? 90 : 0 }}
-            transition={{ duration: 0.15 }}
-            className="flex shrink-0 items-center"
-            aria-hidden="true"
+          <button
+            type="button"
+            onClick={() => onToggleFolder(node.path)}
+            aria-expanded={isOpen}
+            aria-label={`Папка ${node.name}`}
+            className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
-            <ChevronRight className="size-3.5 text-muted-foreground/70" />
-          </motion.span>
-          <Icon
-            className="size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <span className="min-w-0 truncate font-medium">{node.name}</span>
-        </button>
+            <motion.span
+              animate={{ rotate: isOpen ? 90 : 0 }}
+              transition={{ duration: 0.15 }}
+              className="flex shrink-0 items-center"
+              aria-hidden="true"
+            >
+              <ChevronRight className="size-3.5 text-muted-foreground/70" />
+            </motion.span>
+            <Icon
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 truncate font-medium">{node.name}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteFile(node.path)}
+            aria-label={`Удалить папку ${node.name}`}
+            className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+          </button>
+        </div>
         <AnimatePresence initial={false}>
           {isOpen && node.children.length > 0 && (
             <motion.div
@@ -941,6 +1163,7 @@ function TreeNodeRow({
                       activePath={activePath}
                       dirtyPaths={dirtyPaths}
                       onOpenFile={onOpenFile}
+                      onDeleteFile={onDeleteFile}
                     />
                   </li>
                 ))}
@@ -956,32 +1179,44 @@ function TreeNodeRow({
   const dirty = dirtyPaths.has(node.path);
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpenFile(node.path)}
-      aria-current={active ? "true" : undefined}
-      aria-label={`Файл ${node.name}`}
-      title={node.path}
+    <div
       className={cn(
-        "flex min-h-9 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-xs transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        "group flex min-h-9 w-full items-center gap-1 rounded-lg pr-1 text-xs",
         active
           ? "bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-300"
           : "text-foreground/80 hover:bg-accent/60",
       )}
       style={{ paddingLeft: `${6 + depth * 14}px` }}
     >
-      <FileCode2
-        className={cn("size-3.5 shrink-0", fileDotStyle(node.path))}
-        aria-hidden="true"
-      />
-      <span className="min-w-0 truncate">{node.name}</span>
-      {dirty && (
-        <span
-          className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500"
-          aria-label="Есть несохранённые изменения"
+      <button
+        type="button"
+        onClick={() => onOpenFile(node.path)}
+        aria-current={active ? "true" : undefined}
+        aria-label={`Файл ${node.name}`}
+        title={node.path}
+        className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <FileCode2
+          className={cn("size-3.5 shrink-0", fileDotStyle(node.path))}
+          aria-hidden="true"
         />
-      )}
-    </button>
+        <span className="min-w-0 truncate">{node.name}</span>
+        {dirty && (
+          <span
+            className="size-1.5 shrink-0 rounded-full bg-amber-500"
+            aria-label="Есть несохранённые изменения"
+          />
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={() => onDeleteFile(node.path)}
+        aria-label={`Удалить файл ${node.name}`}
+        className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <Trash2 className="size-3.5" aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
@@ -1086,14 +1321,18 @@ function CommitsSheet({
   open,
   onOpenChange,
   projectId,
+  onRestored,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
+  onRestored?: () => void;
 }) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [diffCommit, setDiffCommit] = useState<CommitInfo | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<CommitInfo | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   const loadCommits = useCallback(async () => {
     setLoading(true);
@@ -1113,6 +1352,31 @@ function CommitsSheet({
     if (!open) return;
     void loadCommits();
   }, [open, loadCommits]);
+
+  const confirmRestore = useCallback(async () => {
+    if (!restoreTarget || restoring) return;
+    setRestoring(true);
+    try {
+      const restored = await api.restoreProjectCheckpoint(
+        projectId,
+        restoreTarget.hash,
+      );
+      toast.success("Чекпоинт восстановлен", {
+        description: restored.discardedUncommitted
+          ? `${restored.commit.short} · несохранённые файлы сброшены`
+          : restored.commit.short,
+      });
+      setRestoreTarget(null);
+      onRestored?.();
+      await loadCommits();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось восстановить чекпоинт",
+      );
+    } finally {
+      setRestoring(false);
+    }
+  }, [restoreTarget, restoring, projectId, onRestored, loadCommits]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1163,6 +1427,16 @@ function CommitsSheet({
                       <FileDiff className="size-3.5" aria-hidden="true" />
                       Diff
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 shrink-0 gap-1.5 rounded-lg px-2 text-xs text-muted-foreground opacity-100 transition-colors duration-150 hover:bg-primary/10 hover:text-primary md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                      onClick={() => setRestoreTarget(commit)}
+                      aria-label={`Восстановить чекпоинт ${commit.short}`}
+                    >
+                      <RotateCcw className="size-3.5" aria-hidden="true" />
+                      Откат
+                    </Button>
                   </div>
                   <p className="mt-1.5 text-[11px] text-muted-foreground">
                     {commit.author} · {relativeTime(commit.date)}
@@ -1183,6 +1457,36 @@ function CommitsSheet({
         projectId={projectId}
         commit={diffCommit}
       />
+
+      <AlertDialog
+        open={restoreTarget !== null}
+        onOpenChange={(next) => {
+          if (!next && !restoring) setRestoreTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Восстановить чекпоинт?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Рабочая копия этого проекта станет как в {restoreTarget?.short}.
+              Несохранённые файлы будут сброшены. Чекпоинт другого проекта
+              сюда не подставить.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restoring}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={restoring}
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmRestore();
+              }}
+            >
+              {restoring ? "Восстанавливаем…" : "Восстановить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }

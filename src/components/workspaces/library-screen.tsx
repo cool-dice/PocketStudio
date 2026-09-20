@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { LIBRARY_FAVORITE_FAILED } from "@/lib/library-copy";
 import type { ArtifactDto, WorkspaceDto } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 import { LibraryArtifactDialog } from "@/components/workspaces/library-artifact-dialog";
@@ -82,7 +83,6 @@ export function LibraryScreen({
       setArtifacts(all);
       setWorkspaces(ws);
     } catch (err) {
-      setArtifacts([]);
       setLoadError(
         err instanceof ApiError ? err.message : "Не удалось загрузить библиотеку",
       );
@@ -100,9 +100,9 @@ export function LibraryScreen({
     [workspaces],
   );
 
-  /* Избранное — оптимистично, с откатом при ошибке. */
+  /* Избранное — оптимистично; успех тостит диалог только после PATCH. */
   const toggleFavorite = useCallback(
-    async (artifact: ArtifactDto) => {
+    async (artifact: ArtifactDto): Promise<boolean> => {
       const next = !artifact.favorite;
       setArtifacts((prev) =>
         prev
@@ -111,13 +111,15 @@ export function LibraryScreen({
       );
       try {
         await api.updateArtifact(artifact.id, { favorite: next });
+        return true;
       } catch {
         setArtifacts((prev) =>
           prev
-            ? prev.map((a) => (a.id === artifact.id ? { ...a, favorite: !next } : a))
+            ? prev.map((a) => (a.id === artifact.id ? { ...a, favorite: artifact.favorite } : a))
             : prev,
         );
-        toast.error("Не удалось обновить избранное");
+        toast.error(LIBRARY_FAVORITE_FAILED);
+        return false;
       }
     },
     [],
@@ -263,8 +265,8 @@ export function LibraryScreen({
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <p className="text-xs text-muted-foreground">
-            {loading ? (
-              "Загружаем библиотеку…"
+            {loading || artifacts === null ? (
+              loadError ? "Не удалось загрузить библиотеку" : "Загружаем библиотеку…"
             ) : (
               <>
                 Показано{" "}
@@ -317,7 +319,11 @@ export function LibraryScreen({
             </Button>
           </div>
         ) : visible.length === 0 ? (
-          <LibraryEmptyState onReset={resetFilters} total={total} />
+          <LibraryEmptyState
+            onReset={resetFilters}
+            total={total}
+            filtered={hasActiveFilters && total > 0}
+          />
         ) : (
           <div className="space-y-7">
             {sections.map((section) => (
@@ -442,10 +448,32 @@ function ViewToggle({
 function LibraryEmptyState({
   onReset,
   total,
+  filtered,
 }: {
   onReset: () => void;
   total: number;
+  filtered: boolean;
 }) {
+  if (!filtered) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
+        <span
+          className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground"
+          aria-hidden="true"
+        >
+          <LibraryIcon className="size-6" />
+        </span>
+        <div>
+          <p className="text-sm font-medium">Библиотека пуста</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Здесь появятся артефакты из ваших воркспейсов — изображения, треки,
+            сцены и документы.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
       <span
