@@ -2,11 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { metadata as workspaceLayoutMetadata } from "../app/w/layout";
 import robotsRoute from "../app/robots";
 import {
+  APP_NOINDEX_ROBOTS,
   ROBOTS_ALLOW,
   ROBOTS_DISALLOW,
   ROBOTS_USER_AGENT,
+  appRouteMetadata,
+  isLoginPathname,
+  isPublicLandingPathname,
+  isWorkspacePathname,
+  metadataAllowsIndexing,
+  pageRobots,
   robotsListsSitemap,
   robotsLooksLikePrivateSitemap,
   robotsMetadata,
@@ -66,5 +74,64 @@ describe("robots.txt policy", () => {
       allow: ["/", "/login"],
       disallow: ["/w/", "/api/", "/admin", "/?area=admin"],
     });
+  });
+});
+
+describe("page meta robots (noindex)", () => {
+  test("workspace paths are always noindex", () => {
+    expect(isWorkspacePathname("/w")).toBe(true);
+    expect(isWorkspacePathname("/w/")).toBe(true);
+    expect(isWorkspacePathname("/w/abc12345")).toBe(true);
+    expect(isWorkspacePathname("/w/abc12345?tab=chat")).toBe(true);
+    expect(isWorkspacePathname("/welcome")).toBe(false);
+    expect(isWorkspacePathname("/wiki")).toBe(false);
+    expect(pageRobots({ pathname: "/w/abc12345" })).toEqual(APP_NOINDEX_ROBOTS);
+    expect(pageRobots({ pathname: "/w/abc12345", loggedIn: false })).toEqual(
+      APP_NOINDEX_ROBOTS,
+    );
+    expect(pageRobots({ pathname: "/w/abc12345", loggedIn: true })).toEqual(
+      APP_NOINDEX_ROBOTS,
+    );
+    expect(appRouteMetadata()).toEqual({ robots: { index: false } });
+    expect(appRouteMetadata().robots.index).toBe(false);
+  });
+
+  test("guest landing and login stay indexable", () => {
+    expect(isPublicLandingPathname("/")).toBe(true);
+    expect(isPublicLandingPathname("/?area=admin")).toBe(true);
+    expect(isLoginPathname("/login")).toBe(true);
+    expect(isLoginPathname("/login?tab=register")).toBe(true);
+    expect(pageRobots({ pathname: "/" })).toBeUndefined();
+    expect(pageRobots({ pathname: "/", loggedIn: false })).toBeUndefined();
+    expect(pageRobots({ pathname: "/login" })).toBeUndefined();
+    expect(pageRobots({ pathname: "/login", loggedIn: true })).toBeUndefined();
+    expect(metadataAllowsIndexing({})).toBe(true);
+    expect(metadataAllowsIndexing({ robots: { index: false } })).toBe(false);
+  });
+
+  test("logged-in `/` is the app shell (noindex) without touching guest landing", () => {
+    expect(pageRobots({ pathname: "/", loggedIn: true })).toEqual(
+      APP_NOINDEX_ROBOTS,
+    );
+    expect(pageRobots({ pathname: "/", loggedIn: false })).toBeUndefined();
+  });
+
+  test("App Router /w layout exports noindex; root layout does not", () => {
+    expect(workspaceLayoutMetadata).toEqual(appRouteMetadata());
+    expect(workspaceLayoutMetadata.robots).toEqual({ index: false });
+    expect(metadataAllowsIndexing(workspaceLayoutMetadata)).toBe(false);
+    const rootLayout = readFileSync(
+      join(import.meta.dir, "..", "app", "layout.tsx"),
+      "utf8",
+    );
+    expect(rootLayout).not.toMatch(/index:\s*false/);
+    expect(rootLayout).not.toMatch(/noindex/i);
+    expect(rootLayout).toMatch(/do not set robots\.index false/i);
+    const workspaceLayoutSrc = readFileSync(
+      join(import.meta.dir, "..", "app", "w", "layout.tsx"),
+      "utf8",
+    );
+    expect(workspaceLayoutSrc).toMatch(/appRouteMetadata/);
+    expect(workspaceLayoutSrc).not.toMatch(/["']use client["']/);
   });
 });

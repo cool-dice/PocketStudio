@@ -17,6 +17,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Guest `/` is the public landing — do not set robots.index false here.
+// Authenticated `/w/*` uses appRouteMetadata from `src/app/w/layout.tsx`.
 export const metadata: Metadata = {
   title: "PocketStudio — идея → продукт → доход",
   description: LANDING_META_DESCRIPTION,
