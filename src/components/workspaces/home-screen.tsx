@@ -201,8 +201,6 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
           </p>
         </div>
       </div>
-
-      </div>
     </div>
   );
 }

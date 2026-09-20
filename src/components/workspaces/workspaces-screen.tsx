@@ -222,8 +222,6 @@ export function WorkspacesScreen({
           Воркспейсы, стадии и счётчики — живые данные из БД студии · Фаза A
         </p>
       </div>
-
-      </div>
     </div>
   );
 }

@@ -18,8 +18,8 @@ export interface WorkspaceRow {
 
 export interface WorkspaceLookupDb {
   project: {
-    findFirst: (args: unknown) => Promise<WorkspaceRow | null>;
-    findMany: (args: unknown) => Promise<WorkspaceRow[]>;
+    findFirst: (args: any) => Promise<WorkspaceRow | null>;
+    findMany: (args: any) => Promise<WorkspaceRow[]>;
   };
 }
 
