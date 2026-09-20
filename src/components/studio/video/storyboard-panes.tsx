@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
+  VIDEO_STORYBOARD_EMPTY_HEADING,
   VIDEO_STORYBOARD_EMPTY_HINT,
   VIDEO_STORYBOARD_EMPTY_TITLE,
   VIDEO_STORYBOARD_NO_SCENES,
@@ -135,19 +136,23 @@ export function NoScriptCard({
         </span>
         <div>
           <h2 className="text-base font-semibold">
-            {VIDEO_STORYBOARD_EMPTY_TITLE}
+            {VIDEO_STORYBOARD_EMPTY_HEADING}
           </h2>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
             {VIDEO_STORYBOARD_EMPTY_HINT}
           </p>
         </div>
-        <Button onClick={onCreate} disabled={creating}>
+        <Button
+          onClick={onCreate}
+          disabled={creating}
+          aria-label={VIDEO_STORYBOARD_EMPTY_TITLE}
+        >
           {creating ? (
             <Loader2 className="size-4 animate-spin" aria-hidden="true" />
           ) : (
             <Plus className="size-4" aria-hidden="true" />
           )}
-          Создать сценарий
+          {VIDEO_STORYBOARD_EMPTY_TITLE}
         </Button>
       </div>
     </div>

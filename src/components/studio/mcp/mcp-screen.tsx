@@ -29,7 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { mcpToggleCopy, mcpCatalogView } from "@/lib/mcp-copy";
+import { mcpToggleCopy, mcpCatalogEmptyCopy, mcpCatalogView } from "@/lib/mcp-copy";
 import type { McpServerDto } from "@/lib/workspace-types";
 import { AddServerDialog } from "./add-server-dialog";
 import { ConfigPreviewCard } from "./config-preview-card";
@@ -330,9 +330,7 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
               </div>
             ) : visible.length === 0 ? (
               <div className="rounded-2xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
-                {filter === "connected"
-                  ? "Ничего не включено — включите сервер из каталога"
-                  : "В этой категории серверов нет"}
+                {mcpCatalogEmptyCopy(catalogView, filter)}
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

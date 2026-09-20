@@ -12,6 +12,20 @@ export const IMAGE_GALLERY_LOAD_ERROR = "Не удалось загрузить 
 export const IMAGE_GALLERY_LOAD_ERROR_HINT =
   "Проверьте соединение и обновите — это не пустая галерея.";
 
+export type GalleryListView = "loading" | "error" | "empty" | "ready";
+
+/** Skeletons while fetching — never flash «пока нет картинок» as a 404. */
+export function galleryListView(
+  loading: boolean,
+  loadError: string | null,
+  count: number,
+): GalleryListView {
+  if (loading) return "loading";
+  if (loadError) return "error";
+  if (count === 0) return "empty";
+  return "ready";
+}
+
 export const IMAGE_GEN_FAILED = "Генерация не удалась";
 export const IMAGE_GEN_FAILED_HINT =
   "Картинка не сохранена и не показывается. Попробуйте ещё раз.";
