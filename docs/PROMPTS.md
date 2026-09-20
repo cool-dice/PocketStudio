@@ -27,7 +27,7 @@ Inventory of every LLM surface. Winners are implemented in
 
 ## Agent tools added to the prompt
 
-`create_workspace` / `list_workspaces` (typed studios: film/book/music/app/universal; `create_project` is Next.js-only), `retrieve_canon` / `retrieve_code` (pgvector RAG + keyword fallback in the same scope), `apply_patch`, `tag_note`, `set_reminder`, `fetch_url` / `web_search` / `browser_read` (MCP builtin; browser_read honest if CLI missing), `deploy_project` (app-only ZIP/Dockerfile/docker-build; empty not built; no fake publish). Notes tools (`create_note` / `search_notes` / `list_notes` / `open_note`) follow the RAG workspace/global contract.
+`create_workspace` / `list_workspaces` (typed studios: film/book/music/app/universal; `create_project` is Next.js-only), `list_projects` (code origins template/github/zip only — studios are `list_workspaces`), `retrieve_canon` / `retrieve_code` (pgvector RAG + keyword fallback in the same scope), `apply_patch`, `tag_note`, `set_reminder`, `fetch_url` / `web_search` / `browser_read` (MCP builtin; browser_read honest if CLI missing), `deploy_project` (app-only ZIP/Dockerfile/docker-build; empty not built; no fake publish). Notes tools (`create_note` / `search_notes` / `list_notes` / `open_note`) follow the RAG workspace/global contract.
 
 ## Mode merge (proto2 → PocketStudio)
 

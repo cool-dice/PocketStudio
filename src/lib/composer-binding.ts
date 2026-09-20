@@ -3,6 +3,8 @@
  * Music/book/film threads must not read as «Проект:».
  */
 
+import { pathFor } from "./app-url";
+
 export type BoundChipKind = "workspace" | "project";
 
 const TYPE_PREFIX: Record<string, string> = {
@@ -17,10 +19,15 @@ export function boundThreadChip(opts: {
   name: string;
   origin?: string | null;
   type?: string | null;
-}): { label: string; kind: BoundChipKind } {
+  id?: string | null;
+}): { label: string; kind: BoundChipKind; href: string | null } {
   if (opts.origin === "workspace") {
     const prefix = TYPE_PREFIX[opts.type ?? ""] ?? "Воркспейс";
-    return { label: `${prefix}: ${opts.name}`, kind: "workspace" };
+    return {
+      label: `${prefix}: ${opts.name}`,
+      kind: "workspace",
+      href: opts.id ? pathFor("workspace", opts.id, "chat") : null,
+    };
   }
-  return { label: `Проект: ${opts.name}`, kind: "project" };
+  return { label: `Проект: ${opts.name}`, kind: "project", href: null };
 }

@@ -22,6 +22,10 @@ import {
   StickyNote,
   Terminal,
   Zap,
+  AudioWaveform,
+  BookOpenText,
+  Clapperboard,
+  LayoutDashboard,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -173,6 +177,10 @@ export const SLASH_MISC_ICONS = {
   search: Search,
   checkpoint: ListChecks,
   download: Download,
+  workspace: LayoutDashboard,
+  track: AudioWaveform,
+  book: BookOpenText,
+  film: Clapperboard,
 };
 
 /** Filter commands by the typed token (prefix match, case-insensitive). */

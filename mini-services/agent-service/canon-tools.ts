@@ -185,7 +185,8 @@ const tagNote: ToolDef = {
 
 const setReminder: ToolDef = {
   name: "set_reminder",
-  description: "Назначить напоминание по заметке (ISO-8601 или относительное «завтра»).",
+  description:
+    "Назначить напоминание по заметке (ISO-8601 или относительное «завтра»). В чате воркспейса — только заметки этой студии.",
   argsSchema: {
     noteId: "id заметки",
     at: "ISO-8601 дата/время",

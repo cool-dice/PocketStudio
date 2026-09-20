@@ -21,7 +21,7 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - retrieve_canon {"query","kinds"?} — RAG: заметки, главы, сущности, код, скиллы. Скоуп = этот чат
 - retrieve_code {"query"} — то же, только файлы (kinds: file)
 - create_workspace {"name","type","description?"} — студия film|book|music|app|universal (фильм/книга/музыка/песня/трек/приложение). Спросить и Действовать. Не Next.js.
-- list_workspaces {} — существующие студии (id, name, type, stage)
+- list_workspaces {} — существующие студии (id, name, type, stage). Главный чат: «напиши песню» и студии нет — вызови create_workspace type music (или предложи), не create_project
 - create_document {"title","content","sectionTitle?","kind?"}
 - append_section {"documentId","title","content"}
 - rewrite_section {"documentId?","action":"write|rewrite|continue","instruction?"}
@@ -32,7 +32,7 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - open_in_design {"artifactId?"}
 - apply_filter {"filter":"bright|contrast|sat|bw"}
 - create_project {"name","description?","note_id?"} — ТОЛЬКО код Next.js, запрещено для песни/книги/фильма
-- list_projects {} — шаблоны и студии вместе; для студий предпочти list_workspaces
+- list_projects {} — только код Next.js (template/github/zip). Студии туда не входят — list_workspaces
 - list_files {"path?"}
 - read_file {"path"}
 - write_file {"path","content"} — полный файл, только «Действовать»
@@ -45,12 +45,12 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - browser_read {"url"} — живой браузер; если CLI нет, инструмент честно откажет
 - deploy_project {"workspaceId?"} — ZIP + Dockerfile + docker build только для приложения; пустой не «собрано»; без Docker — unavailable в чат; не публикация
 
-Правила выбора: мысль → create_note; песня/книга/фильм без студии → create_workspace (не create_project); выбрать студию → list_workspaces; текст трека/куплет/лирика → create_note; глава книги/сценарий → create_document или rewrite_section; «вспомни/найди в каноне» → retrieve_canon; код → retrieve_code или retrieve_canon kinds file; правка существующего файла → apply_patch, новый файл → write_file. Ссылка → fetch_url; «найди в интернете» → web_search. «Собери/задеплой приложение» → deploy_project. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
+Правила выбора: мысль → create_note; в главном чате песня/трек/книга/фильм и студии нет → list_workspaces, если пусто — create_workspace (не create_project); выбрать студию → list_workspaces; текст трека/куплет/лирика → create_note; глава книги/сценарий → create_document или rewrite_section; «вспомни/найди в каноне» → retrieve_canon; код → retrieve_code или retrieve_canon kinds file; правка существующего файла → apply_patch, новый файл → write_file. Ссылка → fetch_url; «найди в интернете» → web_search. «Собери/задеплой приложение» → deploy_project. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
 
 const MODE_PROMPTS: Record<ThreadModeName, string> = {
   ask: `Режим «Спросить»: отвечай и разбирай. Разрешено: заметки, create_workspace, list_workspaces, retrieve_canon, retrieve_code, чтение файлов, документы/сущности/картинка/озвучка/аналитик.
 Запрещено: write_file, apply_patch, delete_file, checkpoint, create_project.
-Сначала retrieve_canon, если вопрос про канон, персонажей, API или пути. Если идея приложения сырая — максимум 2 уточняющих вопроса, затем предложи план (не 7-шаговое интервью). Песня/книга/фильм — create_workspace, не приложение.`,
+Сначала retrieve_canon, если вопрос про канон, персонажей, API или пути. Если идея приложения сырая — максимум 2 уточняющих вопроса, затем предложи план (не 7-шаговое интервью). В главном чате «напиши песню/трек» и студии нет — предложи или вызови create_workspace type music, не приложение.`,
   plan: `Режим «План»: сначала контекст (retrieve_canon / retrieve_code / list_notes / list_workspaces / list_files), затем план. Не меняй файлы и не создавай код-проекты.
 
 Завершающий ответ ОБЯЗАН содержать в конце:

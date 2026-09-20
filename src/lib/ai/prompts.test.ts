@@ -73,6 +73,7 @@ describe("prompt library", () => {
     expect(IDENTITY_BLOCK).toContain("не выдумывай");
     expect(IDENTITY_BLOCK).toContain("create_workspace");
     expect(IDENTITY_BLOCK).toContain("create_project — ТОЛЬКО код Next.js");
+    expect(IDENTITY_BLOCK).toContain("предложи или вызови create_workspace");
     expect(RAG_WORKSPACE_BLOCK).toContain("Текст трека");
   });
 });

@@ -17,6 +17,7 @@
 // (worklog Task 4, Task 1-a).
 
 import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
+import { CODE_PROJECT_ORIGINS } from "../../src/lib/code-project-origins";
 import { db } from "./db-client";
 import { scheduleIndexFile } from "../../src/lib/rag/hooks";
 import { removeFileChunks } from "../../src/lib/rag/indexer";
@@ -242,11 +243,11 @@ const createProject: ToolDef = {
 const listProjects: ToolDef = {
   name: "list_projects",
   description:
-    "Все проекты пользователя (шаблоны Next.js и студии вместе). Для песни/книги/фильма предпочти list_workspaces.",
+    "Код-проекты пользователя (origin template/github/zip, Next.js). Студии — list_workspaces, не этот список.",
   argsSchema: {},
   async execute(_args: any, userId: string, _ctx: ToolContext) {
     const projects = await db.project.findMany({
-      where: { userId },
+      where: { userId, origin: { in: [...CODE_PROJECT_ORIGINS] } },
       orderBy: { createdAt: "desc" },
       take: 50,
       select: { id: true, name: true, origin: true, createdAt: true },

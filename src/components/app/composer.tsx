@@ -48,6 +48,7 @@ import { useThreads } from "@/hooks/use-threads";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { api, ApiError } from "@/lib/api";
 import { boundThreadChip } from "@/lib/composer-binding";
+import { CODE_PROJECT_SLASH, WORKSPACE_SLASH_COMMANDS } from "@/lib/slash-catalog";
 import { useAppUi } from "@/lib/store";
 import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
 import {
@@ -74,6 +75,7 @@ export function Composer({
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const openCreateProject = useAppUi((s) => s.openCreateProject);
+  const openCreateWorkspace = useAppUi((s) => s.openCreateWorkspace);
   const bumpProjectFiles = useAppUi((s) => s.bumpProjectFiles);
   const composerDraft = useAppUi((s) => s.composerDraft);
   const composerAutoSendProjectId = useAppUi((s) => s.composerAutoSendProjectId);
@@ -125,11 +127,13 @@ export function Composer({
         name: boundWorkspace.name,
         origin: "workspace",
         type: boundWorkspace.type,
+        id: boundWorkspace.id,
       })
     : boundProject
       ? boundThreadChip({
           name: boundProject.name,
           origin: boundProject.origin,
+          id: boundProject.id,
         })
       : null;
 
@@ -153,10 +157,24 @@ export function Composer({
           requestAnimationFrame(() => taRef.current?.focus());
         },
       },
+      ...WORKSPACE_SLASH_COMMANDS.map((spec) => ({
+        name: spec.name,
+        label: spec.label,
+        description: spec.description,
+        icon:
+          spec.type === "music"
+            ? SLASH_MISC_ICONS.track
+            : spec.type === "book"
+              ? SLASH_MISC_ICONS.book
+              : spec.type === "film"
+                ? SLASH_MISC_ICONS.film
+                : SLASH_MISC_ICONS.workspace,
+        run: () => openCreateWorkspace(spec.type),
+      })),
       {
-        name: "проект",
-        label: "Новый проект",
-        description: "Создать проект: шаблон, GitHub или zip",
+        name: CODE_PROJECT_SLASH.name,
+        label: CODE_PROJECT_SLASH.label,
+        description: CODE_PROJECT_SLASH.description,
         icon: SLASH_MISC_ICONS.project,
         run: () => openCreateProject(),
       },
@@ -268,6 +286,7 @@ export function Composer({
     boundProject,
     bumpProjectFiles,
     openCreateProject,
+    openCreateWorkspace,
     setMainArea,
     setSearchOpen,
     updateThreadMode,
@@ -417,20 +436,31 @@ export function Composer({
           onExecute={executeCommand}
         />
 
-        {boundChip && threadProjectId && (
-          <button
-            type="button"
-            onClick={() => {
-              if (boundChip.kind === "workspace") openWorkspace(threadProjectId);
-              else openProject(threadProjectId);
+        {boundChip && threadProjectId && boundChip.kind === "workspace" && boundChip.href ? (
+          <a
+            href={boundChip.href}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+              e.preventDefault();
+              openWorkspace(threadProjectId);
             }}
             aria-label={`${boundChip.label} — открыть`}
             className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
             <span className="truncate">{boundChip.label}</span>
+          </a>
+        ) : boundChip && threadProjectId ? (
+          <button
+            type="button"
+            onClick={() => openProject(threadProjectId)}
+            aria-label={`${boundChip.label} — открыть`}
+            className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+            <span className="truncate">{boundChip.label}</span>
           </button>
-        )}
+        ) : null}
         <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
           <label htmlFor="composer" className="sr-only">
             Сообщение

@@ -19,6 +19,9 @@ describe("agent system prompt builder", () => {
     expect(prompt).toContain("list_workspaces");
     expect(prompt).toContain("create_project — ТОЛЬКО код Next.js");
     expect(prompt).toContain("текст трека/куплет/лирика → create_note");
+    expect(prompt).toContain("только код Next.js (template/github/zip)");
+    expect(prompt).toContain("напиши песню");
+    expect(prompt).not.toContain("шаблоны и студии вместе");
   });
 
   test("act mode prefers patch and scopes to project tree", () => {

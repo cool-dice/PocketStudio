@@ -6,6 +6,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 
+import { ensureEmptyDawProject } from "./daw-empty";
 import { ensureCodeWorkspace } from "./workspace";
 import {
   CREATE_WORKSPACE_DESC_LONG,
@@ -105,5 +106,8 @@ export async function createTypedWorkspace(
     },
   });
   await scaffoldAppIfNeeded(db, project.id, input.type);
+  if (input.type === "music") {
+    await ensureEmptyDawProject(db, project.id);
+  }
   return project;
 }

@@ -12,6 +12,9 @@ import {
   AUDIO_TTS_FAILED,
   AUDIO_TTS_FAILED_HINT,
   AUDIO_TTS_UNCONFIGURED_HINT,
+  DAW_EMPTY_TRACKS,
+  DAW_EMPTY_TRACKS_HINT,
+  DAW_LOAD_ERROR,
   NARRATION_LIBRARY_EMPTY,
   NARRATION_LIBRARY_LOAD_ERROR,
   NARRATION_LIBRARY_LOAD_ERROR_HINT,
@@ -73,6 +76,9 @@ describe("TTS / audio honesty copy", () => {
     expect(NARRATION_LIBRARY_LOAD_ERROR_HINT).toMatch(/не пустой/i);
     expect(VOICE_TRACK_LOAD_ERROR).not.toBe(VOICE_TRACK_EMPTY);
     expect(VOICE_TRACK_LOAD_ERROR_HINT).toMatch(/не пустой/i);
+    expect(DAW_EMPTY_TRACKS).not.toBe(DAW_LOAD_ERROR);
+    expect(DAW_EMPTY_TRACKS_HINT).toMatch(/не ошибка загрузки/i);
+    expect(DAW_LOAD_ERROR).toMatch(/не удалось загрузить/i);
     expect(AUDIO_LIBRARY_EMPTY).toMatch(/[А-Яа-яЁё]/);
     expect(AUDIO_LIBRARY_LOAD_ERROR).toMatch(/[А-Яа-яЁё]/);
   });

@@ -2,8 +2,9 @@
 
 /**
  * Welcome — empty-thread screen: greeting + starter chips.
- * «Записать мысль» opens the ⌘K capture, «Создать проект» the project
- * creation dialog (template / GitHub / zip), «Что ты умеешь?» sends that
+ * «Записать мысль» opens the ⌘K capture, «Код Next.js» the code
+ * project dialog (template / GitHub / zip), studio chips open
+ * CreateWorkspaceDialog with that type. «Что ты умеешь?» sends that
  * text to the agent. Below the chips: a subtle kbd-hint row (Ctrl+K capture,
  * Ctrl+P search, / commands) so the shortcuts are discoverable.
  */
@@ -98,7 +99,7 @@ export function Welcome() {
           onClick={() => openCreateProject()}
         >
           <FolderGit2 className="size-4" aria-hidden="true" />
-          Создать проект
+          Код Next.js
         </Button>
         <Button
           variant="outline"

@@ -8,6 +8,15 @@ import { notesWhereForScope, workspaceNoteIsOutOfScope } from "./note-scope";
 import { validateWorkspaceCreate } from "./create-typed-workspace";
 import { parseWorkspaceKind } from "./workspace-kind";
 import { boundThreadChip } from "./composer-binding";
+import {
+  CODE_PROJECT_SLASH,
+  slashOpensWorkspaceType,
+  WORKSPACE_SLASH_COMMANDS,
+} from "./slash-catalog";
+import { emptyDawState } from "./daw-empty";
+import { dawHasAudibleContent } from "./daw-model";
+import { pathFor } from "./app-url";
+import { DAW_EMPTY_TRACKS, DAW_LOAD_ERROR } from "./audio-copy";
 
 describe("parseWorkspaceKind", () => {
   test("accepts English kinds and Russian aliases", () => {
@@ -94,13 +103,52 @@ describe("note scope", () => {
 });
 
 describe("boundThreadChip", () => {
-  test("music workspace is a track, not a project", () => {
+  test("music workspace is a track, not a project, and href is /w/{id}", () => {
     expect(
-      boundThreadChip({ name: "Луна", origin: "workspace", type: "music" }),
-    ).toEqual({ label: "Трек: Луна", kind: "workspace" });
+      boundThreadChip({
+        name: "Луна",
+        origin: "workspace",
+        type: "music",
+        id: "ws-luna",
+      }),
+    ).toEqual({
+      label: "Трек: Луна",
+      kind: "workspace",
+      href: "/w/ws-luna",
+    });
+    expect(pathFor("workspace", "ws-luna", "chat")).toBe("/w/ws-luna");
     expect(boundThreadChip({ name: "App", origin: "template" })).toEqual({
       label: "Проект: App",
       kind: "project",
+      href: null,
     });
+  });
+});
+
+describe("slash catalog", () => {
+  test("workspace slashes are not /проект; /проект is Next.js code", () => {
+    const names = WORKSPACE_SLASH_COMMANDS.map((c) => c.name);
+    expect(names).toEqual(["воркспейс", "студия", "трек", "книга", "фильм"]);
+    expect(slashOpensWorkspaceType("трек")).toBe("music");
+    expect(slashOpensWorkspaceType("/книга")).toBe("book");
+    expect(slashOpensWorkspaceType("фильм")).toBe("film");
+    expect(slashOpensWorkspaceType("воркспейс")).toBe("picker");
+    expect(slashOpensWorkspaceType("студия")).toBe("picker");
+    expect(slashOpensWorkspaceType("проект")).toBeNull();
+    expect(CODE_PROJECT_SLASH.name).toBe("проект");
+    expect(CODE_PROJECT_SLASH.description.toLowerCase()).toContain("next.js");
+    expect(CODE_PROJECT_SLASH.label.toLowerCase()).toContain("код");
+    expect(CODE_PROJECT_SLASH.description.toLowerCase()).not.toContain("песн");
+  });
+});
+
+describe("empty DAW", () => {
+  test("new music DAW is silent tracks, not a seed mix or load error", () => {
+    const empty = emptyDawState();
+    expect(empty.tracks).toEqual([]);
+    expect(dawHasAudibleContent(empty)).toBe(false);
+    expect(DAW_EMPTY_TRACKS).toMatch(/дорожек пока нет/i);
+    expect(DAW_EMPTY_TRACKS).not.toBe(DAW_LOAD_ERROR);
+    expect(DAW_LOAD_ERROR).toMatch(/не удалось загрузить/i);
   });
 });

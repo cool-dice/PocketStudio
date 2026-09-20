@@ -24,6 +24,11 @@ import {
   type TrackKind,
   type VoiceClip,
 } from "@/lib/daw-model";
+import {
+  DAW_EMPTY_TRACKS,
+  DAW_EMPTY_TRACKS_HINT,
+  DAW_LOAD_ERROR,
+} from "@/lib/audio-copy";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -162,7 +167,7 @@ export function DawStudio({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Не удалось загрузить проект студии");
+          setError(err instanceof ApiError ? err.message : DAW_LOAD_ERROR);
         }
       })
       .finally(() => {
@@ -359,9 +364,9 @@ export function DawStudio({
 
       {state.tracks.length === 0 ? (
         <div className="rounded-xl border border-dashed p-6 text-center">
-          <p className="text-sm font-medium">Дорожек пока нет</p>
+          <p className="text-sm font-medium">{DAW_EMPTY_TRACKS}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Добавьте барабаны, бас или пэд — и соберите карманный трек.
+            {DAW_EMPTY_TRACKS_HINT}
           </p>
         </div>
       ) : (

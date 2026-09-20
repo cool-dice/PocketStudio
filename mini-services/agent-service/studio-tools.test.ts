@@ -94,5 +94,71 @@ describe.skipIf(SKIP_PG)("create_workspace / list_workspaces agent tools", () =>
     );
     expect(blocked.error).toMatch(/create_workspace|заметк/i);
     expect(blocked.project).toBeUndefined();
+
+    const daw = await db.dawProject.findUnique({
+      where: { projectId: made.workspace.id },
+    });
+    expect(daw).toBeTruthy();
+    expect(JSON.parse(daw!.tracks)).toEqual([]);
+    expect(daw!.bpm).toBe(112);
+
+    const bookDaw = await db.dawProject.findUnique({
+      where: { projectId: extra.workspace.id },
+    });
+    expect(bookDaw).toBeNull();
+
+    const listProjects = getTool("list_projects");
+    const codeApp = await db.project.create({
+      data: {
+        userId: owner.id,
+        name: `Код маяк ${stamp}`,
+        origin: "template",
+        type: "app",
+      },
+    });
+    const listedCode = await listProjects!.execute({}, owner.id, ctx(null));
+    const codeIds = listedCode.projects.map((p: { id: string }) => p.id);
+    const codeOrigins = listedCode.projects.map((p: { origin: string }) => p.origin);
+    expect(codeIds).toContain(codeApp.id);
+    expect(codeIds).not.toContain(made.workspace.id);
+    expect(codeIds).not.toContain(extra.workspace.id);
+    expect(codeOrigins.every((o: string) => ["template", "github", "zip"].includes(o))).toBe(
+      true,
+    );
+    expect(listProjects!.description).toMatch(/list_workspaces/);
+    expect(listProjects!.description.toLowerCase()).not.toContain("студии вместе");
   });
-});
+
+  test("list_workspaces does not leak another user's studios", async () => {
+    const list = getTool("list_workspaces");
+    const owner = await db.user.create({
+      data: {
+        name: "StudioIdorOwner",
+        email: `studio-idor-o-${stamp}@example.test`,
+        passwordHash: await hashPassword("password-ok"),
+        role: "client",
+      },
+    });
+    ids.push(owner.id);
+    const attacker = await db.user.create({
+      data: {
+        name: "StudioIdorAtk",
+        email: `studio-idor-a-${stamp}@example.test`,
+        passwordHash: await hashPassword("password-ok"),
+        role: "client",
+      },
+    });
+    ids.push(attacker.id);
+    const secret = await db.project.create({
+      data: {
+        userId: owner.id,
+        name: `Секретная студия ${stamp}`,
+        type: "music",
+        origin: "workspace",
+      },
+    });
+    const listed = await list!.execute({}, attacker.id, ctx(null));
+    const listedIds = listed.workspaces.map((w: { id: string }) => w.id);
+    expect(listedIds).not.toContain(secret.id);
+    expect(JSON.stringify(listed)).not.toContain("Секретная студия");
+  });

@@ -156,5 +156,28 @@ describe.skipIf(SKIP_PG)("create_note / search_notes workspace isolation", () =>
       ctx(null),
     );
     expect(strangerOpen.error).toBe("Заметка не найдена");
+
+    const tag = getTool("tag_note");
+    const remind = getTool("set_reminder");
+    const at = new Date(Date.now() + 86_400_000).toISOString();
+    const tagBookFromMoon = await tag!.execute(
+      { noteId: bookNote.note.id, tags: ["чужое"] },
+      owner.id,
+      ctx(moon.id, thread.id),
+    );
+    expect(tagBookFromMoon.error).toBe("Заметка не найдена");
+    const remindInboxFromMoon = await remind!.execute(
+      { noteId: inbox.note.id, at },
+      owner.id,
+      ctx(moon.id, thread.id),
+    );
+    expect(remindInboxFromMoon.error).toBe("Заметка не найдена");
+    const tagOwn = await tag!.execute(
+      { noteId: byName.note.id, tags: ["куплет"] },
+      owner.id,
+      ctx(moon.id, thread.id),
+    );
+    expect(tagOwn.error).toBeUndefined();
+    expect(tagOwn.tags).toContain("куплет");
   });
 });
