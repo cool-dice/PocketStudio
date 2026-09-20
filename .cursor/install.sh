@@ -41,7 +41,12 @@ bash "$REPO_ROOT/.cursor/start-postgres.sh"
 echo "[deps] bun install"
 bun install --frozen-lockfile
 
-echo "[prisma] generate + db push (schema + pgvector HNSW index)"
+# Generate the Prisma client before db:push — the db:push script's
+# ensure-pgvector step imports @prisma/client, which must exist first.
+echo "[prisma] generate client"
+bun run db:generate
+
+echo "[prisma] db push (schema + pgvector HNSW index)"
 bun run db:push
 
 echo "[install] done"
