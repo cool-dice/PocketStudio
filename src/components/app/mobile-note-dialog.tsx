@@ -15,15 +15,17 @@ import {
 } from "@/components/ui/dialog";
 import { NoteDetail } from "@/components/app/note-detail";
 import { useIsNarrow } from "@/hooks/use-media-query";
+import { noteDetailSurface } from "@/lib/notes-list-state";
 import { useAppUi } from "@/lib/store";
 
 export function MobileNoteDialog() {
   const isNarrow = useIsNarrow();
+  const mainArea = useAppUi((s) => s.mainArea);
   const note = useAppUi((s) => s.contextNote);
   const dialogOpen = useAppUi((s) => s.noteDialogOpen);
   const closeNoteDialog = useAppUi((s) => s.closeNoteDialog);
 
-  if (!isNarrow) return null;
+  if (noteDetailSurface(mainArea, isNarrow) !== "dialog") return null;
 
   return (
     <Dialog

@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { WORKSPACE_OR_CODE_NOT_FOUND, WORKSPACE_OR_CODE_PICK } from "@/lib/composer-binding";
 import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
 
 const linkSchema = z.object({
-  projectId: z.string().trim().min(1, "Выберите студию или проект"),
+  projectId: z.string().trim().min(1, WORKSPACE_OR_CODE_PICK),
   kind: z.enum(["reference", "context", "proposal"]).optional(),
 });
 
@@ -87,7 +88,7 @@ export async function POST(
   });
   if (!project) {
     return NextResponse.json(
-      { error: "Студия или проект не найдены" },
+      { error: WORKSPACE_OR_CODE_NOT_FOUND },
       { status: 404 },
     );
   }

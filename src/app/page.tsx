@@ -42,5 +42,9 @@ function BootSkeleton() {
 }
 
 export default function Home() {
-  return <RootScreen />;
+  return (
+    <Suspense fallback={<BootSkeleton />}>
+      <RootScreen />
+    </Suspense>
+  );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { mcpToggleCopy } from "./mcp-copy";
+import { mcpCatalogView, mcpToggleCopy } from "./mcp-copy";
 
 describe("mcpToggleCopy never claims connected when CLI is missing", () => {
   test("cli_missing enable copy", () => {
@@ -19,5 +19,18 @@ describe("mcpToggleCopy never claims connected when CLI is missing", () => {
     );
     expect(copy.title).not.toMatch(/подключ/i);
     expect(copy.description).toMatch(/не стартовал/i);
+  });
+});
+
+describe("mcpCatalogView", () => {
+  test("load error is error, not an empty catalog", () => {
+    expect(mcpCatalogView(null, "Не удалось загрузить реестр")).toBe("error");
+    expect(mcpCatalogView([], "Не удалось загрузить реестр")).toBe("error");
+  });
+
+  test("null without error is loading; empty array is empty", () => {
+    expect(mcpCatalogView(null, null)).toBe("loading");
+    expect(mcpCatalogView([], null)).toBe("empty");
+    expect(mcpCatalogView([{ id: "1" }], null)).toBe("ready");
   });
 });

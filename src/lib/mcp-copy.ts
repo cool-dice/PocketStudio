@@ -4,6 +4,19 @@
 
 import type { McpServerDto } from "@/lib/workspace-types";
 
+export type McpCatalogView = "loading" | "error" | "empty" | "ready";
+
+/** Failed registry fetch is never a zero-server catalog. */
+export function mcpCatalogView(
+  servers: unknown[] | null,
+  loadError: string | null,
+): McpCatalogView {
+  if (loadError) return "error";
+  if (servers === null) return "loading";
+  if (servers.length === 0) return "empty";
+  return "ready";
+}
+
 export function mcpToggleCopy(
   server: Pick<McpServerDto, "name" | "runtimeStatus" | "external">,
   enabled: boolean,

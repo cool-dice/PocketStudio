@@ -36,6 +36,8 @@ export const LINKED_TARGETS_EMPTY =
   "Пока нет связанных воркспейсов, треков или код-проектов.";
 export const LINKED_TARGETS_LOAD_ERROR = "Не удалось загрузить связи";
 export const LINKED_UNLINK_ERROR = "Не удалось отвязать";
+export const WORKSPACE_OR_CODE_NOT_FOUND = "Воркспейс или код-проект не найдены";
+export const WORKSPACE_OR_CODE_PICK = "Выберите воркспейс или код-проект";
 
 export function linkedTargetAria(
   kind: BoundChipKind,
