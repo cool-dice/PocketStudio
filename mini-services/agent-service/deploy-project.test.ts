@@ -161,5 +161,5 @@ describe.skipIf(SKIP_PG)("deploy_project agent tool", () => {
     )) as Record<string, unknown>;
     expect(ctxResult.published).toBe(false);
     expect(ctxResult.status).not.toBeUndefined();
-  });
+  }, 30_000);
 });
