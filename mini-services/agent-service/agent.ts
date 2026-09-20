@@ -7,7 +7,9 @@
 //     (prompts.ts) tells the model to answer with a single JSON object
 //     {"tool":"<name>","args":{...}} when it wants a tool, and parseToolCall
 //     below detects that shape. Partial JSON is never executed — wait until
-//     a complete object is parseable. The tool-calling loop lives in server.ts.
+//     a complete object is parseable. Payloads over 256 KiB (1 MiB for
+//     write_file/apply_patch) are rejected with a Russian error — no execute.
+//     The tool-calling loop lives in server.ts.
 
 import { sleepAbortable } from "../../src/lib/abort-flag";
 import { chatCompletionStream } from "../../src/lib/ai/stream";
@@ -18,6 +20,11 @@ import {
 import type { AiToolId } from "../../src/lib/ai/tools";
 import { recordChatUsage } from "../../src/lib/ai/usage-log";
 import { db } from "./db-client";
+import {
+  candidateOverLimit,
+  gateToolPayload,
+  peekToolName,
+} from "./tool-args-limit";
 
 /** LLM conversation turn (system prompt is passed separately). */
 export interface LlmMessage {
@@ -30,6 +37,15 @@ export interface ToolCall {
   tool: string;
   args: Record<string, unknown>;
 }
+
+/**
+ * parseToolCallResult: a real call, an oversized dump (do not execute),
+ * or not a tool JSON at all (plain-text answer).
+ */
+export type ToolCallParse =
+  | { status: "call"; call: ToolCall }
+  | { status: "oversized"; tool: string; error: string; limitBytes: number }
+  | { status: "none" };
 
 export interface GenerateOpts {
   userId: string;
@@ -197,11 +213,35 @@ function coerceArgs(value: unknown): Record<string, unknown> | null {
   return null;
 }
 
-/** Parse one JSON string as a tool-call object, null when not shaped right. */
-function tryParseToolObject(raw: string): ToolCall | null {
+function oversizedResult(
+  over: { error: string; tool: string; limitBytes: number },
+): ToolCallParse {
+  return {
+    status: "oversized",
+    tool: over.tool,
+    error: over.error,
+    limitBytes: over.limitBytes,
+  };
+}
+
+function finishParsedCall(call: ToolCall): ToolCallParse {
+  const gate = gateToolPayload(call);
+  if (!gate.ok) return oversizedResult(gate);
+  return { status: "call", call };
+}
+
+/** Parse one JSON string as a tool-call object; skip JSON.parse past the cap. */
+function tryParseToolObject(raw: string): ToolCallParse {
+  const looksObject = raw.trimStart().startsWith("{");
+  const peeked = looksObject ? peekToolName(raw) : null;
+  if (looksObject) {
+    const over = candidateOverLimit(raw, peeked);
+    if (over) return oversizedResult(over);
+  }
+
   const parsed = parseJsonLenient(raw);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return null;
+    return { status: "none" };
   }
   const obj = parsed as Record<string, unknown>;
   const nestedFn =
@@ -214,12 +254,12 @@ function tryParseToolObject(raw: string): ToolCall | null {
     (typeof nestedFn?.name === "string" && nestedFn.name) ||
     "";
   const tool = toolRaw.trim();
-  if (!tool) return null;
+  if (!tool) return { status: "none" };
 
   const argsCandidate =
     obj.args ?? obj.arguments ?? nestedFn?.arguments ?? nestedFn?.args;
   const wrapped = coerceArgs(argsCandidate);
-  if (wrapped) return { tool, args: wrapped };
+  if (wrapped) return finishParsedCall({ tool, args: wrapped });
 
   // Flat form observed in the wild: {"tool":"write_file","path":…,…} —
   // the model forgot the args wrapper; treat the other keys as args.
@@ -228,9 +268,17 @@ function tryParseToolObject(raw: string): ToolCall | null {
     delete rest.tool;
     delete rest.name;
     delete rest.function;
-    return { tool, args: rest };
+    return finishParsedCall({ tool, args: rest });
   }
-  return null;
+  return { status: "none" };
+}
+
+function firstToolParse(objects: string[]): ToolCallParse {
+  for (const obj of objects) {
+    const parsed = tryParseToolObject(obj);
+    if (parsed.status !== "none") return parsed;
+  }
+  return { status: "none" };
 }
 
 /**
@@ -242,34 +290,40 @@ function tryParseToolObject(raw: string): ToolCall | null {
  *      follow-up calls resurface naturally on the next loop iteration
  *      (the model re-emits them after each [TOOL_RESULT])
  *   4. fallback: plain JSON.parse of the whole reply / outermost {...} slice
- * Anything else is a plain-text answer → null.
+ * Oversized `{"tool","args"}` is `status: "oversized"` (Russian error, no execute).
+ * Anything else is a plain-text answer → none.
  */
-export function parseToolCall(text: string): ToolCall | null {
-  if (typeof text !== "string") return null;
+export function parseToolCallResult(text: string): ToolCallParse {
+  if (typeof text !== "string") return { status: "none" };
   let trimmed = text.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return { status: "none" };
 
   const fenced = extractFencedBlock(trimmed);
   if (fenced) {
     const fromFence = tryParseToolObject(fenced);
-    if (fromFence) return fromFence;
-    for (const obj of splitTopLevelObjects(fenced)) {
-      const call = tryParseToolObject(obj);
-      if (call) return call;
-    }
+    if (fromFence.status !== "none") return fromFence;
+    const fromFencedObjs = firstToolParse(splitTopLevelObjects(fenced));
+    if (fromFencedObjs.status !== "none") return fromFencedObjs;
   }
 
   trimmed = stripFences(trimmed);
-  if (!trimmed) return null;
+  if (!trimmed) return { status: "none" };
 
   // Fallback: the model occasionally mimics the legacy bracket format
   // "[TOOL_CALL name] {json}" — normalize it to pure JSON first.
   const bracket = trimmed.match(/^\s*\[TOOL_CALL\s+([a-zA-Z_]+)\s*\]\s*([\s\S]+)$/i);
   if (bracket) {
+    const tool = bracket[1];
+    const jsonPart = bracket[2].trim();
+    const over = candidateOverLimit(jsonPart, tool);
+    if (over) return oversizedResult(over);
     try {
-      const args = JSON.parse(bracket[2].trim());
+      const args = JSON.parse(jsonPart);
       if (typeof args === "object" && args !== null && !Array.isArray(args)) {
-        return { tool: bracket[1], args: args as Record<string, unknown> };
+        return finishParsedCall({
+          tool,
+          args: args as Record<string, unknown>,
+        });
       }
     } catch {
       // fall through to the regular candidates
@@ -279,10 +333,8 @@ export function parseToolCall(text: string): ToolCall | null {
   // Reply starts with an object → walk brace depth, try each top-level
   // object (handles chained calls AND single object + trailing prose).
   if (trimmed.startsWith("{")) {
-    for (const obj of splitTopLevelObjects(trimmed)) {
-      const call = tryParseToolObject(obj);
-      if (call) return call;
-    }
+    const fromTop = firstToolParse(splitTopLevelObjects(trimmed));
+    if (fromTop.status !== "none") return fromTop;
   }
 
   const candidates: string[] = [trimmed];
@@ -292,12 +344,12 @@ export function parseToolCall(text: string): ToolCall | null {
     if (first !== -1 && last > first) candidates.push(trimmed.slice(first, last + 1));
   }
 
-  for (const candidate of candidates) {
-    const call = tryParseToolObject(candidate);
-    if (call) return call;
-  }
+  return firstToolParse(candidates);
+}
 
-  return null;
+export function parseToolCall(text: string): ToolCall | null {
+  const parsed = parseToolCallResult(text);
+  return parsed.status === "call" ? parsed.call : null;
 }
 
 /**

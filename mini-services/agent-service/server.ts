@@ -41,10 +41,12 @@ import {
 import { verifyWsToken, type WsUser } from "./auth";
 import {
   generateLLMResponse,
-  parseToolCall,
+  parseToolCallResult,
   parsePlannerSteps,
   type LlmMessage,
+  type ToolCall,
 } from "./agent";
+import { prepareToolExecution } from "./tool-args-limit";
 import {
   decideLiveDelta,
   newLiveStream,
@@ -743,23 +745,27 @@ async function executeToolCall(opts: {
   threadId: string;
   userId: string;
   thread: ThreadTurnInfo;
-  call: { tool: string; args: Record<string, unknown> };
+  call: ToolCall;
   mcp: TurnMcpState;
   signal: AbortSignal;
+  /** Parse-time oversized dump — skip execute, Russian error in the thread. */
+  payloadError?: string;
 }): Promise<unknown> {
   const { room, userRoom, threadId, userId, thread, call, mcp, signal } = opts;
 
   if (signal.aborted) return abortedToolResult();
 
+  const prepared = prepareToolExecution(call, opts.payloadError);
+
   // Tool call → persist a "pending" tool row first (it becomes the
-  // message id reported to the client).
+  // message id reported to the client). Oversized args are never stored.
   const toolMessage = await db.message.create({
     data: {
       threadId,
       role: "tool",
       content: "",
       toolName: call.tool,
-      toolArgs: JSON.stringify(call.args),
+      toolArgs: prepared.argsForStore,
       toolResult: "pending",
     },
   });
@@ -767,7 +773,7 @@ async function executeToolCall(opts: {
     threadId,
     messageId: toolMessage.id,
     tool: call.tool,
-    args: call.args,
+    args: prepared.argsForEmit,
   });
 
   // Execute (never throws into the caller — errors become tool results).
@@ -784,7 +790,9 @@ async function executeToolCall(opts: {
     const tool = getTool(call.tool);
     // MCP-гейтинг (Фаза D): инструмент с адаптером виден только при
     // включённом сервере реестра интеграций.
-    if (tool?.mcpAdapter && !mcp.adapters.has(tool.mcpAdapter)) {
+    if (prepared.error) {
+      result = { error: prepared.error };
+    } else if (tool?.mcpAdapter && !mcp.adapters.has(tool.mcpAdapter)) {
       result = {
         error:
           `Инструмент ${call.tool} недоступен: MCP-сервер «` +
@@ -814,7 +822,7 @@ async function executeToolCall(opts: {
     threadId,
     messageId: toolMessage.id,
     tool: call.tool,
-    args: call.args,
+    args: prepared.argsForEmit,
     result,
   });
 
@@ -1051,8 +1059,8 @@ async function runAgentTurn(
         throw err;
       }
 
-      const call = parseToolCall(raw);
-      if (call) {
+      const parsedCall = parseToolCallResult(raw);
+      if (parsedCall.status === "call" || parsedCall.status === "oversized") {
         if (live.messageId) {
           const prose =
             sanitizeTextAnswer(proseFromMixed(raw, live.acc)) ||
@@ -1065,6 +1073,10 @@ async function runAgentTurn(
           );
           resetLiveBubble(live);
         }
+        const call =
+          parsedCall.status === "call"
+            ? parsedCall.call
+            : { tool: parsedCall.tool, args: {} };
         const result = await executeToolCall({
           room,
           userRoom,
@@ -1074,6 +1086,8 @@ async function runAgentTurn(
           call,
           mcp,
           signal,
+          payloadError:
+            parsedCall.status === "oversized" ? parsedCall.error : undefined,
         });
         const r = resultObject(result);
         if (r && r.error === undefined) {
@@ -1136,9 +1150,13 @@ async function runAgentTurn(
             toolId: "agent",
             signal,
           });
-          const call = parseToolCall(raw);
-          if (!call) break; // model answered with text — accept it
+          const parsedCall = parseToolCallResult(raw);
+          if (parsedCall.status === "none") break; // model answered with text — accept it
           sweepCalls++;
+          const call =
+            parsedCall.status === "call"
+              ? parsedCall.call
+              : { tool: parsedCall.tool, args: {} };
           await executeToolCall({
             room,
             userRoom,
@@ -1148,6 +1166,8 @@ async function runAgentTurn(
             call,
             mcp,
             signal,
+            payloadError:
+              parsedCall.status === "oversized" ? parsedCall.error : undefined,
           });
           if (signal.aborted) {
             finalText = ABORT_REPLY;
