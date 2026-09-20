@@ -23,14 +23,38 @@ export type BoundChip = {
   href: string | null;
 };
 
+export function isStudioOrigin(origin?: string | null): boolean {
+  return origin === "workspace";
+}
+
+export function studioKindPrefix(type?: string | null): string {
+  return TYPE_PREFIX[type ?? ""] ?? "Воркспейс";
+}
+
+export const LINKED_TARGETS_TITLE = "Связанные студии и проекты";
+export const LINKED_TARGETS_EMPTY =
+  "Пока нет связанных студий или проектов.";
+export const LINKED_UNLINK_ERROR = "Не удалось отвязать";
+
+export function linkedTargetAria(
+  kind: BoundChipKind,
+  name: string,
+  action: "open" | "unlink",
+): string {
+  const noun = kind === "workspace" ? "воркспейс" : "проект";
+  return action === "open"
+    ? `Открыть ${noun} «${name}»`
+    : `Отвязать ${noun} «${name}»`;
+}
+
 export function boundThreadChip(opts: {
   name: string;
   origin?: string | null;
   type?: string | null;
   id?: string | null;
 }): BoundChip {
-  if (opts.origin === "workspace") {
-    const prefix = TYPE_PREFIX[opts.type ?? ""] ?? "Воркспейс";
+  if (isStudioOrigin(opts.origin)) {
+    const prefix = studioKindPrefix(opts.type);
     return {
       label: `${prefix}: ${opts.name}`,
       kind: "workspace",

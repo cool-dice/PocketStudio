@@ -227,6 +227,8 @@ async function requestForm<T>(path: string, form: FormData): Promise<T> {
   return data as T;
 }
 
+export type DeploySurface = "workspace" | "project";
+
 export const api = {
   me(): Promise<User> {
     return request<{ user: User }>("/api/auth/me").then((r) => r.user);
@@ -676,6 +678,30 @@ export const api = {
     return `/api/projects/${encodeURIComponent(id)}/export`;
   },
 
+  async exportProjectZip(projectId: string): Promise<Blob> {
+    let res: Response;
+    try {
+      res = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/export`,
+        {
+          credentials: "same-origin",
+          headers: authHeaders(),
+        },
+      );
+    } catch {
+      throw new ApiError("Нет соединения с сервером", 0);
+    }
+    if (!res.ok) {
+      if (res.status === 401) clearAuthToken();
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new ApiError(
+        body.error ?? `Ошибка запроса (${res.status})`,
+        res.status,
+      );
+    }
+    return res.blob();
+  },
+
   /* ── Global search (Stage 4) ── */
 
   search(q: string, workspaceId?: string | null): Promise<SearchResults> {
@@ -1063,22 +1089,26 @@ export const api = {
     return request<{ config: string; count: number }>("/api/mcp/config");
   },
 
-  /** Dockerfile-генератор: пишет файлы в проект. Образ не публикуется. */
+  /** Dockerfile-генератор: пишет файлы. Образ не публикуется, хоста нет. */
   generateDockerfile(
     projectId: string,
     overwrite = false,
+    surface: DeploySurface = "workspace",
   ): Promise<{
     kind: string;
     dockerfile: string;
     dockerignore: string;
-    workspace: { id: string; name: string };
     published: false;
     imageTag: null;
     status: string;
     empty: boolean;
     hint: string;
   }> {
-    return request(`/api/workspaces/${encodeURIComponent(projectId)}/dockerfile`, {
+    const base =
+      surface === "project"
+        ? `/api/projects/${encodeURIComponent(projectId)}/dockerfile`
+        : `/api/workspaces/${encodeURIComponent(projectId)}/dockerfile`;
+    return request(base, {
       method: "POST",
       body: JSON.stringify({ overwrite }),
     });
@@ -1659,16 +1689,20 @@ export const api = {
     return request("/api/payments/status");
   },
 
-  dockerBuild(workspaceId: string): Promise<{
+  dockerBuild(
+    workspaceId: string,
+    surface: DeploySurface = "workspace",
+  ): Promise<{
     status: string;
     log: string;
     imageTag: string | null;
     published: false;
   }> {
-    return request(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/docker-build`,
-      { method: "POST" },
-    );
+    const base =
+      surface === "project"
+        ? `/api/projects/${encodeURIComponent(workspaceId)}/docker-build`
+        : `/api/workspaces/${encodeURIComponent(workspaceId)}/docker-build`;
+    return request(base, { method: "POST" });
   },
 
   compileFilmFfmpeg(

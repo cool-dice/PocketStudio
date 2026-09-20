@@ -3,7 +3,7 @@
 /**
  * GlobalSearch — Ctrl+P / ⌘P command palette: GET /api/search for the
  * current user (workspace-scoped when a workspace is open). Empty ≠ error.
- * Workspace hits open /w/[id]; notes open the notebook + note panel;
+ * Workspace hits open /w/[id]; code-project hits open the Next.js shell.
  * documents open /w/{id}?tab=documents&doc=; entities open the documents
  * module (or the workspace + query); artifacts open images or library.
  */
@@ -22,7 +22,8 @@ import {
 } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
-import type { SearchResults } from "@/lib/types";
+import type { SearchProjectHit, SearchResults } from "@/lib/types";
+import { searchHitIsStudio } from "@/lib/search";
 import {
   CommandDialog,
   CommandEmpty,
@@ -42,6 +43,7 @@ import {
   SEARCH_ERROR,
   SEARCH_ERROR_HINT,
   SEARCH_GROUP_ARTIFACTS,
+  SEARCH_GROUP_CODE_PROJECTS,
   SEARCH_GROUP_DOCUMENTS,
   SEARCH_GROUP_ENTITIES,
   SEARCH_GROUP_NOTES,
@@ -65,6 +67,7 @@ export function GlobalSearch() {
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const openWorkspace = useAppUi((s) => s.openWorkspace);
+  const openProject = useAppUi((s) => s.openProject);
   const activeWorkspaceId = useAppUi((s) => s.activeWorkspaceId);
   const mainArea = useAppUi((s) => s.mainArea);
 
@@ -131,10 +134,19 @@ export function GlobalSearch() {
 
   const go = useMemo(
     () => ({
-      thread: async (id: string, projectId: string | null) => {
+      thread: async (
+        id: string,
+        projectId: string | null,
+        projectOrigin: string | null,
+      ) => {
         close();
-        if (projectId) openWorkspace(projectId);
-        else setMainArea("chat");
+        if (projectId && searchHitIsStudio(projectOrigin)) {
+          openWorkspace(projectId);
+        } else if (projectId) {
+          openProject(projectId);
+        } else {
+          setMainArea("chat");
+        }
         await selectThread(id);
       },
       note: (noteId: string) => {
@@ -148,6 +160,10 @@ export function GlobalSearch() {
       workspace: (id: string) => {
         close();
         openWorkspace(id);
+      },
+      code: (id: string) => {
+        close();
+        openProject(id);
       },
       href: (href: string, projectId: string, docId?: string) => {
         close();
@@ -170,7 +186,7 @@ export function GlobalSearch() {
         if (doc) useAppUi.getState().setWorkspaceDocId(doc);
       },
     }),
-    [close, openWorkspace, setMainArea, selectThread],
+    [close, openWorkspace, openProject, setMainArea, selectThread],
   );
 
   return (
@@ -221,29 +237,20 @@ export function GlobalSearch() {
           <CommandEmpty>{searchEmptyMessage(query.trim())}</CommandEmpty>
         )}
         {!showHint && !error && results && results.projects.length > 0 && (
-          <CommandGroup heading={SEARCH_GROUP_WORKSPACES}>
-            {results.projects.map((p) => (
-              <CommandItem
-                key={`p-${p.id}`}
-                value={`воркспейс ${p.name} ${p.description ?? ""}`}
-                onSelect={() => go.workspace(p.id)}
-                className="gap-3"
-              >
-                <FolderGit2
-                  className="size-4 shrink-0 text-primary"
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{p.name}</span>
-                  {p.description && (
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {p.description}
-                    </span>
-                  )}
-                </span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
+          <>
+            <SearchProjectGroup
+              heading={SEARCH_GROUP_WORKSPACES}
+              items={results.projects.filter((p) => searchHitIsStudio(p.origin))}
+              onPick={go.workspace}
+              kind="workspace"
+            />
+            <SearchProjectGroup
+              heading={SEARCH_GROUP_CODE_PROJECTS}
+              items={results.projects.filter((p) => !searchHitIsStudio(p.origin))}
+              onPick={go.code}
+              kind="project"
+            />
+          </>
         )}
         {!showHint && !error && results && results.threads.length > 0 && (
           <CommandGroup heading={SEARCH_GROUP_THREADS}>
@@ -251,7 +258,9 @@ export function GlobalSearch() {
               <CommandItem
                 key={`t-${t.id}`}
                 value={`диалог ${t.title} ${t.preview ?? ""}`}
-                onSelect={() => void go.thread(t.id, t.projectId)}
+                onSelect={() =>
+                  void go.thread(t.id, t.projectId, t.projectOrigin)
+                }
                 className="gap-3"
               >
                 <MessageSquare
@@ -378,5 +387,45 @@ export function GlobalSearch() {
         )}
       </CommandList>
     </CommandDialog>
+  );
+}
+
+function SearchProjectGroup({
+  heading,
+  items,
+  onPick,
+  kind,
+}: {
+  heading: string;
+  items: SearchProjectHit[];
+  onPick: (id: string) => void;
+  kind: "workspace" | "project";
+}) {
+  if (items.length === 0) return null;
+  const prefix = kind === "workspace" ? "воркспейс" : "код-проект";
+  return (
+    <CommandGroup heading={heading}>
+      {items.map((p) => (
+        <CommandItem
+          key={`${kind}-${p.id}`}
+          value={`${prefix} ${p.name} ${p.description ?? ""}`}
+          onSelect={() => onPick(p.id)}
+          className="gap-3"
+        >
+          <FolderGit2
+            className="size-4 shrink-0 text-primary"
+            aria-hidden="true"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">{p.name}</span>
+            {p.description && (
+              <span className="block truncate text-xs text-muted-foreground">
+                {p.description}
+              </span>
+            )}
+          </span>
+        </CommandItem>
+      ))}
+    </CommandGroup>
   );
 }

@@ -7,7 +7,7 @@ import {
 import { notesWhereForScope, workspaceNoteIsOutOfScope } from "./note-scope";
 import { validateWorkspaceCreate } from "./create-typed-workspace";
 import { parseWorkspaceKind } from "./workspace-kind";
-import { boundChipFromLists, boundThreadChip, notificationOpensWorkspace } from "./composer-binding";
+import { boundChipFromLists, boundThreadChip, notificationOpensWorkspace, LINKED_TARGETS_TITLE, LINKED_TARGETS_EMPTY, linkedTargetAria, isStudioOrigin } from "./composer-binding";
 import {
   CODE_PROJECT_SLASH,
   slashOpensWorkspaceType,
@@ -147,6 +147,22 @@ describe("boundThreadChip", () => {
       kind: "project",
       href: null,
     });
+  });
+});
+
+describe("notebook linked targets", () => {
+  test("copy does not call a studio a project", () => {
+    expect(LINKED_TARGETS_TITLE).toMatch(/студи/i);
+    expect(LINKED_TARGETS_TITLE).toMatch(/проект/i);
+    expect(LINKED_TARGETS_EMPTY).toMatch(/студи/i);
+    expect(LINKED_TARGETS_EMPTY).not.toBe("Пока нет связанных проектов.");
+    expect(isStudioOrigin("workspace")).toBe(true);
+    expect(isStudioOrigin("template")).toBe(false);
+    expect(linkedTargetAria("workspace", "Луна", "open")).toMatch(/воркспейс/i);
+    expect(linkedTargetAria("project", "App", "open")).toMatch(/проект/i);
+    expect(linkedTargetAria("workspace", "Луна", "open")).not.toMatch(
+      /открыть проект/i,
+    );
   });
 });
 

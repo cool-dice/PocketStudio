@@ -83,7 +83,10 @@ export async function POST(req: Request) {
       select: { id: true },
     });
     if (!project) {
-      return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Студия или проект не найдены" },
+        { status: 404 },
+      );
     }
     projectId = project.id;
   }

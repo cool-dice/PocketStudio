@@ -12,6 +12,7 @@ import {
   searchMatches,
   searchSnippet,
   searchTotal,
+  searchHitIsStudio,
   SEARCH_MIN_QUERY,
 } from "./search";
 
@@ -42,6 +43,13 @@ describe("search matching", () => {
     expect(empty.entities).toEqual([]);
     expect(empty.artifacts).toEqual([]);
     expect(SEARCH_MIN_QUERY).toBe(2);
+  });
+
+  test("studio origin opens /w, code origin does not", () => {
+    expect(searchHitIsStudio("workspace")).toBe(true);
+    expect(searchHitIsStudio("template")).toBe(false);
+    expect(searchHitIsStudio("github")).toBe(false);
+    expect(searchHitIsStudio(null)).toBe(false);
   });
 });
 

@@ -51,6 +51,11 @@ export function searchSnippet(
   return searchExcerpt(text, needle, SEARCH_SNIPPET_RADIUS);
 }
 
+/** Code-app hits must not open the studio shell `/w/{id}`. */
+export function searchHitIsStudio(origin?: string | null): boolean {
+  return origin === "workspace";
+}
+
 export function emptySearchResults(): SearchResults {
   return {
     threads: [],

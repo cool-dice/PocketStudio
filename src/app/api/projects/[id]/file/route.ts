@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { codeProjectWhere } from "@/lib/project-api";
 import {
   WorkspaceError,
   projectRoot,
@@ -45,7 +46,7 @@ export async function GET(
   const { id } = await params;
 
   const project = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: codeProjectWhere(id, session.sub),
   });
   if (!project) {
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
@@ -80,7 +81,7 @@ export async function PUT(
   const { id } = await params;
 
   const project = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: codeProjectWhere(id, session.sub),
   });
   if (!project) {
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
@@ -136,7 +137,7 @@ export async function DELETE(
   const { id } = await params;
 
   const project = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: codeProjectWhere(id, session.sub),
   });
   if (!project) {
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });

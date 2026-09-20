@@ -7,12 +7,17 @@ import { readJsonBody } from "@/lib/json-body-limit";
 export const dynamic = "force-dynamic";
 
 const linkSchema = z.object({
-  projectId: z.string().trim().min(1, "Выберите проект"),
+  projectId: z.string().trim().min(1, "Выберите студию или проект"),
   kind: z.enum(["reference", "context", "proposal"]).optional(),
 });
 
-function projectRef(p: { id: string; name: string; origin: string }) {
-  return { id: p.id, name: p.name, origin: p.origin };
+function projectRef(p: {
+  id: string;
+  name: string;
+  origin: string;
+  type: string | null;
+}) {
+  return { id: p.id, name: p.name, origin: p.origin, type: p.type };
 }
 
 /* ── GET /api/notes/[id]/links — projects linked to a note ── */
@@ -35,7 +40,7 @@ export async function GET(
   const links = await db.noteLink.findMany({
     where: { noteId: note.id },
     include: {
-      project: { select: { id: true, name: true, origin: true } },
+      project: { select: { id: true, name: true, origin: true, type: true } },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -81,7 +86,10 @@ export async function POST(
     where: { id: parsed.data.projectId, userId: session.sub },
   });
   if (!project) {
-    return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Студия или проект не найдены" },
+      { status: 404 },
+    );
   }
 
   const link = await db.noteLink.create({
