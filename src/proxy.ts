@@ -5,7 +5,8 @@ import { applySecurityHeaders } from "@/lib/security-headers";
 /**
  * Next.js 16 request proxy (formerly middleware). Stamps basic security
  * headers on the outgoing response without rewriting the request.
- * `/api/*` also gets `X-Robots-Tag: noindex`. CORS headers are not touched.
+ * `/api/*` also gets `X-Robots-Tag: noindex` and `Cache-Control: no-store`.
+ * CORS headers are not touched.
  */
 export function proxy(request: NextRequest): NextResponse {
   const response = NextResponse.next();

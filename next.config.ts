@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 import {
   apiNoindexHeaderList,
+  apiNoStoreHeaderList,
   securityHeaderList,
 } from "./src/lib/security-headers";
 
@@ -16,7 +17,10 @@ const nextConfig: NextConfig = {
     return [
       { source: "/", headers: securityHeaderList },
       { source: "/:path*", headers: securityHeaderList },
-      { source: "/api/:path*", headers: apiNoindexHeaderList },
+      {
+        source: "/api/:path*",
+        headers: [...apiNoindexHeaderList, ...apiNoStoreHeaderList],
+      },
     ];
   },
 };

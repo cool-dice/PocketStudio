@@ -7,8 +7,12 @@ import {
   API_NOINDEX_HEADER_NAME,
   API_NOINDEX_HEADER_VALUE,
   API_NOINDEX_HEADERS,
+  API_NO_STORE_HEADER_NAME,
+  API_NO_STORE_HEADER_VALUE,
+  API_NO_STORE_HEADERS,
   SECURITY_HEADERS,
   apiNoindexHeaderList,
+  apiNoStoreHeaderList,
   applySecurityHeaders,
   cspBlocksMonacoOrSocket,
   isApiPathname,
@@ -30,6 +34,7 @@ describe("security headers", () => {
     expect(headers.get("x-frame-options")).toBe("SAMEORIGIN");
     expect(headers.get("x-frame-options")).not.toBe("DENY");
     expect(headers.get("x-robots-tag")).toBeNull();
+    expect(headers.get("cache-control")).toBeNull();
     expect(headers.get("access-control-allow-origin")).toBeNull();
   });
 
@@ -53,6 +58,7 @@ describe("security headers", () => {
       false,
     );
     expect(res.headers.get("x-robots-tag")).toBeNull();
+    expect(res.headers.get("cache-control")).toBeNull();
   });
 });
 
@@ -93,12 +99,14 @@ describe("X-Robots-Tag on /api/", () => {
     });
     applySecurityHeaders(headers, "/api/health");
     expect(headers.get("x-robots-tag")).toBe("noindex");
+    expect(headers.get("cache-control")).toBe("no-store");
     expect(headers.get("access-control-allow-origin")).toBe(
       "https://studio.example",
     );
     expect(headers.get("access-control-allow-methods")).toBe("GET,OPTIONS");
     expect(headers.get("access-control-allow-headers")).toBe("Authorization");
     expect(API_NOINDEX_HEADERS).not.toHaveProperty("Access-Control-Allow-Origin");
+    expect(API_NO_STORE_HEADERS).not.toHaveProperty("Access-Control-Allow-Origin");
     expect(SECURITY_HEADERS).not.toHaveProperty("Access-Control-Allow-Origin");
   });
 
@@ -115,5 +123,51 @@ describe("X-Robots-Tag on /api/", () => {
         rule.headers.some((header) => header.key === API_NOINDEX_HEADER_NAME),
       ).toBe(false);
     }
+  });
+});
+
+describe("Cache-Control no-store on /api/", () => {
+  test("helper stamps no-store on API paths only", () => {
+    expect(headerBag("/api/health").get("cache-control")).toBe("no-store");
+    expect(headerBag("/api/auth/me").get("cache-control")).toBe("no-store");
+    expect(headerBag("/api/auth/me").get(API_NO_STORE_HEADER_NAME)).toBe(
+      API_NO_STORE_HEADER_VALUE,
+    );
+    expect(headerBag("/").get("cache-control")).toBeNull();
+    expect(headerBag("/login").get("cache-control")).toBeNull();
+    expect(headerBag("/w/abc").get("cache-control")).toBeNull();
+    expect(headerBag().get("cache-control")).toBeNull();
+  });
+
+  test("proxy stamps no-store on /api JSON, not on public HTML", () => {
+    const health = proxy(new NextRequest("http://localhost/api/health"));
+    expect(health.headers.get("cache-control")).toBe("no-store");
+    expect(health.headers.get("x-robots-tag")).toBe("noindex");
+    expect(health.headers.get("access-control-allow-origin")).toBeNull();
+
+    const me = proxy(new NextRequest("http://localhost/api/auth/me"));
+    expect(me.headers.get("cache-control")).toBe("no-store");
+    expect(me.headers.get("x-robots-tag")).toBe("noindex");
+
+    expect(proxy(new NextRequest("http://localhost/")).headers.get("cache-control")).toBeNull();
+    expect(
+      proxy(new NextRequest("http://localhost/login")).headers.get("cache-control"),
+    ).toBeNull();
+  });
+
+  test("next.config adds Cache-Control no-store only under /api/:path*", async () => {
+    const rules = (await nextConfig.headers?.()) ?? [];
+    const api = rules.filter((rule) => rule.source.includes("/api"));
+    expect(api.length).toBeGreaterThan(0);
+    expect(api.flatMap((rule) => rule.headers)).toEqual(
+      expect.arrayContaining(apiNoStoreHeaderList),
+    );
+    const html = rules.filter((rule) => !rule.source.includes("/api"));
+    for (const rule of html) {
+      expect(
+        rule.headers.some((header) => header.key === API_NO_STORE_HEADER_NAME),
+      ).toBe(false);
+    }
+    expect(API_NO_STORE_HEADERS).not.toHaveProperty("Access-Control-Allow-Origin");
   });
 });

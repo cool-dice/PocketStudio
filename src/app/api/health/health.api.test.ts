@@ -41,6 +41,7 @@ describe("GET /api/health", () => {
   test("X-Robots-Tag noindex on /api/health without changing JSON or CORS", async () => {
     const stamped = proxy(new NextRequest("http://localhost/api/health"));
     expect(stamped.headers.get("x-robots-tag")).toBe("noindex");
+    expect(stamped.headers.get("cache-control")).toBe("no-store");
     expect(stamped.headers.get("access-control-allow-origin")).toBeNull();
 
     const res = await appHealth();

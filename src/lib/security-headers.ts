@@ -8,6 +8,8 @@
  *
  * `X-Robots-Tag: noindex` is API-only so a crawler that ignores robots.txt
  * does not index JSON. Public HTML (`/`, `/login`) stays indexable.
+ * `Cache-Control: no-store` is also API-only so browsers/proxies do not
+ * cache user JSON. HTML is not opted out of caching here.
  * Access-Control-* is never set or deleted here (CORS / health stay intact).
  */
 
@@ -25,11 +27,22 @@ export const API_NOINDEX_HEADERS: Record<string, string> = {
   [API_NOINDEX_HEADER_NAME]: API_NOINDEX_HEADER_VALUE,
 };
 
+export const API_NO_STORE_HEADER_NAME = "Cache-Control";
+export const API_NO_STORE_HEADER_VALUE = "no-store";
+
+export const API_NO_STORE_HEADERS: Record<string, string> = {
+  [API_NO_STORE_HEADER_NAME]: API_NO_STORE_HEADER_VALUE,
+};
+
 export const securityHeaderList = Object.entries(SECURITY_HEADERS).map(
   ([key, value]) => ({ key, value }),
 );
 
 export const apiNoindexHeaderList = Object.entries(API_NOINDEX_HEADERS).map(
+  ([key, value]) => ({ key, value }),
+);
+
+export const apiNoStoreHeaderList = Object.entries(API_NO_STORE_HEADERS).map(
   ([key, value]) => ({ key, value }),
 );
 
@@ -47,6 +60,10 @@ export function applyApiNoindexHeader(headers: Headers): void {
   headers.set(API_NOINDEX_HEADER_NAME, API_NOINDEX_HEADER_VALUE);
 }
 
+export function applyApiNoStoreHeader(headers: Headers): void {
+  headers.set(API_NO_STORE_HEADER_NAME, API_NO_STORE_HEADER_VALUE);
+}
+
 export function applySecurityHeaders(
   headers: Headers,
   pathname?: string,
@@ -56,6 +73,7 @@ export function applySecurityHeaders(
   }
   if (pathname !== undefined && isApiPathname(pathname)) {
     applyApiNoindexHeader(headers);
+    applyApiNoStoreHeader(headers);
   }
 }
 
