@@ -206,7 +206,7 @@ export interface WsNoteAnalyzedPayload {
 
 /* ── Projects, workspace files & git (Stage 3 REST contract) ── */
 
-export type ProjectOrigin = "template" | "github" | "zip";
+export type ProjectOrigin = "template" | "github" | "zip" | "workspace";
 
 export interface ProjectStats {
   filesCount: number;

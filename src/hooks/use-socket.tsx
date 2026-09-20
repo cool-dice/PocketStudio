@@ -264,6 +264,16 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const { project } = (payload ?? {}) as WsProjectCreatedPayload;
       if (!project || typeof project.id !== "string") return;
       useAppUi.getState().bumpProjects();
+      if (project.origin === "workspace") {
+        invalidateWorkspaces();
+        toast.success(`Агент создал воркспейс «${project.name}»`, {
+          action: {
+            label: "Открыть",
+            onClick: () => useAppUi.getState().openWorkspace(project.id),
+          },
+        });
+        return;
+      }
       toast.success(`Агент создал проект «${project.name}»`, {
         action: {
           label: "Открыть",

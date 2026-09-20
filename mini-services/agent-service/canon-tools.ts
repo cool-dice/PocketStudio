@@ -128,14 +128,22 @@ const retrieveCode: ToolDef = {
   },
 };
 
+async function loadScopedNote(userId: string, noteId: string, ctx: ToolContext) {
+  const where = ctx.projectId
+    ? { id: noteId, userId, links: { some: { projectId: ctx.projectId } } }
+    : { id: noteId, userId };
+  return db.note.findFirst({ where });
+}
+
 const tagNote: ToolDef = {
   name: "tag_note",
-  description: "Поставить теги на заметку пользователя (создаёт теги при необходимости).",
+  description:
+    "Поставить теги на заметку. В чате воркспейса — только заметки этой студии.",
   argsSchema: {
     noteId: "id заметки",
     tags: "массив коротких тегов",
   },
-  async execute(args: any, userId: string) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -152,7 +160,7 @@ const tagNote: ToolDef = {
       .slice(0, 8);
     if (names.length === 0) return { error: "Нужен хотя бы один тег" };
 
-    const note = await db.note.findFirst({ where: { id: noteId, userId } });
+    const note = await loadScopedNote(userId, noteId, ctx);
     if (!note) return { error: "Заметка не найдена" };
 
     const attached: string[] = [];
@@ -182,7 +190,7 @@ const setReminder: ToolDef = {
     noteId: "id заметки",
     at: "ISO-8601 дата/время",
   },
-  async execute(args: any, userId: string) {
+  async execute(args: any, userId: string, ctx: ToolContext) {
     if (typeof args !== "object" || args === null) {
       return { error: "Некорректные аргументы инструмента" };
     }
@@ -193,7 +201,7 @@ const setReminder: ToolDef = {
     const at = new Date(atRaw);
     if (Number.isNaN(at.getTime())) return { error: "Некорректная дата напоминания" };
 
-    const note = await db.note.findFirst({ where: { id: noteId, userId } });
+    const note = await loadScopedNote(userId, noteId, ctx);
     if (!note) return { error: "Заметка не найдена" };
 
     await db.note.update({

@@ -851,6 +851,32 @@ async function executeToolCall(opts: {
           p.id,
         );
       }
+    } else if (call.tool === "create_workspace") {
+      const w = resultObject(r.workspace);
+      if (w && typeof w.id === "string") {
+        if (r.bound === true) thread.projectId = w.id;
+        io.to(userRoom).emit("project:created", {
+          project: {
+            id: w.id,
+            name: w.name,
+            origin: w.origin ?? "workspace",
+          },
+        });
+        io.to(userRoom).emit("project:updated", {
+          projectId: w.id,
+          reason: "workspace",
+        });
+        await createNotification(
+          io,
+          userId,
+          "project_created",
+          `Агент создал воркспейс «${w.name}»`,
+          r.bound === true
+            ? "Студия создана и привязана к диалогу"
+            : "Студия создана; текущий диалог не перепривязан",
+          w.id,
+        );
+      }
     } else if (
       (call.tool === "write_file" || call.tool === "delete_file" || call.tool === "apply_patch") &&
       thread.projectId

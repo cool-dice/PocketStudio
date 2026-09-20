@@ -22,7 +22,7 @@ export function Welcome() {
   const { sendMessage } = useThreads();
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
   const openCreateProject = useAppUi((s) => s.openCreateProject);
-  const setMainArea = useAppUi((s) => s.setMainArea);
+  const openCreateWorkspace = useAppUi((s) => s.openCreateWorkspace);
 
   const firstName = (user?.name ?? "").trim().split(/\s+/)[0] || "друг";
 
@@ -68,7 +68,7 @@ export function Welcome() {
           variant="outline"
           size="sm"
           className="h-9 gap-2 rounded-xl transition-transform duration-150 hover:-translate-y-0.5"
-          onClick={() => setMainArea("workspaces")}
+          onClick={() => openCreateWorkspace("book")}
         >
           <BookOpenText className="size-4" aria-hidden="true" />
           Писать книгу
@@ -77,7 +77,7 @@ export function Welcome() {
           variant="outline"
           size="sm"
           className="h-9 gap-2 rounded-xl transition-transform duration-150 hover:-translate-y-0.5"
-          onClick={() => setMainArea("workspaces")}
+          onClick={() => openCreateWorkspace("music")}
         >
           <AudioWaveform className="size-4" aria-hidden="true" />
           Собрать трек
@@ -86,7 +86,7 @@ export function Welcome() {
           variant="outline"
           size="sm"
           className="h-9 gap-2 rounded-xl transition-transform duration-150 hover:-translate-y-0.5"
-          onClick={() => setMainArea("workspaces")}
+          onClick={() => openCreateWorkspace("film")}
         >
           <Clapperboard className="size-4" aria-hidden="true" />
           Снять видео

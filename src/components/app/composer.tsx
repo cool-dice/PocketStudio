@@ -3,8 +3,8 @@
 /**
  * Composer — auto-growing textarea. Enter sends, Shift+Enter inserts a
  * newline. Disabled while the agent is thinking/streaming (busy).
- * When the active thread is bound to a project, a small «Проект: …» chip
- * sits above the input (click → project screen).
+ * When the active thread is bound to a project or studio, a small chip
+ * sits above the input (click → project screen or workspace).
  *
  * Slash commands (Stage 4): typing "/" opens a command menu above the input —
  * mode switches, quick note prefix, create project, notebook, global search,
@@ -45,7 +45,9 @@ import {
 } from "@/hooks/use-voice-recorder";
 import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { api, ApiError } from "@/lib/api";
+import { boundThreadChip } from "@/lib/composer-binding";
 import { useAppUi } from "@/lib/store";
 import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
 import {
@@ -66,7 +68,9 @@ export function Composer({
   const { busy, sendMessage, abortTurn, activeThread, updateThreadMode, sendError, clearSendError } =
     useThreads();
   const { getById } = useProjects();
+  const { workspaces } = useWorkspaces();
   const openProject = useAppUi((s) => s.openProject);
+  const openWorkspace = useAppUi((s) => s.openWorkspace);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const openCreateProject = useAppUi((s) => s.openCreateProject);
@@ -111,7 +115,23 @@ export function Composer({
   const threadProjectId = activeThread?.projectId ?? null;
   const scoped =
     scopeProjectId === undefined || threadProjectId === scopeProjectId;
+  const boundWorkspace =
+    scoped && threadProjectId
+      ? workspaces.find((w) => w.id === threadProjectId) ?? null
+      : null;
   const boundProject = scoped ? getById(threadProjectId) : null;
+  const boundChip = boundWorkspace
+    ? boundThreadChip({
+        name: boundWorkspace.name,
+        origin: "workspace",
+        type: boundWorkspace.type,
+      })
+    : boundProject
+      ? boundThreadChip({
+          name: boundProject.name,
+          origin: boundProject.origin,
+        })
+      : null;
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
@@ -397,15 +417,18 @@ export function Composer({
           onExecute={executeCommand}
         />
 
-        {boundProject && (
+        {boundChip && threadProjectId && (
           <button
             type="button"
-            onClick={() => openProject(boundProject.id)}
-            aria-label={`Проект «${boundProject.name}» — открыть`}
+            onClick={() => {
+              if (boundChip.kind === "workspace") openWorkspace(threadProjectId);
+              else openProject(threadProjectId);
+            }}
+            aria-label={`${boundChip.label} — открыть`}
             className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-            <span className="truncate">Проект: {boundProject.name}</span>
+            <span className="truncate">{boundChip.label}</span>
           </button>
         )}
         <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">

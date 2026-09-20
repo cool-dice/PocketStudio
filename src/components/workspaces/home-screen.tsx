@@ -21,7 +21,6 @@ import { useWorkspaces } from "@/hooks/use-workspaces";
 import { api } from "@/lib/api";
 import type { DashboardDto } from "@/lib/workspace-types";
 
-import { CreateWorkspaceDialog } from "@/components/workspaces/create-workspace-dialog";
 import { HomeActivity } from "@/components/workspaces/home-activity";
 import { HomeChatWidget } from "@/components/workspaces/home-chat-widget";
 import { HomeRecent } from "@/components/workspaces/home-recent";
@@ -34,7 +33,7 @@ import {
 export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const { user } = useAuth();
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
-  const [createOpen, setCreateOpen] = useState(false);
+  const openCreateWorkspace = useAppUi((s) => s.openCreateWorkspace);
 
   const [dashboard, setDashboard] = useState<DashboardDto | null>(null);
   const [dashLoading, setDashLoading] = useState(true);
@@ -123,7 +122,7 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
                 <Mic className="size-4" aria-hidden="true" />
                 Записать мысль
               </Button>
-              <Button onClick={() => setCreateOpen(true)} className="gap-2">
+              <Button onClick={() => openCreateWorkspace()} className="gap-2">
                 <Plus className="size-4" aria-hidden="true" />
                 Новый воркспейс
               </Button>
@@ -203,7 +202,7 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
         </div>
       </div>
 
-      <CreateWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
+      </div>
     </div>
   );
 }
