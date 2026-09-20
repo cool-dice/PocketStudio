@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
-import { securityHeaderList } from "./src/lib/security-headers";
+import {
+  apiNoindexHeaderList,
+  securityHeaderList,
+} from "./src/lib/security-headers";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -13,6 +16,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/", headers: securityHeaderList },
       { source: "/:path*", headers: securityHeaderList },
+      { source: "/api/:path*", headers: apiNoindexHeaderList },
     ];
   },
 };
