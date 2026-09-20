@@ -2,8 +2,9 @@
 
 /**
  * SocketProvider — socket.io connection to the agent-service
- * (mini-services/agent-service, port 3003, engine path "/") through the
- * sandbox gateway: io("/?XTransformPort=3003").
+ * (mini-services/agent-service, port 3003, engine path "/socket.io").
+ * Same-origin `/?XTransformPort=3003` still works through Caddy :81.
+ * Without Caddy, Next rewrites `/socket.io` to :3003 (`bun run dev`).
  *
  * The provider is mounted only for authenticated users and is keyed by
  * user id (see src/app/page.tsx), so the socket lives exactly one session.
@@ -38,6 +39,10 @@ import {
   requestAgentStart,
   type AgentLinkStatus,
 } from "@/lib/agent-link";
+import {
+  AGENT_SOCKET_PATH,
+  agentSocketClientUri,
+} from "@/lib/agent-socket";
 import { textPreview } from "@/lib/format";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
@@ -89,9 +94,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   // StrictMode double-invocation is harmless). The auth callback fetches a
   // fresh ws-token on every connect attempt.
   const [socket] = useState<Socket>(() =>
-    io("/?XTransformPort=3003", {
-      path: "/",
-      transports: ["websocket", "polling"],
+    io(agentSocketClientUri(), {
+      path: AGENT_SOCKET_PATH,
+      // Polling first: Next :3000 rewrites HTTP reliably; websocket upgrades
+      // when the rewrite (or Caddy :81) supports them.
+      transports: ["polling", "websocket"],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,

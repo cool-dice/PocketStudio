@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 
+import { agentSocketProxyRewrites } from "./src/lib/agent-socket";
 import {
   apiNoindexHeaderList,
   apiNoStoreHeaderList,
@@ -13,6 +14,9 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  async rewrites() {
+    return { beforeFiles: agentSocketProxyRewrites() };
+  },
   async headers() {
     return [
       { source: "/", headers: securityHeaderList },

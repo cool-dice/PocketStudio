@@ -28,7 +28,8 @@
 // final answer streams (nothing slow may run after message:end — the busy
 // flag clears as soon as the turn returns).
 //
-// Path MUST be "/" (Caddy gateway requirement), port 3003 (hardcoded).
+// Path is `/socket.io` so Next :3000 can rewrite it; Caddy :81 still
+// routes by `?XTransformPort=3003`. Port 3003 is hardcoded.
 
 import { createServer } from "http";
 import { randomUUID } from "node:crypto";
@@ -94,6 +95,7 @@ import {
   MESSAGE_SEND_MAX_PACKET_BYTES,
   parseMessageSend,
 } from "../../src/lib/message-send";
+import { AGENT_SOCKET_PATH } from "../../src/lib/agent-socket";
 
 const PORT = 3003;
 const HISTORY_LIMIT = 30; // last N message rows fed to the LLM (all roles)
@@ -116,8 +118,9 @@ const ORCHESTRATE_MIN_CHARS = 24; // act-mode request length gate for planning
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
-  // DO NOT change the path — Caddy uses it to forward to this port.
-  path: "/",
+  // `/socket.io` (not `/`) so Next :3000 can rewrite without colliding
+  // with the app shell. Caddy :81 still keys off `?XTransformPort=3003`.
+  path: AGENT_SOCKET_PATH,
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
