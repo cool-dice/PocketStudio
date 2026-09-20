@@ -8,6 +8,7 @@ import { snapshotSection } from "@/lib/section-revisions";
 import { sectionDto } from "@/lib/workspace-shapes";
 import { scheduleIndexEntity, scheduleIndexSection, scheduleRemove } from "@/lib/rag";
 import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
+import { sectionContentSchema } from "@/lib/section-content";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ async function loadSection(id: string) {
 
 const patchSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
-  content: z.string().max(200_000).optional(),
+  content: sectionContentSchema.optional(),
   status: z.enum(["draft", "done"]).optional(),
 });
 

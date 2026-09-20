@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { indexSectionById } from "@/lib/rag";
 import { retrieve } from "@/lib/rag/retrieve";
 import { ragScopeFromThread } from "@/lib/rag/scope";
+import { MAX_SECTION_CONTENT_CHARS } from "@/lib/section-content";
 
 import { GET as getDocument } from "./[id]/route";
 import { PATCH as patchSection } from "../sections/[id]/route";
@@ -166,5 +167,75 @@ describe.skipIf(SKIP_PG)("documents: rollback, history, missing id", () => {
     expect(owned.status).toBe(200);
     const ownedJson = (await owned.json()) as { document: { id: string } };
     expect(ownedJson.document.id).toBe(document.id);
+  });
+});
+
+describe.skipIf(SKIP_PG)("documents: shared 200k section content cap", () => {
+  let capOwnerId: string | null = null;
+
+  afterAll(async () => {
+    if (capOwnerId) {
+      await db.user.delete({ where: { id: capOwnerId } }).catch(() => {});
+    }
+  });
+
+  test("PATCH allows 50_001 chars; over 200k is 400", async () => {
+    expect(MAX_SECTION_CONTENT_CHARS).toBe(200_000);
+
+    const owner = await db.user.create({
+      data: {
+        name: "DocCapOwner",
+        email: `doc-cap-${stamp}@example.test`,
+        passwordHash: await hashPassword("password-ok"),
+        role: "client",
+      },
+    });
+    capOwnerId = owner.id;
+    const token = await signSession({
+      sub: owner.id,
+      email: owner.email,
+      name: owner.name,
+      role: owner.role,
+    });
+    const ws = await db.project.create({
+      data: { userId: owner.id, name: "Книга капа", type: "book" },
+    });
+    const document = await db.document.create({
+      data: { projectId: ws.id, title: "Рукопись капа" },
+    });
+    const section = await db.documentSection.create({
+      data: { documentId: document.id, title: "гл. 1", content: "коротко" },
+    });
+
+    const mid = "я".repeat(50_001);
+    const patched = await patchSection(
+      jsonRequest(
+        `http://localhost/api/sections/${section.id}`,
+        "PATCH",
+        { content: mid },
+        token,
+      ),
+      { params: Promise.resolve({ id: section.id }) },
+    );
+    expect(patched.status).toBe(200);
+    const patchedJson = (await patched.json()) as { section: { content: string } };
+    expect(patchedJson.section.content.length).toBe(50_001);
+    expect(patchedJson.section.content).toBe(mid);
+
+    const live = await db.documentSection.findUnique({ where: { id: section.id } });
+    expect(live?.content.length).toBe(50_001);
+
+    const over = await patchSection(
+      jsonRequest(
+        `http://localhost/api/sections/${section.id}`,
+        "PATCH",
+        { content: "x".repeat(MAX_SECTION_CONTENT_CHARS + 1) },
+        token,
+      ),
+      { params: Promise.resolve({ id: section.id }) },
+    );
+    expect(over.status).toBe(400);
+    const still = await db.documentSection.findUnique({ where: { id: section.id } });
+    expect(still?.content.length).toBe(50_001);
   });
 });

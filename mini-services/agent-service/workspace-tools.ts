@@ -63,6 +63,7 @@ import {
   listWorkspaceTree,
   projectRoot,
 } from "../../src/lib/workspace";
+import { sectionContentFromToolArg } from "../../src/lib/section-content";
 import type { ToolContext, ToolDef } from "./tools";
 
 // ─────────────────────────── shared helpers ───────────────────────────
@@ -619,7 +620,7 @@ const createDocument: ToolDef = {
         ? kindRaw
         : null;
     const sectionTitle = optString(args.sectionTitle, 120) ?? "Глава 1";
-    const content = optString(args.content, 50_000) ?? "";
+    const content = sectionContentFromToolArg(args.content);
 
     const ws = await resolveWorkspace(userId, args, ctx);
     if ("error" in ws) return { error: ws.error };
@@ -666,7 +667,7 @@ const appendSection: ToolDef = {
     }
     const sectionTitle = optString(args.title, 120);
     if (!sectionTitle) return { error: "Аргумент title обязателен (заголовок главы)" };
-    const content = optString(args.content, 50_000) ?? "";
+    const content = sectionContentFromToolArg(args.content);
 
     let documentId = pickString(args, ["documentId"]);
     if (!documentId) {
