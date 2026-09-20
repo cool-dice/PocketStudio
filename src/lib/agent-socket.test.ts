@@ -7,6 +7,7 @@ import { NextRequest } from "next/server";
 import {
   AGENT_CADDY_PORT_QUERY,
   AGENT_SERVICE_PORT,
+  AGENT_SOCKET_INTERNAL_PATH,
   AGENT_SOCKET_PATH,
   PROXY_MATCHER,
   agentSocketClientUri,
@@ -27,7 +28,7 @@ describe("agent socket path for Next without Caddy", () => {
     expect(agentSocketClientUri().startsWith("/?")).toBe(true);
   });
 
-  test("upstream URL stays on :3003/socket.io", () => {
+  test("upstream URL always uses trailing slash so engine.io does not hang", () => {
     expect(agentSocketProxyDestination()).toBe(
       "http://127.0.0.1:3003/socket.io",
     );
@@ -35,7 +36,17 @@ describe("agent socket path for Next without Caddy", () => {
       agentSocketUpstreamUrl(
         "http://localhost:3000/socket.io?EIO=4&transport=polling",
       ),
-    ).toBe("http://127.0.0.1:3003/socket.io?EIO=4&transport=polling");
+    ).toBe("http://127.0.0.1:3003/socket.io/?EIO=4&transport=polling");
+    expect(
+      agentSocketUpstreamUrl(
+        "http://localhost:3000/socket.io/?EIO=4&transport=polling",
+      ),
+    ).toBe("http://127.0.0.1:3003/socket.io/?EIO=4&transport=polling");
+    expect(
+      agentSocketUpstreamUrl(
+        `http://localhost:3000${AGENT_SOCKET_INTERNAL_PATH}?EIO=4&transport=polling`,
+      ),
+    ).toBe("http://127.0.0.1:3003/socket.io/?EIO=4&transport=polling");
   });
 
   test("isAgentSocketPath does not match the homepage or /api", () => {
@@ -58,46 +69,55 @@ describe("agent socket path for Next without Caddy", () => {
     expect(caddy.upgrade).toBe(true);
   });
 
-  test("next.config only rewrites /socket.io onto the trailing-slash route", async () => {
-    const raw = await nextConfig.rewrites?.();
-    const rules = Array.isArray(raw)
-      ? raw
-      : [...(raw?.beforeFiles ?? []), ...(raw?.afterFiles ?? [])];
-    expect(rules).toEqual([
-      { source: "/socket.io", destination: "/socket.io/" },
-    ]);
-    expect(JSON.stringify(rules)).not.toContain(":3003");
+  test("next.config does not rewrite /socket.io (that rewrite hangs)", async () => {
+    expect(typeof nextConfig.rewrites).toBe("undefined");
   });
 
-  test("proxy matcher skips socket.io so polling POSTs are not JSON-capped", () => {
-    expect(PROXY_MATCHER.join(" ")).toContain("socket\\.io");
+  test("proxy rewrites bare /socket.io and does not JSON-cap polling POSTs", () => {
+    expect(PROXY_MATCHER.join(" ")).not.toContain("socket\\.io");
     expect(proxyConfig.matcher).toEqual([...PROXY_MATCHER]);
-    const res = proxy(
+    const bare = proxy(
+      new NextRequest("http://localhost/socket.io?EIO=4&transport=polling"),
+    );
+    expect(bare.status).not.toBe(413);
+    const rewrite =
+      bare.headers.get("x-middleware-rewrite") ??
+      bare.headers.get("location") ??
+      "";
+    expect(rewrite).toContain("agent-socket");
+    const slashed = proxy(
       new NextRequest("http://localhost/socket.io/?EIO=4&transport=polling"),
     );
-    expect(res.status).not.toBe(413);
+    expect(slashed.status).not.toBe(413);
   });
 
-  test("HTTP proxy forwards Engine.IO handshake to :3003", async () => {
+  test("HTTP proxy forwards Engine.IO handshake to :3003 with trailing slash", async () => {
     const seen: { url: string; method: string }[] = [];
-    const res = await proxyAgentSocketRequest(
-      new Request("http://localhost:3000/socket.io?EIO=4&transport=polling"),
-      async (url, init) => {
-        seen.push({ url: String(url), method: String(init?.method ?? "GET") });
-        return new Response(
-          '0{"sid":"test","upgrades":[],"pingInterval":25000,"pingTimeout":60000}',
-          { status: 200, headers: { "content-type": "text/plain" } },
-        );
-      },
-    );
-    expect(seen).toEqual([
-      {
-        url: "http://127.0.0.1:3003/socket.io?EIO=4&transport=polling",
-        method: "GET",
-      },
-    ]);
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain("sid");
+    const handshake =
+      '0{"sid":"test","upgrades":[],"pingInterval":25000,"pingTimeout":60000}';
+    const mock: typeof fetch = async (url, init) => {
+      seen.push({ url: String(url), method: String(init?.method ?? "GET") });
+      return new Response(handshake, {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
+    };
+    for (const incoming of [
+      "http://localhost:3000/socket.io?EIO=4&transport=polling",
+      "http://localhost:3000/socket.io/?EIO=4&transport=polling",
+      `http://localhost:3000${AGENT_SOCKET_INTERNAL_PATH}?EIO=4&transport=polling`,
+    ]) {
+      seen.length = 0;
+      const res = await proxyAgentSocketRequest(new Request(incoming), mock);
+      expect(seen).toEqual([
+        {
+          url: "http://127.0.0.1:3003/socket.io/?EIO=4&transport=polling",
+          method: "GET",
+        },
+      ]);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain("sid");
+    }
   });
 
   test("proxy 502s when the agent is unreachable, does not hang", async () => {
@@ -111,23 +131,40 @@ describe("agent socket path for Next without Caddy", () => {
   });
 });
 
+async function tryLiveHandshake(
+  url: string,
+  timeoutMs: number,
+): Promise<{ status: number; text: string; ms: number } | null> {
+  const t0 = Date.now();
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    return { status: res.status, text: await res.text(), ms: Date.now() - t0 };
+  } catch {
+    return null;
+  }
+}
+
 describe("live Next /socket.io proxy", () => {
-  test("polling handshake reaches agent when Next already proxies", async () => {
-    let text = "";
-    let status = 0;
-    try {
-      const res = await fetch(
-        "http://127.0.0.1:3000/socket.io/?EIO=4&transport=polling",
-        { signal: AbortSignal.timeout(2500) },
-      );
-      status = res.status;
-      text = await res.text();
-    } catch {
+  test("bare /socket.io and trailing slash both handshake without hanging", async () => {
+    const slash = await tryLiveHandshake(
+      "http://127.0.0.1:3000/socket.io/?EIO=4&transport=polling",
+      2500,
+    );
+    if (!slash || slash.status === 404 || slash.text.includes("<!DOCTYPE")) {
       return;
     }
-    if (status === 404 || text.includes("<!DOCTYPE")) return;
-    expect(status).toBe(200);
-    expect(text.startsWith("0")).toBe(true);
-    expect(text).toContain("sid");
+    expect(slash.status).toBe(200);
+    expect(slash.text.startsWith("0")).toBe(true);
+    expect(slash.text).toContain("sid");
+
+    const bare = await tryLiveHandshake(
+      "http://127.0.0.1:3000/socket.io?EIO=4&transport=polling",
+      2000,
+    );
+    expect(bare).not.toBeNull();
+    expect(bare!.ms).toBeLessThan(2000);
+    expect(bare!.status).toBe(200);
+    expect(bare!.text.startsWith("0")).toBe(true);
+    expect(bare!.text).toContain("sid");
   });
 });

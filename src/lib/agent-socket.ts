@@ -6,12 +6,20 @@
  * `/socket.io` to the mini-service. Path `/` cannot be the engine path — it
  * is the app shell — so the engine path is the standard `/socket.io`.
  *
- * Do not use next.config `rewrites()` to :3003: Turbopack's external rewrite
- * hangs (open socket, no bytes). The App Router route calls this helper.
+ * Do not use next.config `rewrites()`: Turbopack hangs on an external rewrite
+ * to :3003, and an internal `/socket.io` → `/socket.io/` rewrite also hangs
+ * (open socket, zero bytes). Engine.IO itself hangs on bare `/socket.io`
+ * without a trailing slash — always talk to :3003 at `/socket.io/`.
+ *
+ * Bare `/socket.io` is rewritten in `src/proxy.ts` onto `/api/agent-socket`
+ * (not onto `/socket.io/` — that internal rewrite hangs). `/socket.io/`
+ * goes to the App Router route (`maxDuration` for long-polling).
  */
 
 export const AGENT_SERVICE_PORT = 3003;
 export const AGENT_SOCKET_PATH = "/socket.io";
+/** Internal App Router path for bare `/socket.io` (no trailing slash). */
+export const AGENT_SOCKET_INTERNAL_PATH = "/api/agent-socket";
 export const AGENT_CADDY_PORT_QUERY = "XTransformPort";
 export const AGENT_SERVICE_ORIGIN = `http://127.0.0.1:${AGENT_SERVICE_PORT}`;
 
@@ -24,9 +32,13 @@ export function agentSocketProxyDestination(): string {
   return `${AGENT_SERVICE_ORIGIN}${AGENT_SOCKET_PATH}`;
 }
 
+/**
+ * Engine.IO on :3003 only answers `/socket.io/` — bare `/socket.io` hangs
+ * until the client times out. Always canonicalize to the slashed form.
+ */
 export function agentSocketUpstreamUrl(requestUrl: string): string {
   const incoming = new URL(requestUrl);
-  return `${AGENT_SERVICE_ORIGIN}${incoming.pathname}${incoming.search}`;
+  return `${AGENT_SERVICE_ORIGIN}${AGENT_SOCKET_PATH}/${incoming.search}`;
 }
 
 /** True for `/socket.io` and `/socket.io/...` (query/hash ignored). */
@@ -47,7 +59,8 @@ export async function proxyAgentSocketRequest(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   const incoming = new URL(req.url);
-  if (!isAgentSocketPath(incoming.pathname)) {
+  const path = incoming.pathname;
+  if (!isAgentSocketPath(path) && path !== AGENT_SOCKET_INTERNAL_PATH) {
     return new Response(null, { status: 404 });
   }
 
@@ -108,10 +121,11 @@ export function agentSocketIoClientOptions(port = ""): {
 }
 
 /**
- * Next.js 16 `proxy` matcher. `/socket.io` is excluded so Engine.IO polling
- * POSTs are not JSON-capped. The matcher string MUST be a compile-time
- * literal in `src/proxy.ts`.
+ * Next.js 16 `proxy` matcher. Must include `/socket.io` so the bare
+ * (no-slash) handshake is answered here instead of hanging on a rewrite.
+ * The matcher string MUST be a compile-time literal in `src/proxy.ts`.
+ * Engine.IO POSTs are not JSON-capped — `proxy()` returns before the cap.
  */
 export const PROXY_MATCHER = [
-  "/((?!_next/static|_next/image|favicon.ico|socket\\.io).*)",
+  "/((?!_next/static|_next/image|favicon.ico).*)",
 ] as const;

@@ -93,24 +93,35 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   // (io() reuses the same instance for identical url+namespace, so React
   // StrictMode double-invocation is harmless). The auth callback fetches a
   // fresh ws-token on every connect attempt.
-  const [socket] = useState<Socket>(() =>
-    io(agentSocketClientUri(), {
+  const [socket] = useState<Socket>(() => {
+    let firstToken: Promise<string | null> | null =
+      typeof window === "undefined"
+        ? null
+        : api
+            .wsToken()
+            .then((r) => r.token)
+            .catch(() => null);
+    return io(agentSocketClientUri(), {
       ...agentSocketIoClientOptions(
         typeof window === "undefined" ? "" : window.location.port,
       ),
       reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 10000,
+      reconnectionDelay: 200,
+      reconnectionDelayMax: 2000,
+      timeout: 4000,
       autoConnect: false,
       auth: (cb) => {
-        api
-          .wsToken()
-          .then(({ token }) => cb({ token }))
-          .catch(() => cb({}));
+        const pending = firstToken;
+        firstToken = null;
+        void (pending ??
+          api
+            .wsToken()
+            .then((r) => r.token)
+            .catch(() => null)
+        ).then((token) => cb(token ? { token } : {}));
       },
-    }),
-  );
+    });
+  });
 
   const [connected, setConnected] = useState(false);
   const [healthUp, setHealthUp] = useState<boolean | null>(null);
@@ -187,7 +198,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     // Debounced self-heal: at most one POST per 30s per provider lifetime.
     // Boot always POSTs once so the composer is not stuck reconnecting
-    // until the first connect_error.
+    // until the first connect_error. Connect is not gated on the POST —
+    // if the agent is already up the handshake should finish first.
     const healRef = { last: 0 };
     async function healAgentService(force = false) {
       if (disposedRef.current) return;
@@ -199,8 +211,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setHealthUp(result.up);
       if (result.up && !s.connected) s.connect();
     }
-
-    void healAgentService(true);
 
     /* ── Note analysis pipeline (Stage 2) ── */
 
@@ -331,6 +341,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     s.on("project:updated", handleProjectUpdated);
 
     s.connect();
+    void healAgentService(true);
 
     return () => {
       disposedRef.current = true;

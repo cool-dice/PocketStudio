@@ -13,16 +13,10 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // Keep both `/socket.io` and `/socket.io/` as distinct URLs. Bare
+  // `/socket.io` is handled in `src/proxy.ts`; do not rewrite it here —
+  // Turbopack's `/socket.io` → `/socket.io/` rewrite hangs with 0 bytes.
   skipTrailingSlashRedirect: true,
-  async rewrites() {
-    // Internal only — never proxy to :3003 here (Turbopack hangs).
-    // Engine.IO without a trailing slash would miss the App Router route.
-    return {
-      beforeFiles: [
-        { source: "/socket.io", destination: "/socket.io/" },
-      ],
-    };
-  },
   async headers() {
     return [
       { source: "/", headers: securityHeaderList },
