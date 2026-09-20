@@ -901,7 +901,7 @@ export function ProjectScreen({
                 </span>
                 <p className="text-sm font-medium">Выберите файл слева</p>
                 <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
-                  Дерево файлов проекта —{" "}
+                  Дерево файлов —{" "}
                   <span className="md:hidden">кнопка «Файлы» сверху</span>
                   <span className="hidden md:inline">панель слева</span>.
                   Правки сохраняются через ⌘S / Ctrl+S.
@@ -915,7 +915,7 @@ export function ProjectScreen({
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-5xl">
           <DialogHeader>
-            <DialogTitle>Превью проекта</DialogTitle>
+            <DialogTitle>Превью файлов</DialogTitle>
             <DialogDescription>
               {previewHint ?? PREVIEW_HTML_HINT} Кликните
               элемент, чтобы инспектировать.
