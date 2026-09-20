@@ -312,7 +312,7 @@ export function DawStudio({
       <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-6 text-center">
         <CircleAlert className="mx-auto size-6 text-destructive" aria-hidden="true" />
         <p className="mt-2 text-sm font-medium text-destructive">
-          {error ?? "Проект не загружен"}
+          {error ?? DAW_LOAD_ERROR}
         </p>
         <Button
           variant="outline"

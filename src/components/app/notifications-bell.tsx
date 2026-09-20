@@ -43,10 +43,12 @@ import {
   BELL_RETRY,
   bellListView,
 } from "@/lib/notification-copy";
+import { notificationOpensWorkspace } from "@/lib/composer-binding";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
 import type { Notification, NotificationType } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { peekOwnedWorkspace } from "@/hooks/use-workspaces";
 
 const TYPE_META: Record<
   NotificationType,
@@ -78,6 +80,35 @@ const TYPE_META: Record<
     ariaLabel: "Системное",
   },
 };
+
+function openStudioOrCodeProject(
+  id: string,
+  title: string,
+  body: string | null,
+) {
+  const ui = useAppUi.getState();
+  if (peekOwnedWorkspace(id)) {
+    ui.openWorkspace(id);
+    return;
+  }
+  void api.getWorkspace(id).then(
+    () => ui.openWorkspace(id),
+    () => {
+      if (
+        notificationOpensWorkspace({
+          cachedStudio: false,
+          fetchOk: false,
+          title,
+          body,
+        })
+      ) {
+        ui.openWorkspace(id);
+        return;
+      }
+      ui.openProject(id);
+    },
+  );
+}
 
 export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom" }) {
   const { notifications, unread, loaded, loadError } = useNotifications();
@@ -112,7 +143,7 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
           ui.setMainArea("notebook");
         });
     } else if ((n.type === "project_created" || n.type === "checkpoint") && n.entityId) {
-      ui.openProject(n.entityId);
+      openStudioOrCodeProject(n.entityId, n.title, n.body);
     }
     setOpen(false);
   };

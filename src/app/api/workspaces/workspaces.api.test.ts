@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { workspacesListSearch } from "@/lib/workspace-copy";
 
 import { GET as listWorkspaces } from "./route";
-import { PATCH as patchWorkspace } from "./[id]/route";
+import { GET as getWorkspace, PATCH as patchWorkspace } from "./[id]/route";
 
 const SKIP_PG = !(process.env.DATABASE_URL ?? "").startsWith("postgres");
 const stamp = Date.now().toString(36);
@@ -377,5 +377,74 @@ describe.skipIf(SKIP_PG)("workspaces API: pipeline stage PATCH honesty", () => {
     const row = await db.project.findUnique({ where: { id: film.id } });
     expect(row?.stage).toBe("Выпуск");
     expect(row?.stageIndex).toBe(6);
+  });
+});
+
+describe.skipIf(SKIP_PG)("GET /api/workspaces/[id] is studio-only", () => {
+  const ids: string[] = [];
+
+  afterAll(async () => {
+    for (const id of ids.reverse()) {
+      await db.user.delete({ where: { id } }).catch(() => {});
+    }
+  });
+
+  test("Next.js template origin is 404, not a fake /w shell", async () => {
+    const user = await db.user.create({
+      data: {
+        name: "Code vs studio",
+        email: `ws-code-shell-${stamp}@example.test`,
+        passwordHash: await hashPassword("password-ok"),
+        role: "client",
+      },
+    });
+    ids.push(user.id);
+    const token = await signSession({
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    });
+    const code = await db.project.create({
+      data: {
+        userId: user.id,
+        name: "Next App",
+        type: "app",
+        origin: "template",
+      },
+    });
+    const studio = await db.project.create({
+      data: {
+        userId: user.id,
+        name: "Луна",
+        type: "music",
+        origin: "workspace",
+      },
+    });
+    const codeRes = await getWorkspace(
+      jsonRequest(
+        `http://localhost/api/workspaces/${code.id}`,
+        "GET",
+        undefined,
+        token,
+      ),
+      { params: Promise.resolve({ id: code.id }) },
+    );
+    expect(codeRes.status).toBe(404);
+    const studioRes = await getWorkspace(
+      jsonRequest(
+        `http://localhost/api/workspaces/${studio.id}`,
+        "GET",
+        undefined,
+        token,
+      ),
+      { params: Promise.resolve({ id: studio.id }) },
+    );
+    expect(studioRes.status).toBe(200);
+    const studioJson = (await studioRes.json()) as {
+      workspace: { id: string; origin: string };
+    };
+    expect(studioJson.workspace.id).toBe(studio.id);
+    expect(studioJson.workspace.origin).toBe("workspace");
   });
 });

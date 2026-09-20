@@ -24,6 +24,24 @@ export const WORKSPACES_RESTORED = "Воркспейс возвращён";
 export const WORKSPACES_ARCHIVE_FAILED = "Не удалось архивировать воркспейс";
 export const WORKSPACES_UNARCHIVE_FAILED = "Не удалось вернуть воркспейс";
 export const WORKSPACES_FAVORITE_FAILED = "Не удалось обновить избранное";
+export const WORKSPACE_NOT_FOUND =
+  "Воркспейс не найден — возможно, он был удалён.";
+export const WORKSPACE_SHELL_LOAD_ERROR = "Не удалось загрузить воркспейс";
+export const WORKSPACE_SHELL_LOAD_ERROR_HINT =
+  "Проверьте соединение и обновите — это не удалённая студия.";
+
+export type WorkspaceShellView = "loading" | "not-found" | "error" | "ready";
+
+export function workspaceShellView(
+  loading: boolean,
+  hasWorkspace: boolean,
+  status: number | null,
+): WorkspaceShellView {
+  if (hasWorkspace) return "ready";
+  if (loading || status === null) return "loading";
+  if (status === 404) return "not-found";
+  return "error";
+}
 
 export type WorkspacesListView = "loading" | "error" | "empty" | "ready";
 

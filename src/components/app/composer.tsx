@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, FolderGit2, Loader2, Mic, Square } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -43,11 +43,12 @@ import {
   useVoiceRecorder,
   type VoiceClip,
 } from "@/hooks/use-voice-recorder";
+import { BoundThreadChip } from "@/components/app/bound-thread-chip";
 import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { api, ApiError } from "@/lib/api";
-import { boundThreadChip } from "@/lib/composer-binding";
+import { boundChipFromLists } from "@/lib/composer-binding";
 import { CODE_PROJECT_SLASH, WORKSPACE_SLASH_COMMANDS } from "@/lib/slash-catalog";
 import { useAppUi } from "@/lib/store";
 import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
@@ -70,8 +71,6 @@ export function Composer({
     useThreads();
   const { getById } = useProjects();
   const { workspaces } = useWorkspaces();
-  const openProject = useAppUi((s) => s.openProject);
-  const openWorkspace = useAppUi((s) => s.openWorkspace);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const openCreateProject = useAppUi((s) => s.openCreateProject);
@@ -122,20 +121,11 @@ export function Composer({
       ? workspaces.find((w) => w.id === threadProjectId) ?? null
       : null;
   const boundProject = scoped ? getById(threadProjectId) : null;
-  const boundChip = boundWorkspace
-    ? boundThreadChip({
-        name: boundWorkspace.name,
-        origin: "workspace",
-        type: boundWorkspace.type,
-        id: boundWorkspace.id,
-      })
-    : boundProject
-      ? boundThreadChip({
-          name: boundProject.name,
-          origin: boundProject.origin,
-          id: boundProject.id,
-        })
-      : null;
+  const boundChip = boundChipFromLists({
+    id: threadProjectId,
+    workspace: boundWorkspace,
+    project: boundProject,
+  });
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
@@ -436,30 +426,8 @@ export function Composer({
           onExecute={executeCommand}
         />
 
-        {boundChip && threadProjectId && boundChip.kind === "workspace" && boundChip.href ? (
-          <a
-            href={boundChip.href}
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-              e.preventDefault();
-              openWorkspace(threadProjectId);
-            }}
-            aria-label={`${boundChip.label} — открыть`}
-            className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-            <span className="truncate">{boundChip.label}</span>
-          </a>
-        ) : boundChip && threadProjectId ? (
-          <button
-            type="button"
-            onClick={() => openProject(threadProjectId)}
-            aria-label={`${boundChip.label} — открыть`}
-            className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-            <span className="truncate">{boundChip.label}</span>
-          </button>
+        {boundChip && threadProjectId ? (
+          <BoundThreadChip chip={boundChip} id={threadProjectId} className="mb-2" />
         ) : null}
         <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
           <label htmlFor="composer" className="sr-only">

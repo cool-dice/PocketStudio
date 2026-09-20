@@ -22,7 +22,7 @@ export async function GET(req: Request, { params }: Params) {
   const { id } = await params;
 
   const project = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: { id, userId: session.sub, origin: "workspace" },
   });
   if (!project) {
     return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
@@ -63,7 +63,7 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   const existing = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: { id, userId: session.sub, origin: "workspace" },
   });
   if (!existing) {
     return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
@@ -115,7 +115,7 @@ export async function DELETE(req: Request, { params }: Params) {
   const { id } = await params;
 
   const existing = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: { id, userId: session.sub, origin: "workspace" },
     select: { id: true },
   });
   if (!existing) {

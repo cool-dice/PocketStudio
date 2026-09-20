@@ -12,7 +12,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ChevronDown,
-  FolderGit2,
   HelpCircle,
   Map,
   Menu,
@@ -23,6 +22,7 @@ import {
   Zap,
 } from "lucide-react";
 
+import { BoundThreadChip } from "@/components/app/bound-thread-chip";
 import { Composer } from "@/components/app/composer";
 import { MessageBubble } from "@/components/app/message-bubble";
 import { PlanCard } from "@/components/app/plan-card";
@@ -40,8 +40,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
+import { useWorkspaces } from "@/hooks/use-workspaces";
+import { boundChipFromLists } from "@/lib/composer-binding";
 import { formatPrefetchHint } from "@/lib/rag/prefetch";
-import { useAppUi } from "@/lib/store";
 import {
   MODE_DESCRIPTIONS,
   MODE_LABELS,
@@ -75,7 +76,6 @@ export function ChatArea({
 }: ChatAreaProps) {
   const {
     activeThread,
-    activeThreadId,
     messages,
     messagesLoading,
     busy,
@@ -87,9 +87,15 @@ export function ChatArea({
   } = useThreads();
 
   const { getById } = useProjects();
-  const openProject = useAppUi((s) => s.openProject);
-
-  const boundProject = getById(activeThread?.projectId ?? null);
+  const { workspaces } = useWorkspaces();
+  const boundId = activeThread?.projectId ?? null;
+  const boundChip = boundChipFromLists({
+    id: boundId,
+    workspace: boundId
+      ? workspaces.find((w) => w.id === boundId) ?? null
+      : null,
+    project: getById(boundId),
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -167,18 +173,13 @@ export function ChatArea({
             )}
           </div>
         </div>
-        {activeThread?.projectId && boundProject && (
-          <button
-            type="button"
-            onClick={() => openProject(boundProject.id)}
-            title={`Проект «${boundProject.name}»`}
-            aria-label={`Открыть проект «${boundProject.name}»`}
-            className="hidden min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60 sm:flex"
-          >
-            <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-            <span className="max-w-32 truncate">{boundProject.name}</span>
-          </button>
-        )}
+        {boundId && boundChip ? (
+          <BoundThreadChip
+            chip={boundChip}
+            id={boundId}
+            className="hidden max-w-40 shrink-0 sm:inline-flex"
+          />
+        ) : null}
         <Button
             variant="ghost"
             size="icon"

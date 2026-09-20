@@ -7,7 +7,7 @@ import {
 import { notesWhereForScope, workspaceNoteIsOutOfScope } from "./note-scope";
 import { validateWorkspaceCreate } from "./create-typed-workspace";
 import { parseWorkspaceKind } from "./workspace-kind";
-import { boundThreadChip } from "./composer-binding";
+import { boundChipFromLists, boundThreadChip, notificationOpensWorkspace } from "./composer-binding";
 import {
   CODE_PROJECT_SLASH,
   slashOpensWorkspaceType,
@@ -122,6 +122,66 @@ describe("boundThreadChip", () => {
       kind: "project",
       href: null,
     });
+  });
+
+  test("list lookup prefers studio over a code row with the same id", () => {
+    expect(
+      boundChipFromLists({
+        id: "ws-luna",
+        workspace: { id: "ws-luna", name: "Луна", type: "music" },
+        project: { id: "ws-luna", name: "Луна", origin: "template" },
+      }),
+    ).toEqual({
+      label: "Трек: Луна",
+      kind: "workspace",
+      href: "/w/ws-luna",
+    });
+    expect(
+      boundChipFromLists({
+        id: "code-1",
+        workspace: null,
+        project: { id: "code-1", name: "App", origin: "github" },
+      }),
+    ).toEqual({
+      label: "Проект: App",
+      kind: "project",
+      href: null,
+    });
+  });
+});
+
+describe("notificationOpensWorkspace", () => {
+  test("studio cache or GET must not open the code project shell", () => {
+    expect(
+      notificationOpensWorkspace({
+        cachedStudio: true,
+        fetchOk: false,
+        title: "Чекпоинт",
+      }),
+    ).toBe(true);
+    expect(
+      notificationOpensWorkspace({
+        cachedStudio: false,
+        fetchOk: true,
+        title: "Агент создал проект «App»",
+      }),
+    ).toBe(true);
+    expect(
+      notificationOpensWorkspace({
+        cachedStudio: false,
+        fetchOk: false,
+        title: "Агент создал воркспейс «Луна»",
+        body: "Студия создана и привязана к диалогу",
+      }),
+    ).toBe(true);
+    expect(
+      notificationOpensWorkspace({
+        cachedStudio: false,
+        fetchOk: false,
+        title: "Агент создал проект «App»",
+        body: "Проект создан из шаблона и привязан к диалогу",
+      }),
+    ).toBe(false);
   });
 });
 

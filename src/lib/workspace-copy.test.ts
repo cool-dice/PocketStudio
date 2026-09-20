@@ -17,9 +17,13 @@ import {
   WORKSPACES_SHOW_ARCHIVE,
   WORKSPACES_UNARCHIVE_ACTION,
   WORKSPACES_UNARCHIVE_FAILED,
+  WORKSPACE_NOT_FOUND,
+  WORKSPACE_SHELL_LOAD_ERROR,
+  WORKSPACE_SHELL_LOAD_ERROR_HINT,
   gridWorkspacesAfterArchive,
   gridWorkspacesAfterFavorite,
   workspaceArchiveToast,
+  workspaceShellView,
   workspacesEmptyCopy,
   workspacesListQuery,
   workspacesListSearch,
@@ -35,6 +39,17 @@ describe("workspace grid empty vs error copy", () => {
     expect(WORKSPACES_EMPTY_HINT).toMatch(/[А-Яа-яЁё]/);
     expect(WORKSPACES_LOAD_ERROR).toMatch(/[А-Яа-яЁё]/);
     expect(WORKSPACES_RETRY).toMatch(/повторить/i);
+  });
+
+  test("shell load failure is not «удалён»", () => {
+    expect(WORKSPACE_SHELL_LOAD_ERROR).not.toMatch(/был удалён/i);
+    expect(WORKSPACE_NOT_FOUND).toMatch(/не найден/i);
+    expect(WORKSPACE_SHELL_LOAD_ERROR_HINT).toMatch(/не удалён/i);
+    expect(workspaceShellView(true, false, null)).toBe("loading");
+    expect(workspaceShellView(false, true, 0)).toBe("ready");
+    expect(workspaceShellView(false, false, 404)).toBe("not-found");
+    expect(workspaceShellView(false, false, 0)).toBe("error");
+    expect(workspaceShellView(false, false, 500)).toBe("error");
   });
 
   test("failed load is error, not empty; successful [] is empty", () => {

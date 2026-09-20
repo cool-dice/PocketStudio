@@ -17,7 +17,7 @@ export function unauthorized(): NextResponse {
   return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
 }
 
-/** Проверить, что воркспейс принадлежит пользователю. */
+/** Проверить, что origin=workspace принадлежит пользователю (не код Next.js). */
 export async function ensureWorkspace(
   req: Request,
   projectId: string,
@@ -30,7 +30,7 @@ export async function ensureWorkspace(
     return { ok: false, response: unauthorized() };
   }
   const project = await db.project.findFirst({
-    where: { id: projectId, userId: session.sub },
+    where: { id: projectId, userId: session.sub, origin: "workspace" },
     select: { userId: true, type: true },
   });
   if (!project) {

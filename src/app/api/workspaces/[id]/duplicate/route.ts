@@ -18,7 +18,7 @@ export async function POST(req: Request, { params }: Params) {
   }
   const { id } = await params;
   const source = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: { id, userId: session.sub, origin: "workspace" },
   });
   if (!source) {
     return NextResponse.json({ error: "Воркспейс не найден" }, { status: 404 });
