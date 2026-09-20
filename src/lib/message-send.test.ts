@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  COMPOSER_TEXTAREA_MAX_CHARS,
+  MESSAGE_SEND_COUNT_NEAR_BYTES,
   MESSAGE_SEND_EMPTY,
   MESSAGE_SEND_INVALID,
   MESSAGE_SEND_MAX_BYTES,
   MESSAGE_SEND_MAX_PACKET_BYTES,
   MESSAGE_SEND_TOO_LARGE,
+  composerSizeUi,
+  formatComposerByteCount,
   formatMessageSendLimit,
+  isMessageSendTooLargeError,
   isOversizedMessageText,
   messageSendTooLargeMessage,
   parseMessageSend,
@@ -106,5 +111,78 @@ describe("message:send size cap", () => {
     expect(messageSendTooLargeMessage()).toBe(
       "Сообщение слишком длинное (максимум 64 КБ)",
     );
+  });
+});
+
+describe("composer size UI", () => {
+  test("short draft can send, hides the counter, no error", () => {
+    const ui = composerSizeUi("Запиши мысль про маяк");
+    expect(ui.oversized).toBe(false);
+    expect(ui.disableSend).toBe(false);
+    expect(ui.error).toBeNull();
+    expect(ui.showCount).toBe(false);
+    expect(ui.bytes).toBeLessThan(MESSAGE_SEND_COUNT_NEAR_BYTES);
+  });
+
+  test("near the cap shows a Russian count but still allows send", () => {
+    const used = MESSAGE_SEND_MAX_BYTES - MESSAGE_SEND_COUNT_NEAR_BYTES;
+    const ui = composerSizeUi("a".repeat(used));
+    expect(ui.oversized).toBe(false);
+    expect(ui.disableSend).toBe(false);
+    expect(ui.error).toBeNull();
+    expect(ui.showCount).toBe(true);
+    expect(ui.countLabel).toBe(
+      formatComposerByteCount(used, MESSAGE_SEND_MAX_BYTES),
+    );
+    expect(ui.countLabel).toMatch(/КБ/);
+    expect(formatComposerByteCount(MESSAGE_SEND_MAX_BYTES)).toBe("64 / 64 КБ");
+  });
+
+  test("over the cap disables send with the same RU copy as socket error", () => {
+    const over = "a".repeat(MESSAGE_SEND_MAX_BYTES + 1);
+    const parsed = parseMessageSend({ threadId: THREAD, content: over });
+    expect(parsed.ok).toBe(false);
+    const socketMessage = parsed.ok ? "" : parsed.message;
+    const ui = composerSizeUi(over, socketMessage);
+    expect(ui.oversized).toBe(true);
+    expect(ui.disableSend).toBe(true);
+    expect(ui.showCount).toBe(true);
+    expect(ui.error).toBe(messageSendTooLargeMessage());
+    expect(ui.error).toBe(socketMessage);
+    expect(ui.error).toMatch(/[А-Яа-яЁё]/);
+    expect(isMessageSendTooLargeError(socketMessage)).toBe(true);
+  });
+
+  test("empty draft still shows the socket error event copy", () => {
+    const socket = messageSendTooLargeMessage();
+    const ui = composerSizeUi("", socket);
+    expect(ui.oversized).toBe(false);
+    expect(ui.disableSend).toBe(false);
+    expect(ui.error).toBe(socket);
+    expect(isMessageSendTooLargeError(ui.error)).toBe(true);
+  });
+
+  test("other socket errors do not become the oversize field error", () => {
+    const ui = composerSizeUi("привет", "Диалог не найден");
+    expect(ui.error).toBeNull();
+    expect(ui.disableSend).toBe(false);
+    expect(isMessageSendTooLargeError("Диалог не найден")).toBe(false);
+    expect(isMessageSendTooLargeError(null)).toBe(false);
+  });
+
+  test("textarea char cap sits just above 64 KiB so ASCII can trip the error", () => {
+    expect(COMPOSER_TEXTAREA_MAX_CHARS).toBe(MESSAGE_SEND_MAX_BYTES + 1);
+    expect(
+      utf8ByteLength("a".repeat(COMPOSER_TEXTAREA_MAX_CHARS)),
+    ).toBeGreaterThan(MESSAGE_SEND_MAX_BYTES);
+  });
+
+  test("Cyrillic count uses UTF-8 bytes, not JS string length", () => {
+    const over = "я".repeat(MESSAGE_SEND_MAX_BYTES / 2 + 1);
+    const ui = composerSizeUi(over);
+    expect(over.length).toBeLessThan(MESSAGE_SEND_MAX_BYTES);
+    expect(ui.bytes).toBeGreaterThan(MESSAGE_SEND_MAX_BYTES);
+    expect(ui.disableSend).toBe(true);
+    expect(ui.error).toBe(messageSendTooLargeMessage());
   });
 });

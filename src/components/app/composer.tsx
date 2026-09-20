@@ -14,6 +14,9 @@
  * useVoiceRecorder, the backend transcribes (POST /api/notes/voice → { text })
  * and the text is appended to the message input for review before sending.
  * Chat voice does not create a notebook note.
+ *
+ * Oversize: UTF-8 > 64 KiB shows the same Russian `error` copy as the
+ * socket event, disables send, and a byte count appears near the cap.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -45,6 +48,10 @@ import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
+import {
+  COMPOSER_TEXTAREA_MAX_CHARS,
+  composerSizeUi,
+} from "@/lib/message-send";
 
 const MAX_HEIGHT = 200;
 
@@ -56,7 +63,8 @@ export function Composer({
   /** When set, chip/send stay on this workspace — never the previous one. */
   scopeProjectId?: string | null;
 }) {
-  const { busy, sendMessage, abortTurn, activeThread, updateThreadMode } = useThreads();
+  const { busy, sendMessage, abortTurn, activeThread, updateThreadMode, sendError, clearSendError } =
+    useThreads();
   const { getById } = useProjects();
   const openProject = useAppUi((s) => s.openProject);
   const setMainArea = useAppUi((s) => s.setMainArea);
@@ -90,6 +98,11 @@ export function Composer({
     if (!pending || busy || locked || !activeThread) return;
     const have = activeThread.projectId ?? null;
     if (pending.projectId !== have) return;
+    const size = composerSizeUi(pending.text);
+    if (size.disableSend) {
+      pendingAutoSend.current = null;
+      return;
+    }
     pendingAutoSend.current = null;
     setValue("");
     void sendMessage(pending.text);
@@ -313,10 +326,15 @@ export function Composer({
   }, [value]);
 
   const blocked = busy || locked || !scoped;
-  const canSend = !blocked && !isRecording && value.trim().length > 0;
+  const size = composerSizeUi(value, sendError);
+  const canSend =
+    !blocked &&
+    !isRecording &&
+    value.trim().length > 0 &&
+    !size.disableSend;
 
   const submit = async () => {
-    if (!canSend || submittingRef.current) return;
+    if (!canSend || submittingRef.current || size.disableSend) return;
     submittingRef.current = true;
     const text = value;
     setValue("");
@@ -399,9 +417,15 @@ export function Composer({
             ref={taRef}
             rows={1}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              if (sendError) clearSendError();
+              setValue(e.target.value);
+            }}
             onKeyDown={handleKeyDown}
-            aria-describedby="composer-hint"
+            aria-invalid={Boolean(size.error)}
+            aria-describedby={
+              size.showCount ? "composer-hint composer-count" : "composer-hint"
+            }
             placeholder={
               isRecording
                 ? "Слушаем вас…"
@@ -412,7 +436,7 @@ export function Composer({
                     : "Напишите сообщение… или / для команд"
             }
             disabled={blocked || isRecording}
-            maxLength={MAX_MESSAGE_LENGTH}
+            maxLength={COMPOSER_TEXTAREA_MAX_CHARS}
             className="vf-scroll max-h-[200px] min-h-11 min-w-0 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
 
@@ -505,19 +529,42 @@ export function Composer({
           </Button>
           )}
         </div>
-        <p id="composer-hint" className="mt-2 px-1 text-center text-xs text-muted-foreground">
-          {isRecording
-            ? "Идёт запись голоса"
-            : voiceState === "processing"
-              ? "Распознаём голос…"
-              : locked && !busy
-                ? "Подключаем чат воркспейса…"
-                : busy
-                ? "Стоп — прервать ответ агента"
-                : blocked
-                ? "Агент отвечает — подождите немного"
-                : "Enter — отправить · Shift+Enter — новая строка · / — команды"}
-        </p>
+        <div className="mt-2 flex items-start justify-between gap-2 px-1">
+          <p
+            id="composer-hint"
+            className={`min-w-0 flex-1 text-xs ${
+              size.error ? "text-destructive" : "text-muted-foreground"
+            }`}
+            role={size.error ? "alert" : undefined}
+          >
+            {size.error
+              ? size.error
+              : isRecording
+                ? "Идёт запись голоса"
+                : voiceState === "processing"
+                  ? "Распознаём голос…"
+                  : locked && !busy
+                    ? "Подключаем чат воркспейса…"
+                    : busy
+                      ? "Стоп — прервать ответ агента"
+                      : blocked
+                        ? "Агент отвечает — подождите немного"
+                        : "Enter — отправить · Shift+Enter — новая строка · / — команды"}
+          </p>
+          {size.showCount ? (
+            <span
+              id="composer-count"
+              className={`shrink-0 text-[11px] tabular-nums ${
+                size.oversized
+                  ? "text-destructive"
+                  : "text-amber-600 dark:text-amber-400"
+              }`}
+              aria-live="polite"
+            >
+              {size.countLabel}
+            </span>
+          ) : null}
+        </div>
       </form>
     </div>
   );

@@ -40,6 +40,70 @@ export function isOversizedMessageText(
   return utf8ByteLength(text) > limitBytes;
 }
 
+/** Show the composer counter once this much room is left (or already over). */
+export const MESSAGE_SEND_COUNT_NEAR_BYTES = 8 * 1024;
+
+/**
+ * HTML `maxLength` is characters, not UTF-8. Cap paste bombs while still
+ * letting ASCII go one byte over so the RU error can appear.
+ */
+export const COMPOSER_TEXTAREA_MAX_CHARS = MESSAGE_SEND_MAX_BYTES + 1;
+
+/** True for the socket `error` payload `parseMessageSend` emits on oversize. */
+export function isMessageSendTooLargeError(
+  message: string | null | undefined,
+): boolean {
+  return typeof message === "string" && message.includes(MESSAGE_SEND_TOO_LARGE);
+}
+
+export function formatComposerByteCount(
+  usedBytes: number,
+  limitBytes: number = MESSAGE_SEND_MAX_BYTES,
+): string {
+  return `${Math.round(usedBytes / 1024)} / ${formatMessageSendLimit(limitBytes)}`;
+}
+
+export type ComposerSizeUi = {
+  bytes: number;
+  oversized: boolean;
+  showCount: boolean;
+  disableSend: boolean;
+  error: string | null;
+  countLabel: string;
+};
+
+/**
+ * Composer send/count/error from the draft plus optional socket `error`
+ * message. Oversize copy is the same Russian string the server emits.
+ */
+export function composerSizeUi(
+  draft: string,
+  socketError: string | null = null,
+  limitBytes: number = MESSAGE_SEND_MAX_BYTES,
+): ComposerSizeUi {
+  const bytes = utf8ByteLength(draft.trim());
+  const oversized = bytes > limitBytes;
+  const socketOversize = isMessageSendTooLargeError(socketError);
+  const error = oversized
+    ? socketOversize && socketError
+      ? socketError
+      : messageSendTooLargeMessage(limitBytes)
+    : socketOversize
+      ? socketError
+      : null;
+  const remaining = limitBytes - bytes;
+  const showCount =
+    oversized || (bytes > 0 && remaining <= MESSAGE_SEND_COUNT_NEAR_BYTES);
+  return {
+    bytes,
+    oversized,
+    showCount,
+    disableSend: oversized,
+    error,
+    countLabel: formatComposerByteCount(bytes, limitBytes),
+  };
+}
+
 export type MessageSendOk = {
   ok: true;
   threadId: string;

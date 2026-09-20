@@ -22,7 +22,10 @@ import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useThreads } from "@/hooks/use-threads";
-import { MAX_MESSAGE_LENGTH } from "@/lib/types";
+import {
+  COMPOSER_TEXTAREA_MAX_CHARS,
+  composerSizeUi,
+} from "@/lib/message-send";
 import { THREADS_LOAD_ERROR, THREADS_LOAD_ERROR_HINT } from "@/lib/thread-copy";
 import { useAppUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -49,6 +52,8 @@ export function HomeChatWidget() {
     ensureStudioThread,
     threadsLoading,
     threadsError,
+    sendError,
+    clearSendError,
   } = useThreads();
   const setMainArea = useAppUi((s) => s.setMainArea);
 
@@ -70,10 +75,15 @@ export function HomeChatWidget() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, thinking, messagesLoading]);
 
-  const canSend = !busy && !threadsError && value.trim().length > 0;
+  const size = composerSizeUi(value, sendError);
+  const canSend =
+    !busy &&
+    !threadsError &&
+    value.trim().length > 0 &&
+    !size.disableSend;
 
   const submit = async () => {
-    if (!canSend) return;
+    if (!canSend || size.disableSend) return;
     if (threadsError) return;
     const text = value.trim();
     setValue("");
@@ -168,10 +178,19 @@ export function HomeChatWidget() {
             ref={taRef}
             rows={1}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              if (sendError) clearSendError();
+              setValue(e.target.value);
+            }}
             onKeyDown={handleKeyDown}
             disabled={busy || Boolean(threadsError)}
-            maxLength={MAX_MESSAGE_LENGTH}
+            maxLength={COMPOSER_TEXTAREA_MAX_CHARS}
+            aria-invalid={Boolean(size.error)}
+            aria-describedby={
+              size.showCount
+                ? "home-chat-widget-hint home-chat-widget-count"
+                : "home-chat-widget-hint"
+            }
             placeholder={busy ? "Студия печатает…" : "Спросите студию…"}
             className="vf-scroll max-h-24 min-h-9 flex-1 resize-none self-center bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
@@ -186,9 +205,32 @@ export function HomeChatWidget() {
             <ArrowUp className="size-4" aria-hidden="true" />
           </Button>
         </div>
-        <p className="mt-1.5 px-1 text-center text-[10px] text-muted-foreground">
-          Enter — отправить · Shift+Enter — новая строка
-        </p>
+        <div className="mt-1.5 flex items-start justify-between gap-2 px-1">
+          <p
+            id="home-chat-widget-hint"
+            className={`min-w-0 flex-1 text-[10px] ${
+              size.error ? "text-destructive" : "text-muted-foreground"
+            }`}
+            role={size.error ? "alert" : undefined}
+          >
+            {size.error
+              ? size.error
+              : "Enter — отправить · Shift+Enter — новая строка"}
+          </p>
+          {size.showCount ? (
+            <span
+              id="home-chat-widget-count"
+              className={`shrink-0 text-[10px] tabular-nums ${
+                size.oversized
+                  ? "text-destructive"
+                  : "text-amber-600 dark:text-amber-400"
+              }`}
+              aria-live="polite"
+            >
+              {size.countLabel}
+            </span>
+          ) : null}
+        </div>
       </footer>
     </section>
   );

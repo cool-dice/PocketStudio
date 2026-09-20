@@ -7,7 +7,8 @@
  * Flow: optimistic user message → "message:user" replaces it →
  * "agent:thinking" → "message:start" adds an empty assistant bubble →
  * "message:delta"× appends → "message:end" finalizes. "thread:updated"
- * renames in the list (auto-title), "error" → toast + busy-state cleanup.
+ * renames in the list (auto-title). "error" → toast + composer oversize
+ * field; never a success toast on a rejected send. Busy-state cleanup.
  */
 
 import {
@@ -37,6 +38,7 @@ import {
 } from "@/lib/chat-send-guard";
 import {
   isOversizedMessageText,
+  isMessageSendTooLargeError,
   messageSendTooLargeMessage,
 } from "@/lib/message-send";
 import {
@@ -115,6 +117,12 @@ interface ThreadsContextValue {
    */
   ensureStudioThread: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
+  /**
+   * Last socket `error` payload. Composer shows the oversize RU copy
+   * inline; other errors stay toasts. Cleared on send / thread switch.
+   */
+  sendError: string | null;
+  clearSendError: () => void;
   abortTurn: () => void;
   /** Short RAG hint after prefetch (not the chunks themselves). */
   canonHint: {
@@ -201,6 +209,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     hitCount: number;
     mode?: "vector" | "keyword";
   } | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const clearSendError = useCallback(() => setSendError(null), []);
 
   // Refs mirror state so WS handlers and callbacks always see fresh values.
   const socketRef = useRef(socket);
@@ -300,6 +310,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       loadedRef.current = null;
       activeIdRef.current = id;
       setActiveThreadId(id);
+      setSendError(null);
       setMessages([]);
       setTasks([]);
       setPhase(null);
@@ -681,7 +692,9 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       const trimmed = content.trim();
       if (!trimmed) return;
       if (isOversizedMessageText(trimmed)) {
-        toast.error(messageSendTooLargeMessage());
+        const message = messageSendTooLargeMessage();
+        setSendError(message);
+        toast.error(message);
         return;
       }
       if (
@@ -757,6 +770,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       s.emit("thread:join", { threadId });
       setThinkingThreadId(threadId);
       busyRef.current = true;
+      setSendError(null);
       s.emit("message:send", { threadId, content: trimmed });
       sendLockRef.current = false;
     },
@@ -992,7 +1006,10 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     };
 
     const onError = ({ message }: WsErrorPayload) => {
-      toast.error(message);
+      setSendError(message);
+      if (!isMessageSendTooLargeError(message)) {
+        toast.error(message);
+      }
       if (shouldKeepBusyOnSocketError(message)) return;
       abortingRef.current = null;
       setThinkingThreadId(null);
@@ -1116,6 +1133,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       startProjectThread,
       ensureStudioThread,
       sendMessage,
+      sendError,
+      clearSendError,
       abortTurn,
       canonHint,
     }),
@@ -1144,6 +1163,8 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       startProjectThread,
       ensureStudioThread,
       sendMessage,
+      sendError,
+      clearSendError,
       abortTurn,
       canonHint,
     ],
