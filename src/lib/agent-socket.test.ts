@@ -12,20 +12,10 @@ import {
   agentSocketClientUri,
   agentSocketIoClientOptions,
   agentSocketProxyDestination,
-  agentSocketProxyRewrites,
+  agentSocketUpstreamUrl,
   isAgentSocketPath,
+  proxyAgentSocketRequest,
 } from "./agent-socket";
-
-async function rewriteList() {
-  const raw = await nextConfig.rewrites?.();
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  return [
-    ...(raw.beforeFiles ?? []),
-    ...(raw.afterFiles ?? []),
-    ...(raw.fallback ?? []),
-  ];
-}
 
 describe("agent socket path for Next without Caddy", () => {
   test("engine path is /socket.io, not the app shell /", () => {
@@ -37,24 +27,15 @@ describe("agent socket path for Next without Caddy", () => {
     expect(agentSocketClientUri().startsWith("/?")).toBe(true);
   });
 
-  test("rewrites send /socket.io to the agent on :3003", () => {
-    const rules = agentSocketProxyRewrites();
-    expect(rules.some((r) => r.source === AGENT_SOCKET_PATH)).toBe(true);
+  test("upstream URL stays on :3003/socket.io", () => {
+    expect(agentSocketProxyDestination()).toBe(
+      "http://127.0.0.1:3003/socket.io",
+    );
     expect(
-      rules.some((r) => r.source === `${AGENT_SOCKET_PATH}/:path*`),
-    ).toBe(true);
-    const dest = agentSocketProxyDestination();
-    expect(dest).toBe("http://127.0.0.1:3003/socket.io");
-    for (const rule of rules) {
-      expect(rule.destination.startsWith(dest)).toBe(true);
-    }
-  });
-
-  test("next.config beforeFiles includes the agent rewrite", async () => {
-    const rules = await rewriteList();
-    const hit = rules.find((r) => r.source === `${AGENT_SOCKET_PATH}/:path*`);
-    expect(hit).toBeDefined();
-    expect(hit?.destination).toBe("http://127.0.0.1:3003/socket.io/:path*");
+      agentSocketUpstreamUrl(
+        "http://localhost:3000/socket.io?EIO=4&transport=polling",
+      ),
+    ).toBe("http://127.0.0.1:3003/socket.io?EIO=4&transport=polling");
   });
 
   test("isAgentSocketPath does not match the homepage or /api", () => {
@@ -66,14 +47,29 @@ describe("agent socket path for Next without Caddy", () => {
     expect(isAgentSocketPath("/w/abc")).toBe(false);
   });
 
-  test("client options skip the trailing slash Next would 308", () => {
-    const opts = agentSocketIoClientOptions();
-    expect(opts.path).toBe(AGENT_SOCKET_PATH);
-    expect(opts.addTrailingSlash).toBe(false);
-    expect(opts.transports[0]).toBe("polling");
+  test("client options keep Engine.IO trailing slash; Next uses polling only", () => {
+    const nextPort = agentSocketIoClientOptions("");
+    expect(nextPort.path).toBe(AGENT_SOCKET_PATH);
+    expect(nextPort.addTrailingSlash).toBe(true);
+    expect(nextPort.transports).toEqual(["polling"]);
+    expect(nextPort.upgrade).toBe(false);
+    const caddy = agentSocketIoClientOptions("81");
+    expect(caddy.transports[0]).toBe("websocket");
+    expect(caddy.upgrade).toBe(true);
   });
 
-  test("proxy matcher skips socket.io so upgrades are not intercepted", () => {
+  test("next.config only rewrites /socket.io onto the trailing-slash route", async () => {
+    const raw = await nextConfig.rewrites?.();
+    const rules = Array.isArray(raw)
+      ? raw
+      : [...(raw?.beforeFiles ?? []), ...(raw?.afterFiles ?? [])];
+    expect(rules).toEqual([
+      { source: "/socket.io", destination: "/socket.io/" },
+    ]);
+    expect(JSON.stringify(rules)).not.toContain(":3003");
+  });
+
+  test("proxy matcher skips socket.io so polling POSTs are not JSON-capped", () => {
     expect(PROXY_MATCHER.join(" ")).toContain("socket\\.io");
     expect(proxyConfig.matcher).toEqual([...PROXY_MATCHER]);
     const res = proxy(
@@ -81,16 +77,48 @@ describe("agent socket path for Next without Caddy", () => {
     );
     expect(res.status).not.toBe(413);
   });
+
+  test("HTTP proxy forwards Engine.IO handshake to :3003", async () => {
+    const seen: { url: string; method: string }[] = [];
+    const res = await proxyAgentSocketRequest(
+      new Request("http://localhost:3000/socket.io?EIO=4&transport=polling"),
+      async (url, init) => {
+        seen.push({ url: String(url), method: String(init?.method ?? "GET") });
+        return new Response(
+          '0{"sid":"test","upgrades":[],"pingInterval":25000,"pingTimeout":60000}',
+          { status: 200, headers: { "content-type": "text/plain" } },
+        );
+      },
+    );
+    expect(seen).toEqual([
+      {
+        url: "http://127.0.0.1:3003/socket.io?EIO=4&transport=polling",
+        method: "GET",
+      },
+    ]);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("sid");
+  });
+
+  test("proxy 502s when the agent is unreachable, does not hang", async () => {
+    const res = await proxyAgentSocketRequest(
+      new Request("http://localhost:3000/socket.io?EIO=4&transport=polling"),
+      async () => {
+        throw new Error("ECONNREFUSED");
+      },
+    );
+    expect(res.status).toBe(502);
+  });
 });
 
 describe("live Next /socket.io proxy", () => {
-  test("polling handshake reaches agent when Next already rewrites", async () => {
+  test("polling handshake reaches agent when Next already proxies", async () => {
     let text = "";
     let status = 0;
     try {
       const res = await fetch(
         "http://127.0.0.1:3000/socket.io/?EIO=4&transport=polling",
-        { signal: AbortSignal.timeout(1500) },
+        { signal: AbortSignal.timeout(2500) },
       );
       status = res.status;
       text = await res.text();

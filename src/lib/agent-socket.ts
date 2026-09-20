@@ -2,9 +2,12 @@
  * Agent socket.io path and Next↔Caddy routing.
  *
  * Caddy `:81` forwards by `?XTransformPort=3003` and does not care about the
- * Engine.IO path. `bun run dev` on `:3000` has no Caddy, so Next must rewrite
- * `/socket.io` to the mini-service. Path `/` cannot be rewritten — it is the
- * app shell — so the engine path is the standard `/socket.io`.
+ * Engine.IO path. `bun run dev` on `:3000` has no Caddy, so Next must proxy
+ * `/socket.io` to the mini-service. Path `/` cannot be the engine path — it
+ * is the app shell — so the engine path is the standard `/socket.io`.
+ *
+ * Do not use next.config `rewrites()` to :3003: Turbopack's external rewrite
+ * hangs (open socket, no bytes). The App Router route calls this helper.
  */
 
 export const AGENT_SERVICE_PORT = 3003;
@@ -21,28 +24,9 @@ export function agentSocketProxyDestination(): string {
   return `${AGENT_SERVICE_ORIGIN}${AGENT_SOCKET_PATH}`;
 }
 
-export function agentSocketProxyRewrites(): {
-  source: string;
-  destination: string;
-}[] {
-  const dest = agentSocketProxyDestination();
-  return [
-    { source: AGENT_SOCKET_PATH, destination: dest },
-    { source: `${AGENT_SOCKET_PATH}/`, destination: `${dest}/` },
-    {
-      source: `${AGENT_SOCKET_PATH}/:path*`,
-      destination: `${dest}/:path*`,
-    },
-  ];
-}
-
-/** socket.io-client options: no trailing slash so Next does not 308 the handshake. */
-export function agentSocketIoClientOptions() {
-  return {
-    path: AGENT_SOCKET_PATH,
-    addTrailingSlash: false as const,
-    transports: ["polling", "websocket"] as const,
-  };
+export function agentSocketUpstreamUrl(requestUrl: string): string {
+  const incoming = new URL(requestUrl);
+  return `${AGENT_SERVICE_ORIGIN}${incoming.pathname}${incoming.search}`;
 }
 
 /** True for `/socket.io` and `/socket.io/...` (query/hash ignored). */
@@ -58,10 +42,75 @@ export function isAgentSocketPath(pathname: string): boolean {
   );
 }
 
+export async function proxyAgentSocketRequest(
+  req: Request,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  const incoming = new URL(req.url);
+  if (!isAgentSocketPath(incoming.pathname)) {
+    return new Response(null, { status: 404 });
+  }
+
+  const headers = new Headers();
+  const contentType = req.headers.get("content-type");
+  if (contentType) headers.set("content-type", contentType);
+
+  const init: RequestInit = { method: req.method, headers };
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    init.body = await req.arrayBuffer();
+  }
+
+  let res: Response;
+  try {
+    res = await fetchImpl(agentSocketUpstreamUrl(req.url), init);
+  } catch {
+    return new Response(null, { status: 502 });
+  }
+
+  const out = new Headers();
+  for (const name of [
+    "content-type",
+    "cache-control",
+    "access-control-allow-origin",
+  ]) {
+    const value = res.headers.get(name);
+    if (value) out.set(name, value);
+  }
+  if (!out.has("cache-control")) out.set("cache-control", "no-store");
+  return new Response(res.body, { status: res.status, headers: out });
+}
+
+/**
+ * On Caddy :81 use websocket; on Next :3000 stay on HTTP polling (the App
+ * Router proxy cannot upgrade).
+ */
+export function agentSocketIoClientOptions(port = ""): {
+  path: string;
+  addTrailingSlash: true;
+  transports: readonly ["polling"] | readonly ["websocket", "polling"];
+  upgrade: boolean;
+} {
+  const viaCaddy = port === "81";
+  if (viaCaddy) {
+    return {
+      path: AGENT_SOCKET_PATH,
+      addTrailingSlash: true,
+      transports: ["websocket", "polling"],
+      upgrade: true,
+    };
+  }
+  return {
+    path: AGENT_SOCKET_PATH,
+    addTrailingSlash: true,
+    transports: ["polling"],
+    upgrade: false,
+  };
+}
+
 /**
  * Next.js 16 `proxy` matcher. `/socket.io` is excluded so Engine.IO polling
- * POSTs and websocket upgrades are not turned into Next responses.
- * The matcher string MUST be a compile-time literal in `src/proxy.ts`.
+ * POSTs are not JSON-capped. The matcher string MUST be a compile-time
+ * literal in `src/proxy.ts`.
  */
 export const PROXY_MATCHER = [
   "/((?!_next/static|_next/image|favicon.ico|socket\\.io).*)",

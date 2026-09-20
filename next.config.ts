@@ -1,6 +1,5 @@
 import type { NextConfig } from "next";
 
-import { agentSocketProxyRewrites } from "./src/lib/agent-socket";
 import {
   apiNoindexHeaderList,
   apiNoStoreHeaderList,
@@ -16,7 +15,13 @@ const nextConfig: NextConfig = {
   reactStrictMode: false,
   skipTrailingSlashRedirect: true,
   async rewrites() {
-    return { beforeFiles: agentSocketProxyRewrites() };
+    // Internal only — never proxy to :3003 here (Turbopack hangs).
+    // Engine.IO without a trailing slash would miss the App Router route.
+    return {
+      beforeFiles: [
+        { source: "/socket.io", destination: "/socket.io/" },
+      ],
+    };
   },
   async headers() {
     return [

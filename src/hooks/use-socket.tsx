@@ -95,7 +95,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   // fresh ws-token on every connect attempt.
   const [socket] = useState<Socket>(() =>
     io(agentSocketClientUri(), {
-      ...agentSocketIoClientOptions(),
+      ...agentSocketIoClientOptions(
+        typeof window === "undefined" ? "" : window.location.port,
+      ),
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
