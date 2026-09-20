@@ -88,9 +88,12 @@ import {
   isAbortFlag,
   throwIfAborted,
 } from "../../src/lib/abort-flag";
+import {
+  MESSAGE_SEND_MAX_PACKET_BYTES,
+  parseMessageSend,
+} from "../../src/lib/message-send";
 
 const PORT = 3003;
-const MAX_CONTENT_LENGTH = 20000;
 const HISTORY_LIMIT = 30; // last N message rows fed to the LLM (all roles)
 const MAX_TOOL_ITERATIONS = 8; // hard cap on LLM round-trips per turn (file work needs more steps)
 const TURN_TIMEOUT_MS = 120000; // total turn budget
@@ -119,6 +122,7 @@ const io = new Server(httpServer, {
   },
   pingTimeout: 60000,
   pingInterval: 25000,
+  maxHttpBufferSize: MESSAGE_SEND_MAX_PACKET_BYTES,
 });
 
 // ─────────────────────────── helpers ───────────────────────────
@@ -712,7 +716,7 @@ async function runPlanner(
       hasProject: Boolean(thread.projectId),
     });
     const raw = await generateLLMResponse(prompt, [
-      { role: "user", content: content.slice(0, MAX_CONTENT_LENGTH) },
+      { role: "user", content },
     ], { userId, toolId: "agent", signal });
     const steps = parsePlannerSteps(raw);
     if (steps && steps.length >= 2) return steps;
@@ -1363,20 +1367,12 @@ io.on("connection", async (socket: Socket) => {
   // ── message:send {threadId, content} ──
   socket.on("message:send", async (payload: unknown) => {
     try {
-      const { threadId, content } = (payload ?? {}) as { threadId?: unknown; content?: unknown };
-      if (typeof threadId !== "string" || !threadId || typeof content !== "string") {
-        socket.emit("error", { message: "Некорректный запрос" });
+      const parsed = parseMessageSend(payload);
+      if (!parsed.ok) {
+        socket.emit("error", { message: parsed.message });
         return;
       }
-      const text = content.trim();
-      if (!text) {
-        socket.emit("error", { message: "Сообщение не может быть пустым" });
-        return;
-      }
-      if (text.length > MAX_CONTENT_LENGTH) {
-        socket.emit("error", { message: `Сообщение слишком длинное (максимум ${MAX_CONTENT_LENGTH} символов)` });
-        return;
-      }
+      const { threadId, text } = parsed;
 
       const thread = await db.thread.findUnique({ where: { id: threadId } });
       if (!thread || thread.userId !== user.sub) {

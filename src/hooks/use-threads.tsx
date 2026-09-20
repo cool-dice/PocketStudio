@@ -36,6 +36,10 @@ import {
   shouldKeepBusyOnSocketError,
 } from "@/lib/chat-send-guard";
 import {
+  isOversizedMessageText,
+  messageSendTooLargeMessage,
+} from "@/lib/message-send";
+import {
   THREADS_DELETE_FAILED,
   THREADS_LOAD_ERROR,
   THREADS_RENAME_FAILED,
@@ -676,6 +680,10 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     async (content: string) => {
       const trimmed = content.trim();
       if (!trimmed) return;
+      if (isOversizedMessageText(trimmed)) {
+        toast.error(messageSendTooLargeMessage());
+        return;
+      }
       if (
         shouldBlockSend({
           sending: sendLockRef.current,
