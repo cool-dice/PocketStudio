@@ -18,6 +18,7 @@ import type { Note } from "@/lib/types";
 import type {
   WorkspaceSummary,
   WorkspaceTab,
+  WorkspaceType,
 } from "@/lib/workspace-data";
 
 export type MainArea =
@@ -111,6 +112,12 @@ interface AppUiState {
   setCreateProjectOpen: (open: boolean) => void;
   /** Note the dialog is bound to (null → regular create). */
   createProjectNoteId: string | null;
+
+  /** Create-workspace dialog (global, mounted in AppShell). */
+  createWorkspaceOpen: boolean;
+  createWorkspaceInitialType: WorkspaceType | null;
+  openCreateWorkspace: (type?: WorkspaceType) => void;
+  setCreateWorkspaceOpen: (open: boolean) => void;
 
   /** Global search dialog (Ctrl+P / ⌘P, Stage 4). */
   searchOpen: boolean;
@@ -230,6 +237,21 @@ export const useAppUi = create<AppUiState>((set, get) => ({
     } else {
       // Closing always unbinds the note.
       set({ createProjectOpen: false, createProjectNoteId: null });
+    }
+  },
+
+  createWorkspaceOpen: false,
+  createWorkspaceInitialType: null,
+  openCreateWorkspace: (type) =>
+    set({
+      createWorkspaceOpen: true,
+      createWorkspaceInitialType: type ?? null,
+    }),
+  setCreateWorkspaceOpen: (open) => {
+    if (open) {
+      set({ createWorkspaceOpen: true });
+    } else {
+      set({ createWorkspaceOpen: false, createWorkspaceInitialType: null });
     }
   },
 

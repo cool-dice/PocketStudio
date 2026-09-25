@@ -206,7 +206,7 @@ export interface WsNoteAnalyzedPayload {
 
 /* ── Projects, workspace files & git (Stage 3 REST contract) ── */
 
-export type ProjectOrigin = "template" | "github" | "zip";
+export type ProjectOrigin = "template" | "github" | "zip" | "workspace";
 
 export interface ProjectStats {
   filesCount: number;
@@ -255,11 +255,16 @@ export interface CheckpointResult {
   filesChanged: number;
 }
 
-/** Note ↔ project link as returned by GET /api/notes/[id]/links. */
+/** Note ↔ project/studio link as returned by GET /api/notes/[id]/links. */
 export interface NoteProjectLink {
   id: string;
   kind: "reference" | "context" | "proposal";
-  project: { id: string; name: string; origin: ProjectOrigin };
+  project: {
+    id: string;
+    name: string;
+    origin: ProjectOrigin;
+    type: string | null;
+  };
 }
 
 /* ── Project WS events (Stage 3, agent-service → user room) ── */
@@ -434,6 +439,8 @@ export interface SearchThreadHit {
   title: string;
   mode: ThreadMode;
   projectId: string | null;
+  /** Origin of the bound row — studio vs code, so search does not open /w for Next.js. */
+  projectOrigin: ProjectOrigin | null;
   updatedAt: string;
   preview: string | null;
 }

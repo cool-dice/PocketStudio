@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { notebookFeedView, notesListViewState } from "./notes-list-state";
+import {
+  notebookFeedView,
+  noteDetailSurface,
+  notesListViewState,
+} from "./notes-list-state";
 
 describe("notesListViewState", () => {
   test("another workspace's notes are loading, not empty", () => {
@@ -39,5 +43,20 @@ describe("notebookFeedView", () => {
 
   test("notes after a successful load are ready", () => {
     expect(notebookFeedView(false, null, 2)).toBe("ready");
+  });
+});
+
+describe("noteDetailSurface", () => {
+  test("workspace opens a dialog on desktop — context rail is chat/notebook only", () => {
+    expect(noteDetailSurface("workspace", false)).toBe("dialog");
+    expect(noteDetailSurface("documents", false)).toBe("dialog");
+    expect(noteDetailSurface("chat", false)).toBe("context-panel");
+    expect(noteDetailSurface("notebook", false)).toBe("context-panel");
+  });
+
+  test("narrow viewports always use the dialog", () => {
+    expect(noteDetailSurface("chat", true)).toBe("dialog");
+    expect(noteDetailSurface("notebook", true)).toBe("dialog");
+    expect(noteDetailSurface("workspace", true)).toBe("dialog");
   });
 });

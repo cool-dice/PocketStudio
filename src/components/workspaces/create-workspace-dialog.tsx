@@ -8,7 +8,7 @@
  * Содержимое шагов — в create-workspace-steps.tsx.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Loader2, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -38,23 +38,30 @@ const STEPS = [
   { id: 3, label: "Готово" },
 ] as const;
 
-export function CreateWorkspaceDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
+export function CreateWorkspaceDialog() {
+  const open = useAppUi((s) => s.createWorkspaceOpen);
+  const initialType = useAppUi((s) => s.createWorkspaceInitialType);
+  const setCreateWorkspaceOpen = useAppUi((s) => s.setCreateWorkspaceOpen);
   const [step, setStep] = useState(1);
   const [type, setType] = useState<WorkspaceType | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
 
-  /**
-   * Любое закрытие (крестик, Escape, «Создать») возвращает мастер
-   * к первому шагу — каждый запуск начинается с чистого листа.
-   */
+  useEffect(() => {
+    if (!open) return;
+    setName("");
+    setDescription("");
+    setCreating(false);
+    if (initialType) {
+      setType(initialType);
+      setStep(2);
+    } else {
+      setType(null);
+      setStep(1);
+    }
+  }, [open, initialType]);
+
   function handleOpenChange(next: boolean) {
     if (!next) {
       setStep(1);
@@ -62,7 +69,7 @@ export function CreateWorkspaceDialog({
       setName("");
       setDescription("");
     }
-    onOpenChange(next);
+    setCreateWorkspaceOpen(next);
   }
 
   const trimmedName = name.trim();

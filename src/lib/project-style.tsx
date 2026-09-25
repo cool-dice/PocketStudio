@@ -10,6 +10,7 @@
 import {
   FileArchive,
   Folder,
+  FolderKanban,
   Github,
   LayoutTemplate,
   type LucideIcon,
@@ -45,6 +46,12 @@ export const ORIGIN_META: Record<ProjectOrigin, OriginMeta> = {
     chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
     iconClass: "text-amber-600 dark:text-amber-400",
   },
+  workspace: {
+    label: "Воркспейс",
+    icon: FolderKanban,
+    chip: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+    iconClass: "text-sky-600 dark:text-sky-400",
+  },
 };
 
 /** Origin chip: icon + label, tinted per origin. */
@@ -55,7 +62,7 @@ export function OriginBadge({
   origin: ProjectOrigin;
   className?: string;
 }) {
-  const meta = ORIGIN_META[origin] ?? ORIGIN_META.template;
+  const meta = ORIGIN_META[origin] ?? ORIGIN_META.workspace;
   const Icon = meta.icon;
   return (
     <span

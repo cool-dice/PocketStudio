@@ -9,16 +9,7 @@ import { useEffect, useState } from "react";
 import { ArrowUpRight, NotebookPen, Plus, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
-import { NoteTranscriptionBlock } from "@/components/app/note-transcription";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { invalidateWorkspaces } from "@/hooks/use-workspaces";
@@ -35,6 +26,7 @@ import { timeAgo } from "@/components/workspaces/home-data";
 export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
   const setMainArea = useAppUi((s) => s.setMainArea);
   const bumpNotes = useAppUi((s) => s.bumpNotes);
+  const openNote = useAppUi((s) => s.openNote);
   const notesVersion = useAppUi((s) => s.notesVersion);
 
   const [notes, setNotes] = useState<Note[]>([]);
@@ -43,7 +35,6 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
-  const [openNote, setOpenNote] = useState<Note | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
 
   const currentStage =
@@ -83,10 +74,6 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
     };
   }, [workspace.id, notesVersion, reloadTick]);
 
-  useEffect(() => {
-    setOpenNote(null);
-  }, [workspace.id]);
-
   async function addNote() {
     const text = draft.trim();
     if (!text || saving) return;
@@ -103,6 +90,7 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
       toast.success("Мысль записана", {
         description: `Привязана к воркспейсу · стадия «${currentStage}»`,
       });
+      openNote(note);
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : "Не удалось записать заметку",
@@ -204,7 +192,7 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
                 <button
                   key={note.id}
                   type="button"
-                  onClick={() => setOpenNote(note)}
+                  onClick={() => openNote(note)}
                   className="flex w-full flex-col rounded-xl border bg-card p-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring/60"
                 >
                   <span className="line-clamp-2 text-sm font-medium">
@@ -235,38 +223,6 @@ export function NotesTab({ workspace }: { workspace: WorkspaceSummary }) {
           )}
         </div>
       </div>
-
-      <Dialog
-        open={openNote !== null}
-        onOpenChange={(open) => {
-          if (!open) setOpenNote(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="pr-8 leading-snug">Заметка воркспейса</DialogTitle>
-            <DialogDescription>
-              {openNote ? timeAgo(openNote.createdAt) : ""}
-            </DialogDescription>
-          </DialogHeader>
-          <div>
-            <div className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed">
-              {openNote?.rawText || "Пусто"}
-            </div>
-            {openNote ? (
-              <NoteTranscriptionBlock
-                rawText={openNote.rawText}
-                transcription={openNote.transcription}
-              />
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpenNote(null)}>
-              Закрыть
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

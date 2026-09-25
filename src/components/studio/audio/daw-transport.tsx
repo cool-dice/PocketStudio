@@ -103,7 +103,7 @@ export function DawTransport({
           size="sm"
           className="ml-auto shrink-0"
           onClick={onExport}
-          disabled={exporting || !canExport}
+          disabled={exporting}
           title={canExport ? undefined : "Нет ударов, нот и клипов — экспортировать нечего"}
         >
           {exporting ? (

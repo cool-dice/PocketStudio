@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { defaultDawState, normalizeDawState, type DawProjectDto } from "@/lib/daw-model";
+import { dawCreateData, emptyDawState } from "@/lib/daw-empty";
+import { normalizeDawState, type DawProjectDto } from "@/lib/daw-model";
 import { ensureWorkspace } from "@/lib/workspace-api";
 import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
 
@@ -41,7 +42,7 @@ function rowToDto(row: DawRow): DawProjectDto {
   return {
     id: row.id,
     projectId: row.projectId,
-    ...(state ?? defaultDawState()),
+    ...(state ?? emptyDawState()),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -58,17 +59,8 @@ export async function GET(req: Request, { params }: Params) {
     return NextResponse.json({ project: rowToDto(existing) });
   }
 
-  const seed = defaultDawState();
   const created = await db.dawProject.create({
-    data: {
-      projectId: id,
-      bpm: seed.bpm,
-      bars: seed.bars,
-      masterVolume: seed.masterVolume,
-      transpose: seed.transpose,
-      metronome: seed.metronome,
-      tracks: JSON.stringify(seed.tracks),
-    },
+    data: dawCreateData(id),
   });
   return NextResponse.json({ project: rowToDto(created) });
 }

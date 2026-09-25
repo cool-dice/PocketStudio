@@ -24,6 +24,12 @@ export const THREADS_ARCHIVED = "Диалог в архиве";
 export const THREADS_RESTORED = "Диалог возвращён";
 export const THREADS_ARCHIVE_FAILED = "Не удалось архивировать диалог";
 export const THREADS_UNARCHIVE_FAILED = "Не удалось вернуть диалог";
+/** WS/REST lookup miss — toast only on chat surfaces, never on film/video. */
+export const THREAD_NOT_FOUND = "Диалог не найден";
+export const THREAD_LOAD_FAILED = "Не удалось загрузить диалог";
+/** Send is refused; sidebar hides archived by default, so do not unarchive. */
+export const THREAD_ARCHIVED_SEND =
+  "Диалог в архиве — верните его, чтобы писать";
 
 export type ThreadsListView = "loading" | "error" | "empty" | "ready";
 
@@ -161,4 +167,89 @@ export function resolveSendThreadId(
   if (deleted.has(activeId)) return null;
   if (!knownIds.includes(activeId)) return null;
   return activeId;
+}
+
+export function isThreadLookupError(message: string): boolean {
+  return message === THREAD_NOT_FOUND || message === THREAD_LOAD_FAILED;
+}
+
+/**
+ * Composer/chat surfaces may toast a missing thread. Film/video and other
+ * workspace modules are fine without a global orchestrator bind.
+ */
+export function isThreadComposerSurface(surface: {
+  mainArea: string;
+  workspaceTab?: string | null;
+}): boolean {
+  if (surface.mainArea === "chat" || surface.mainArea === "home") return true;
+  return surface.mainArea === "workspace" && surface.workspaceTab === "chat";
+}
+
+export function shouldToastThreadLookupError(
+  message: string,
+  surface: { mainArea: string; workspaceTab?: string | null },
+): boolean {
+  if (!isThreadLookupError(message)) return true;
+  return isThreadComposerSurface(surface);
+}
+
+export type WorkspaceThreadBindAction =
+  | { action: "noop" }
+  | { action: "select"; threadId: string }
+  | { action: "create" };
+
+/** Bind the live workspace thread, never an archived row or a foreign id. */
+export function workspaceThreadBindAction(
+  workspaceId: string,
+  activeProjectId: string | null | undefined,
+  threads: readonly {
+    id: string;
+    projectId: string | null;
+    archived?: boolean;
+  }[],
+): WorkspaceThreadBindAction {
+  if (activeProjectId === workspaceId) return { action: "noop" };
+  const existing = threads.find(
+    (t) => t.projectId === workspaceId && t.archived !== true,
+  );
+  if (existing) return { action: "select", threadId: existing.id };
+  return { action: "create" };
+}
+
+export type ComposerSendGuard =
+  | { ok: true; threadId: string | null }
+  | { ok: false; message: string };
+
+/**
+ * Archived threads stay readable; send is refused (no hang, no silent
+ * unarchive). Unknown/deleted ids still mean «create a new thread».
+ */
+export function composerSendGuard(opts: {
+  activeId: string | null;
+  knownIds: readonly string[];
+  deletedIds: Iterable<string>;
+  archived: boolean;
+}): ComposerSendGuard {
+  if (opts.activeId && opts.archived) {
+    return { ok: false, message: THREAD_ARCHIVED_SEND };
+  }
+  return {
+    ok: true,
+    threadId: resolveSendThreadId(
+      opts.activeId,
+      opts.knownIds,
+      opts.deletedIds,
+    ),
+  };
+}
+
+/** Ownership for join/send/abort; send may also refuse archived. */
+export function threadLookupError(
+  thread: { userId: string; archived?: boolean } | null,
+  userId: string,
+  opts?: { rejectArchived?: boolean },
+): string | null {
+  if (!thread || thread.userId !== userId) return THREAD_NOT_FOUND;
+  if (opts?.rejectArchived && thread.archived) return THREAD_ARCHIVED_SEND;
+  return null;
 }

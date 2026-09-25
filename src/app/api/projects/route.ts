@@ -15,6 +15,7 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { oversizedJsonResponse, readJsonBody } from "@/lib/json-body-limit";
+import { CODE_PROJECT_ORIGINS } from "@/lib/code-project-origins";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +73,7 @@ export async function GET(req: Request) {
   }
 
   const projects = await db.project.findMany({
-    where: { userId: session.sub },
+    where: { userId: session.sub, origin: { in: [...CODE_PROJECT_ORIGINS] } },
     orderBy: { updatedAt: "desc" },
     include: { _count: { select: { threads: true, noteLinks: true } } },
   });

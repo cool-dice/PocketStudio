@@ -151,9 +151,15 @@ function isFullSection(s: Partial<SectionRow>): s is SectionRow {
 }
 
 export function documentDto(d: DocumentRow): DocumentDto {
-  const sections = d.sections?.filter(isFullSection).map(sectionDto);
+  const fullSections = d.sections?.filter(isFullSection).map(sectionDto) ?? [];
   const words =
     d.sections?.reduce((acc, s) => acc + wordsCount(s.content), 0) ?? null;
+  /* List GET may include content-only rows (for word count). Those fail
+     isFullSection, so [] must not wipe sectionsCount to a fake empty. */
+  const sectionsCount =
+    fullSections.length > 0
+      ? fullSections.length
+      : (d._count?.sections ?? d.sections?.length ?? 0);
   return {
     id: d.id,
     projectId: d.projectId,
@@ -162,10 +168,10 @@ export function documentDto(d: DocumentRow): DocumentDto {
     kind: (["manuscript", "spec", "article", "script"].includes(d.kind)
       ? d.kind
       : "manuscript") as DocumentDto["kind"],
-    wordsCount: words ?? d._count?.sections ?? 0,
+    wordsCount: words ?? 0,
     updatedAt: d.updatedAt.toISOString(),
-    sections,
-    sectionsCount: sections?.length ?? d._count?.sections ?? 0,
+    sections: fullSections.length > 0 ? fullSections : undefined,
+    sectionsCount,
   };
 }
 

@@ -33,7 +33,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModuleHeader, type ModuleScreenProps } from "@/components/studio/shared/module-header";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
 import {
   readLastWorkspaceDoc,
@@ -83,6 +83,7 @@ export function DocumentsScreen({
     [isEmbedded, embedded.documents, globalShelves.shelves],
   );
   const loading = isEmbedded ? embedded.loading : globalShelves.loading;
+  const loadError = isEmbedded ? embedded.loadError : globalShelves.loadError;
   const shelves = isEmbedded ? null : globalShelves.shelves;
 
   // Активный документ — производное значение: пока не выбрали (или
@@ -196,17 +197,22 @@ export function DocumentsScreen({
   async function handleCreateDoc(title: string, kind: DocumentKind) {
     if (!dataWorkspaceId) return;
     try {
-      const created = await api.createDocument(dataWorkspaceId, { title, kind });
-      if (isEmbedded) embedded.patchLocal(created.id, created);
-      else if (dataWorkspace) globalShelves.addDocument(dataWorkspace, created);
+      const created = isEmbedded
+        ? await embedded.create({ title, kind })
+        : await api.createDocument(dataWorkspaceId, { title, kind });
+      if (!isEmbedded && dataWorkspace) {
+        globalShelves.addDocument(dataWorkspace, created);
+      }
       setActiveDocId(created.id);
       setCreateOpen(false);
       setTab("manuscript");
       toast.success("Документ создан", {
         description: `«${created.title}» — первая глава уже внутри.`,
       });
-    } catch {
-      toast.error("Не удалось создать документ");
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось создать документ",
+      );
     }
   }
 
@@ -292,6 +298,15 @@ export function DocumentsScreen({
             onRemoveDoc={handleRemoveDoc}
             onRenameDoc={handleRenameDoc}
             onCreateDoc={() => setCreateOpen(true)}
+            loadError={loadError}
+            onRetryLoad={() => {
+              if (isEmbedded) {
+                /* useDocuments reloads with workspaceVersion / next fetch */
+                useAppUi.getState().bumpWorkspace();
+              } else {
+                void globalShelves.refresh();
+              }
+            }}
             saveSection={saveSection}
             createSection={createSection}
             deleteSection={deleteSection}

@@ -3,9 +3,9 @@
 /**
  * WorkspaceChatTab — вкладка «Чат» воркспейса (PS-3-d → Фаза A, PS-5-d).
  *
- * ЖИВОЙ оркестратор: на общем ThreadsProvider находим свежий тред этого
- * воркспейса (Thread.projectId === workspace.id) или создаём новый —
- * агент-сервис резолвит projectId из строки треда, поэтому инструменты
+ * ЖИВОЙ оркестратор: оболочка воркспейса молча биндит тред
+ * (Thread.projectId === workspace.id) на любой вкладке, в том числе Видео.
+ * Агент-сервис резолвит projectId из строки треда, поэтому инструменты
  * (create_entity / check_document / generate_image / tts_narration)
  * работают в скоупе ЭТОГО воркспейса. Тот же тред виден в сайдбаре и
  * виджете на Главной — единая беседа продукта.
@@ -15,7 +15,6 @@
  * + Composer (slash-команды, голосовой ввод).
  */
 
-import { useEffect, useRef } from "react";
 import { MessageSquare, Sparkles } from "lucide-react";
 
 import { Composer } from "@/components/app/composer";
@@ -60,7 +59,7 @@ const STARTER_PROMPTS: Record<WorkspaceSummary["type"], string[]> = {
   ],
   music: [
     "С чего начнём работу над музыкой?",
-    "Собери текст трека",
+    "Запиши текст трека в заметки",
     "Озвучь текст песни",
     "Сгенерируй обложку трека",
   ],
@@ -128,9 +127,6 @@ export function WorkspaceChatTab({
   const moduleTabs = moduleTabsOf(workspace);
 
   const {
-    threads,
-    threadsLoading,
-    threadsError,
     activeThread,
     messages,
     messagesLoading,
@@ -138,38 +134,9 @@ export function WorkspaceChatTab({
     thinking,
     phase,
     tasks,
-    selectThread,
-    startProjectThread,
     sendMessage,
     canonHint,
   } = useThreads();
-
-  /* Не плодим треды, если предыдущий start ещё в полёте. */
-  const bindingRef = useRef(false);
-
-  useEffect(() => {
-    if (threadsLoading || threadsError || bindingRef.current) return;
-    if (activeThread?.projectId === workspace.id) return;
-
-    const existing = threads.find((t) => t.projectId === workspace.id);
-    if (existing) {
-      void selectThread(existing.id);
-      return;
-    }
-    bindingRef.current = true;
-    void startProjectThread(workspace.id, `Чат · ${workspace.title}`).finally(() => {
-      bindingRef.current = false;
-    });
-  }, [
-    threads,
-    threadsLoading,
-    threadsError,
-    activeThread?.projectId,
-    workspace.id,
-    workspace.title,
-    selectThread,
-    startProjectThread,
-  ]);
 
   const starters = STARTER_PROMPTS[workspace.type];
   const isScoped = activeThread?.projectId === workspace.id;

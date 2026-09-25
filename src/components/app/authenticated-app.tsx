@@ -1,5 +1,7 @@
 "use client";
 
+import { Suspense } from "react";
+
 import { SocketProvider } from "@/hooks/use-socket";
 import { ThreadsProvider } from "@/hooks/use-threads";
 import { useAuth } from "@/hooks/use-auth";
@@ -18,7 +20,9 @@ export function AuthenticatedApp({
   return (
     <SocketProvider key={user.id}>
       <ThreadsProvider>
-        <UrlSync initialWorkspaceId={workspaceId} />
+        <Suspense fallback={null}>
+          <UrlSync initialWorkspaceId={workspaceId} />
+        </Suspense>
         <OnboardingTour />
         <DueRemindersWatcher />
         <AppShell />

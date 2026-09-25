@@ -17,7 +17,7 @@ export const SEARCH_PER_GROUP = 5;
 export const SEARCH_SNIPPET_RADIUS = 40;
 
 /** Workspace types that expose the documents module (see WORKSPACE_TABS_BY_TYPE). */
-const DOCUMENTS_TAB_TYPES = new Set(["book", "film", "universal"]);
+const DOCUMENTS_TAB_TYPES = new Set(["book", "film", "music", "universal"]);
 /** Workspace types that expose the images module. */
 const IMAGES_TAB_TYPES = new Set(["film", "universal"]);
 const IMAGE_ARTIFACT_KINDS = new Set(["image", "illustration", "concept"]);
@@ -51,6 +51,11 @@ export function searchSnippet(
   return searchExcerpt(text, needle, SEARCH_SNIPPET_RADIUS);
 }
 
+/** Code-app hits must not open the studio shell `/w/{id}`. */
+export function searchHitIsStudio(origin?: string | null): boolean {
+  return origin === "workspace";
+}
+
 export function emptySearchResults(): SearchResults {
   return {
     threads: [],
@@ -78,7 +83,7 @@ export function documentSearchHref(projectId: string, docId: string): string {
   return `/w/${projectId}?tab=documents&doc=${docId}`;
 }
 
-/** Documents module holds entities; music/app have no such tab → workspace + query. */
+/** Documents module holds entities; app has no such tab → workspace + query. */
 export function entitySearchHref(
   projectId: string,
   name: string,

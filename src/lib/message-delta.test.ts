@@ -7,6 +7,7 @@ import {
   applyMessageDelta,
   applyMessageEnd,
   applyMessageStart,
+  dropFailedOptimisticSend,
   mergeTranscriptOnReconnect,
 } from "./message-delta";
 import type { ChatMessage } from "./types";
@@ -190,5 +191,31 @@ describe("applyMessageDelta", () => {
     expect(rows[1]?.content).toMatch(/Администратор ещё не настроил/);
     expect(rows[1]?.streaming).toBe(false);
     expect(rows[1]?.content).not.toMatch(/готово|успешно|я обработал запрос/i);
+  });
+});
+
+describe("dropFailedOptimisticSend", () => {
+  test("rejected send drops the pending user bubble so it cannot hang", () => {
+    const rows = [
+      msg({ id: "m1", role: "user", content: "старое" }),
+      msg({
+        id: "temp-1",
+        role: "user",
+        content: "новое",
+        pending: true,
+      }),
+    ];
+    const next = dropFailedOptimisticSend(rows);
+    expect(next).toHaveLength(1);
+    expect(next[0]?.id).toBe("m1");
+    expect(next.some((m) => m.pending)).toBe(false);
+  });
+
+  test("confirmed rows are kept even if a later tool is pending", () => {
+    const rows = [
+      msg({ id: "u1", role: "user", content: "hi", pending: false }),
+      msg({ id: "tool-1", role: "tool", content: "", toolPending: true }),
+    ];
+    expect(dropFailedOptimisticSend(rows)).toEqual(rows);
   });
 });

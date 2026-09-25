@@ -1,12 +1,8 @@
 "use client";
 
 /**
- * DockerfileCard (Фаза D) — генератор Dockerfile для воркспейса с кодом.
- *
- * Кнопка «Сгенерировать» → POST /api/workspaces/[id]/dockerfile
- * (анализ package.json/файлов → Dockerfile + .dockerignore на диск).
- * «Собрать образ» вызывает docker build; если демона нет — честный
- * статус unavailable и команда для локальной машины.
+ * Dockerfile generator + local docker build. Surface is workspace (app
+ * studio) or project (template/github/zip). Never a hosted publish.
  */
 
 import { useCallback, useState } from "react";
@@ -21,27 +17,37 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type DeploySurface } from "@/lib/api";
 import {
   DOCKER_BUILD_LOCAL_ONLY,
   DOCKERFILE_NOT_PUBLISHED,
+  DOCKERFILE_NOT_PUBLISHED_CODE,
   EMPTY_APP_BUILD_ERROR,
 } from "@/lib/docker-copy";
-import type { WorkspaceDto } from "@/lib/workspace-types";
 
-export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
+export function DockerfileCard({
+  targetId,
+  surface,
+}: {
+  targetId: string;
+  surface: DeploySurface;
+}) {
   const [kind, setKind] = useState<string | null>(null);
   const [dockerfile, setDockerfile] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [building, setBuilding] = useState(false);
   const [buildLog, setBuildLog] = useState<string | null>(null);
   const [buildStatus, setBuildStatus] = useState<string | null>(null);
+  const hint =
+    surface === "project"
+      ? DOCKERFILE_NOT_PUBLISHED_CODE
+      : DOCKERFILE_NOT_PUBLISHED;
 
   const generate = useCallback(
     async (overwrite = false) => {
       setBusy(true);
       try {
-        const res = await api.generateDockerfile(workspace.id, overwrite);
+        const res = await api.generateDockerfile(targetId, overwrite, surface);
         setKind(res.kind);
         setDockerfile(res.dockerfile);
         setBuildStatus(res.empty ? "empty" : "ready_zip");
@@ -51,21 +57,20 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
           });
         } else {
           toast.success(`Dockerfile готов — профиль: ${res.kind}`, {
-            description: res.hint || DOCKERFILE_NOT_PUBLISHED,
+            description: res.hint || hint,
           });
         }
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
-          // Уже есть — перегенерируем поверх по подтверждению.
           try {
-            const res = await api.generateDockerfile(workspace.id, true);
+            const res = await api.generateDockerfile(targetId, true, surface);
             setKind(res.kind);
             setDockerfile(res.dockerfile);
             setBuildStatus(res.empty ? "empty" : "ready_zip");
             toast.success(`Dockerfile перезаписан — профиль: ${res.kind}`, {
               description: res.empty
                 ? EMPTY_APP_BUILD_ERROR
-                : res.hint || DOCKERFILE_NOT_PUBLISHED,
+                : res.hint || hint,
             });
             return;
           } catch (retry) {
@@ -86,14 +91,14 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
         setBusy(false);
       }
     },
-    [workspace.id],
+    [targetId, surface, hint],
   );
 
   async function buildImage() {
     setBuilding(true);
     setBuildLog(null);
     try {
-      const res = await api.dockerBuild(workspace.id);
+      const res = await api.dockerBuild(targetId, surface);
       setBuildStatus(res.status);
       setBuildLog(res.log);
       if (res.status === "built" && !res.published) {
@@ -102,7 +107,8 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
         });
       } else if (res.status === "unavailable") {
         toast.message("Docker недоступен", {
-          description: "Команда для локальной сборки в логе. Образ не опубликован.",
+          description:
+            "Команда для локальной сборки в логе. Образ не опубликован.",
         });
       } else if (res.status === "empty") {
         toast.message("Нечего собирать", { description: EMPTY_APP_BUILD_ERROR });
@@ -126,7 +132,7 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
 
   return (
     <section
-      aria-label="Dockerfile воркспейса"
+      aria-label="Dockerfile"
       className="rounded-xl border bg-card p-4 shadow-sm sm:p-6"
     >
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
@@ -139,8 +145,9 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
             Dockerfile
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Генератор пишет Dockerfile в корень проекта. Это не публикация
-            образа и не «собрано».
+            {surface === "project"
+              ? "Пишем Dockerfile в корень код-проекта. Это не хост и не «опубликовано»."
+              : "Пишем Dockerfile в корень приложения. Это не публикация образа."}
           </p>
         </div>
         <Button
@@ -170,7 +177,7 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
             </span>
             <span className="inline-flex items-center gap-1">
               <FileCode2 className="size-3.5" aria-hidden="true" />
-              {DOCKERFILE_NOT_PUBLISHED}
+              {hint}
             </span>
             {buildStatus ? (
               <span className="rounded-full border px-2 py-0.5 font-mono">
@@ -182,21 +189,19 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
             <code>{dockerfile}</code>
           </pre>
           <p className="mt-2.5 text-xs text-muted-foreground">
-            Нажмите «Собрать образ»: если docker есть — выполним build, иначе
-            покажем точную команду для локальной машины.
+            «Собрать образ» — локальный docker build. Без демона покажем команду.
+            URL хоста не появится.
           </p>
-          {dockerfile ? (
-            <Button
-              className="mt-3"
-              variant="outline"
-              size="sm"
-              disabled={building}
-              onClick={() => void buildImage()}
-            >
-              {building ? <Loader2 className="size-4 animate-spin" /> : null}
-              Собрать образ
-            </Button>
-          ) : null}
+          <Button
+            className="mt-3"
+            variant="outline"
+            size="sm"
+            disabled={building}
+            onClick={() => void buildImage()}
+          >
+            {building ? <Loader2 className="size-4 animate-spin" /> : null}
+            Собрать образ
+          </Button>
           {buildLog ? (
             <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-stone-950 p-3 font-mono text-[11px] text-stone-300">
               {buildStatus}: {buildLog}
@@ -205,8 +210,7 @@ export function DockerfileCard({ workspace }: { workspace: WorkspaceDto }) {
         </div>
       ) : (
         <p className="mt-3 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-          Поддерживаемые профили: Next.js, Vite, Node.js, Python и статика —
-          выберется автоматически по файлам воркспейса.
+          Профили: Next.js, Vite, Node.js, Python и статика — по файлам на диске.
         </p>
       )}
     </section>

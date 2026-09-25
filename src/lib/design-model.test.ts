@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   emptyLayout,
   emptyRaster,
+  designPreviewUrl,
   parseDesignPayload,
   tryParseDesignPayload,
 } from "./design-model";
@@ -33,6 +34,14 @@ describe("design payload", () => {
     const parsed = tryParseDesignPayload(seed);
     expect(parsed?.kind).toBe("raster");
     expect(parsed && parsed.kind === "raster" && parsed.layers[0]?.dataUrl).toBe("");
+  });
+
+  test("preview URL is omitted when the PNG data-URL is over the cap", () => {
+    expect(designPreviewUrl("")).toBeNull();
+    expect(designPreviewUrl("data:image/png;base64,abc")).toBe(
+      "data:image/png;base64,abc",
+    );
+    expect(designPreviewUrl(`data:image/png;base64,${"x".repeat(1_800_001)}`)).toBeNull();
   });
 
   test("empty layers array is still a valid empty canvas", () => {

@@ -14,12 +14,11 @@
  *   re-run action next to the section title for processed notes.
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import {
   AlertTriangle,
   Compass,
-  FolderGit2,
   ListChecks,
   Loader2,
   MessageCircle,
@@ -29,7 +28,6 @@ import {
   Star,
   ThumbsUp,
   Trash2,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -45,7 +43,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { LinkedTargets } from "@/components/app/linked-targets";
 import { NoteTranscriptionBlock } from "@/components/app/note-transcription";
 import { useThreads } from "@/hooks/use-threads";
 import { formatNoteDate, textPreview } from "@/lib/format";
@@ -62,7 +60,7 @@ import {
   NOTE_ANALYSIS_UNCONFIGURED_HINT,
 } from "@/lib/note-analysis";
 import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
-import type { Note, NoteProjectLink, NoteStatus } from "@/lib/types";
+import type { Note, NoteStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface NoteDetailProps {
@@ -238,97 +236,6 @@ function AnalysisBlock({
         {children}
       </div>
     </motion.section>
-  );
-}
-
-/* ── Linked projects (note ↔ project links) ── */
-
-function LinkedProjects({ noteId }: { noteId: string }) {
-  const openProject = useAppUi((s) => s.openProject);
-  // Any project creation/import (incl. «Создать проект из заметки») bumps
-  // projectsVersion → refetch so a fresh link shows up without reopening.
-  const projectsVersion = useAppUi((s) => s.projectsVersion);
-  const [links, setLinks] = useState<NoteProjectLink[] | null>(null);
-  const [removingId, setRemovingId] = useState<string | null>(null);
-
-  const loadLinks = useCallback(async () => {
-    try {
-      const list = await api.listNoteLinks(noteId);
-      setLinks(list);
-    } catch {
-      setLinks([]);
-    }
-  }, [noteId]);
-
-  useEffect(() => {
-    setLinks(null);
-    void loadLinks();
-  }, [loadLinks, projectsVersion]);
-
-  const unlink = async (projectId: string) => {
-    if (removingId) return;
-    setRemovingId(projectId);
-    try {
-      await api.unlinkNoteFromProject(noteId, projectId);
-      setLinks((prev) =>
-        (prev ?? []).filter((l) => l.project.id !== projectId),
-      );
-    } catch {
-      toast.error("Не удалось отвязать проект");
-    } finally {
-      setRemovingId(null);
-    }
-  };
-
-  return (
-    <div className="mt-3 border-t pt-3">
-      <h4 className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Связанные проекты
-      </h4>
-      {links === null ? (
-        <div className="mt-2 px-1">
-          <Skeleton className="h-6 w-40 rounded-full" />
-        </div>
-      ) : links.length === 0 ? (
-        <p className="mt-1.5 px-1 text-xs leading-relaxed text-muted-foreground">
-          Пока нет связанных проектов.
-        </p>
-      ) : (
-        <ul className="mt-2 flex flex-wrap gap-1.5">
-          {links.map((link) => (
-            <li key={link.id} className="group/link">
-              <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/5 pl-2.5 pr-1.5 py-1 text-[11px] font-medium text-foreground/90">
-                <button
-                  type="button"
-                  onClick={() => openProject(link.project.id)}
-                  aria-label={`Открыть проект «${link.project.name}»`}
-                  className="flex min-w-0 items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60 rounded-full"
-                >
-                  <FolderGit2
-                    className="size-3 shrink-0 text-primary"
-                    aria-hidden="true"
-                  />
-                  <span className="max-w-36 truncate">{link.project.name}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void unlink(link.project.id)}
-                  disabled={removingId === link.project.id}
-                  aria-label={`Отвязать проект «${link.project.name}»`}
-                  className="flex shrink-0 items-center rounded-full p-0.5 text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:text-destructive focus-visible:opacity-100 group-hover/link:opacity-100"
-                >
-                  {removingId === link.project.id ? (
-                    <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <X className="size-3" aria-hidden="true" />
-                  )}
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 
@@ -792,8 +699,8 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
             size="icon"
             className="size-9 shrink-0 rounded-xl hover:border-primary/40 hover:text-primary"
             onClick={() => openCreateProject(note.id)}
-            aria-label="Создать проект из заметки"
-            title="В проект"
+            aria-label="Создать код-проект из заметки"
+            title="В код-проект"
           >
             <Rocket className="size-3.5" aria-hidden="true" />
           </Button>
@@ -808,8 +715,7 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
           </Button>
         </div>
 
-        {/* ── Linked projects ── */}
-        <LinkedProjects noteId={note.id} />
+        <LinkedTargets noteId={note.id} />
       </div>
 
       {/* ── Delete confirmation ── */}

@@ -29,7 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { mcpToggleCopy } from "@/lib/mcp-copy";
+import { mcpToggleCopy, mcpCatalogEmptyCopy, mcpCatalogView } from "@/lib/mcp-copy";
 import type { McpServerDto } from "@/lib/workspace-types";
 import { AddServerDialog } from "./add-server-dialog";
 import { ConfigPreviewCard } from "./config-preview-card";
@@ -103,7 +103,6 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
       setLoadError(
         err instanceof ApiError ? err.message : "Не удалось загрузить реестр",
       );
-      setServers([]);
     }
   }, []);
 
@@ -198,6 +197,7 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
     [servers],
   );
 
+  const catalogView = mcpCatalogView(servers, loadError);
   const visible = useMemo(
     () => (servers ? applyFilter(servers, filter) : []),
     [servers, filter],
@@ -247,7 +247,11 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
             transition={{ duration: 0.3 }}
             className="grid grid-cols-3 gap-3"
           >
-            {stats ? (
+            {catalogView === "error" ? (
+              <div className="col-span-3 rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                Реестр не загрузился — счётчики появятся после повтора.
+              </div>
+            ) : stats ? (
               <>
                 <StatTile
                   icon={STAT_META.connected.icon}
@@ -306,13 +310,13 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
               })}
             </div>
 
-            {servers === null ? (
+            {catalogView === "loading" ? (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {Array.from({ length: 6 }, (_, i) => (
                   <Skeleton key={i} className="h-48 rounded-2xl" />
                 ))}
               </div>
-            ) : loadError ? (
+            ) : catalogView === "error" ? (
               <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-10 text-center">
                 <AlertCircle
                   className="size-8 text-muted-foreground/50"
@@ -326,9 +330,7 @@ export function McpScreen({ onOpenMobileNav }: ModuleScreenProps) {
               </div>
             ) : visible.length === 0 ? (
               <div className="rounded-2xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
-                {filter === "connected"
-                  ? "Ничего не включено — включите сервер из каталога"
-                  : "В этой категории серверов нет"}
+                {mcpCatalogEmptyCopy(catalogView, filter)}
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

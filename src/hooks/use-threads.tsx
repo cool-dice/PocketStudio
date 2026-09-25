@@ -28,6 +28,7 @@ import {
   applyMessageDelta,
   applyMessageEnd,
   applyMessageStart,
+  dropFailedOptimisticSend,
   mergeTranscriptOnReconnect,
 } from "@/lib/message-delta";
 import { api } from "@/lib/api";
@@ -45,13 +46,16 @@ import {
   THREADS_DELETE_FAILED,
   THREADS_LOAD_ERROR,
   THREADS_RENAME_FAILED,
+  THREAD_LOAD_FAILED,
+  composerSendGuard,
   composerTargetAfterArchive,
   composerTargetAfterDelete,
   renamedTitle,
-  resolveSendThreadId,
+  shouldToastThreadLookupError,
   sidebarThreadsAfterArchive,
   sidebarThreadsAfterDelete,
   threadArchiveToast,
+  workspaceThreadBindAction,
 } from "@/lib/thread-copy";
 import type {
   ChatMessage,
@@ -116,6 +120,11 @@ interface ThreadsContextValue {
    * deleting an empty workspace thread the user just opened.
    */
   ensureStudioThread: () => Promise<void>;
+  /**
+   * Bind the live thread for this workspace (select or create). Safe on
+   * film/video tabs — missing global thread is not toasted.
+   */
+  ensureWorkspaceThread: (projectId: string, title: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   /**
    * Last socket `error` payload. Composer shows the oversize RU copy
@@ -185,6 +194,8 @@ function noteFromToolResult(tool: string, result: unknown): Note | null {
 
 export function ThreadsProvider({ children }: { children: ReactNode }) {
   const { socket, ensureConnected } = useSocket();
+  const mainArea = useAppUi((s) => s.mainArea);
+  const workspaceTab = useAppUi((s) => s.workspaceTab);
 
   const [threads, setThreads] = useState<ThreadListItem[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(true);
@@ -227,6 +238,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const threadsErrorRef = useRef<string | null>(null);
   const showArchivedRef = useRef(false);
+  const surfaceRef = useRef({ mainArea, workspaceTab });
 
   useEffect(() => {
     socketRef.current = socket;
@@ -249,6 +261,9 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     streamingRef.current = streaming;
   }, [streaming]);
+  useEffect(() => {
+    surfaceRef.current = { mainArea, workspaceTab };
+  }, [mainArea, workspaceTab]);
 
   /** Update list preview and move the thread to the top (most recently active). */
   const bumpThread = useCallback((threadId: string, message: Message) => {
@@ -337,7 +352,14 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         if (s && s.connected) s.emit("thread:join", { threadId: id });
       } catch {
         if (seq === selectSeqRef.current) {
-          toast.error("Не удалось загрузить диалог");
+          if (
+            shouldToastThreadLookupError(
+              THREAD_LOAD_FAILED,
+              surfaceRef.current,
+            )
+          ) {
+            toast.error(THREAD_LOAD_FAILED);
+          }
         }
       } finally {
         if (seq === selectSeqRef.current) {
@@ -547,6 +569,38 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     }
   }, [adoptLiveThread, refreshThreads, selectThreadInternal]);
 
+  /**
+   * Workspace modules (video/storyboard included) bind the scoped thread
+   * without requiring the chat tab. Missing leftover global ids stay silent
+   * on non-chat surfaces via shouldToastThreadLookupError.
+   */
+  const ensureWorkspaceThread = useCallback(
+    async (projectId: string, title: string) => {
+      if (threadsErrorRef.current) return;
+      if (showArchivedRef.current) {
+        showArchivedRef.current = false;
+        setShowArchived(false);
+        const list = await refreshThreads();
+        if (!list) return;
+      }
+      const current = threadsRef.current.find(
+        (t) => t.id === activeIdRef.current,
+      );
+      const action = workspaceThreadBindAction(
+        projectId,
+        current?.projectId,
+        threadsRef.current,
+      );
+      if (action.action === "noop") return;
+      if (action.action === "select") {
+        await selectThreadInternal(action.threadId);
+        return;
+      }
+      await startProjectThread(projectId, title);
+    },
+    [refreshThreads, selectThreadInternal, startProjectThread],
+  );
+
   /** Optimistic mode switch; reverts the chip when the PATCH fails. */
   const updateThreadMode = useCallback(
     async (id: string, mode: ThreadMode) => {
@@ -697,6 +751,21 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         toast.error(message);
         return;
       }
+      const knownIds = threadsRef.current.map((t) => t.id);
+      const activeRow = threadsRef.current.find(
+        (t) => t.id === activeIdRef.current,
+      );
+      const guard = composerSendGuard({
+        activeId: activeIdRef.current,
+        knownIds,
+        deletedIds: deletedIdsRef.current,
+        archived: Boolean(activeRow?.archived),
+      });
+      if (!guard.ok) {
+        setSendError(guard.message);
+        toast.error(guard.message);
+        return;
+      }
       if (
         shouldBlockSend({
           sending: sendLockRef.current,
@@ -711,12 +780,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       // No active thread yet (fresh account / last one deleted) — create one
       // transparently so the first message always works (Cursor-style).
       // Never send to a thread the sidebar already dropped.
-      const knownIds = threadsRef.current.map((t) => t.id);
-      let threadId = resolveSendThreadId(
-        activeIdRef.current,
-        knownIds,
-        deletedIdsRef.current,
-      );
+      let threadId = guard.threadId;
       if (!threadId) {
         try {
           const thread = await api.createThread();
@@ -1007,20 +1071,23 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
 
     const onError = ({ message }: WsErrorPayload) => {
       setSendError(message);
-      if (!isMessageSendTooLargeError(message)) {
+      if (
+        !isMessageSendTooLargeError(message) &&
+        shouldToastThreadLookupError(message, surfaceRef.current)
+      ) {
         toast.error(message);
       }
       if (shouldKeepBusyOnSocketError(message)) return;
       abortingRef.current = null;
       setThinkingThreadId(null);
       setPhase(null);
-      // A failed turn can leave tool cards stuck in the running state —
-      // finalize them without a result.
-      setMessages((prev) =>
-        prev.some((m) => m.toolPending)
-          ? prev.map((m) => (m.toolPending ? { ...m, toolPending: false } : m))
-          : prev,
-      );
+      busyRef.current = false;
+      setMessages((prev) => {
+        const dropped = dropFailedOptimisticSend(prev);
+        return dropped.some((m) => m.toolPending)
+          ? dropped.map((m) => (m.toolPending ? { ...m, toolPending: false } : m))
+          : dropped;
+      });
       // If the turn failed before any content arrived, drop the empty
       // assistant bubble and clear the busy flag so the composer unlocks.
       const st = streamingRef.current;
@@ -1132,6 +1199,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       updateThreadMode,
       startProjectThread,
       ensureStudioThread,
+      ensureWorkspaceThread,
       sendMessage,
       sendError,
       clearSendError,
@@ -1162,6 +1230,7 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
       updateThreadMode,
       startProjectThread,
       ensureStudioThread,
+      ensureWorkspaceThread,
       sendMessage,
       sendError,
       clearSendError,

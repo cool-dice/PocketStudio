@@ -4,7 +4,6 @@
  * apply_filter — поставить фильтр в очередь холста (применится в редакторе).
  */
 
-import { throwIfAborted } from "../../src/lib/abort-flag";
 import { db } from "./db-client";
 import {
   emptyRaster,
@@ -12,44 +11,25 @@ import {
   type RasterDoc,
 } from "../../src/lib/design-model";
 import type { ToolContext, ToolDef } from "./tools";
-
-function pickString(
-  args: Record<string, unknown>,
-  keys: string[],
-): string | null {
-  for (const key of keys) {
-    const v = args[key];
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return null;
-}
+import { pickString, resolveWorkspace as resolveWorkspaceShared } from "../../src/lib/resolve-workspace";
 
 async function resolveWorkspace(
   userId: string,
   args: Record<string, unknown>,
   ctx?: ToolContext,
 ) {
-  throwIfAborted(ctx?.signal);
-  const idArg = pickString(args, ["workspaceId", "projectId"]);
-  if (idArg) {
-    const byId = await db.project.findFirst({
-      where: { id: idArg, userId },
-      select: { id: true, name: true },
-    });
-    if (byId) return byId;
-    return { error: "Воркспейс с таким id не найден" as const };
+  const result = await resolveWorkspaceShared(db, userId, args, ctx, {
+    required: true,
+  });
+  if (!result || "error" in result) {
+    return {
+      error:
+        result && "error" in result
+          ? result.error
+          : "Укажите воркспейс: откройте чат внутри воркспейса или передайте workspaceId",
+    } as const;
   }
-  if (ctx?.projectId) {
-    const byCtx = await db.project.findFirst({
-      where: { id: ctx.projectId, userId },
-      select: { id: true, name: true },
-    });
-    if (byCtx) return byCtx;
-  }
-  return {
-    error:
-      "Укажите воркспейс: откройте чат внутри воркспейса или передайте workspaceId" as const,
-  };
+  return result;
 }
 
 async function loadRaster(projectId: string): Promise<{ id: string; doc: RasterDoc }> {

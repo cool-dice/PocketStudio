@@ -71,6 +71,16 @@ const TOOL_META: Record<string, ToolMeta> = {
     running: "Загружаю проекты…",
     done: "Проекты",
   },
+  create_workspace: {
+    icon: FolderKanban,
+    running: "Создаю воркспейс…",
+    done: "Воркспейс создан",
+  },
+  list_workspaces: {
+    icon: FolderKanban,
+    running: "Загружаю студии…",
+    done: "Студии",
+  },
   list_files: {
     icon: FolderTree,
     running: "Читаю файлы проекта…",
@@ -137,6 +147,7 @@ function safeParse(json: string | null | undefined): unknown {
 function toolAccent(tool: string): string {
   if (tool === "delete_file") return "text-rose-500";
   if (tool === "create_project") return "text-emerald-500";
+  if (tool === "create_workspace") return "text-emerald-500";
   if (tool === "complete_task") return "text-emerald-500";
   return "text-primary";
 }
@@ -177,6 +188,26 @@ function summarizeResult(tool: string, result: unknown): string | null {
   }
 
   /* ── Project tools ── */
+
+  if (tool === "create_workspace") {
+    const workspace = r.workspace as { name?: unknown } | undefined;
+    const name = typeof workspace?.name === "string" ? workspace.name : null;
+    return name ?? (typeof r.message === "string" ? r.message : null);
+  }
+
+  if (tool === "list_workspaces") {
+    const workspaces = Array.isArray(r.workspaces) ? r.workspaces : [];
+    if (workspaces.length === 0) return "Студий пока нет";
+    const names = workspaces
+      .slice(0, 4)
+      .map((p) => String((p as { name?: unknown }).name ?? ""))
+      .filter(Boolean)
+      .join(", ");
+    const rest = workspaces.length > 4 ? " …" : "";
+    return names
+      ? `${workspaces.length} ${workspaces.length === 1 ? "студия" : "студий"}: ${names}${rest}`
+      : null;
+  }
 
   if (tool === "create_project") {
     const project = r.project as

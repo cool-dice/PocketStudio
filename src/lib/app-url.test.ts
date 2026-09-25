@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseAppLocation, pathFor } from "./app-url";
+import {
+  hrefFromLocation,
+  isSidebarChatActive,
+  parseAppLocation,
+  pathFor,
+  sidebarChatLocation,
+} from "./app-url";
 
 describe("parseAppLocation", () => {
   test("workspace path with tab", () => {
@@ -77,5 +83,82 @@ describe("pathFor", () => {
   test("home and chat share /", () => {
     expect(pathFor("chat", null, "chat")).toBe("/");
     expect(pathFor("home", null, "chat")).toBe("/");
+  });
+});
+
+describe("sidebar Chat nav vs workspace URL", () => {
+  test("from /w/{id} Code stays on scoped chat, not global /", () => {
+    const inside = sidebarChatLocation({
+      mainArea: "workspace",
+      workspaceId: "ws1",
+      workspaceTab: "code",
+      workspaceDocId: null,
+    });
+    expect(inside).toEqual({
+      mainArea: "workspace",
+      workspaceId: "ws1",
+      workspaceTab: "chat",
+      workspaceDocId: null,
+    });
+    expect(hrefFromLocation(inside)).toBe("/w/ws1");
+    expect(hrefFromLocation(inside)).not.toBe("/");
+  });
+
+  test("from Home / other areas opens the unbound orchestrator", () => {
+    expect(
+      hrefFromLocation(
+        sidebarChatLocation({
+          mainArea: "home",
+          workspaceId: null,
+          workspaceTab: "chat",
+          workspaceDocId: null,
+        }),
+      ),
+    ).toBe("/");
+    expect(
+      hrefFromLocation(
+        sidebarChatLocation({
+          mainArea: "notebook",
+          workspaceId: null,
+          workspaceTab: "chat",
+          workspaceDocId: null,
+        }),
+      ),
+    ).toBe("/");
+  });
+
+  test("Chat is active on global chat and workspace chat tab only", () => {
+    expect(
+      isSidebarChatActive({
+        mainArea: "chat",
+        workspaceId: null,
+        workspaceTab: "chat",
+        workspaceDocId: null,
+      }),
+    ).toBe(true);
+    expect(
+      isSidebarChatActive({
+        mainArea: "workspace",
+        workspaceId: "ws1",
+        workspaceTab: "chat",
+        workspaceDocId: null,
+      }),
+    ).toBe(true);
+    expect(
+      isSidebarChatActive({
+        mainArea: "workspace",
+        workspaceId: "ws1",
+        workspaceTab: "code",
+        workspaceDocId: null,
+      }),
+    ).toBe(false);
+    expect(
+      isSidebarChatActive({
+        mainArea: "home",
+        workspaceId: null,
+        workspaceTab: "chat",
+        workspaceDocId: null,
+      }),
+    ).toBe(false);
   });
 });

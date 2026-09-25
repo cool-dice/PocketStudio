@@ -79,6 +79,7 @@ describe.skipIf(SKIP_PG)("GET /api/search: scope, empty, IDOR", () => {
         name: `Воркспейс ${SECRET}`,
         description: "личный конвейер",
         type: "book",
+        origin: "workspace",
       },
     });
     const otherWs = await db.project.create({
@@ -86,6 +87,7 @@ describe.skipIf(SKIP_PG)("GET /api/search: scope, empty, IDOR", () => {
         userId: owner.user.id,
         name: "Другой воркспейс без секрета",
         type: "music",
+        origin: "workspace",
       },
     });
     const note = await db.note.create({
@@ -127,7 +129,7 @@ describe.skipIf(SKIP_PG)("GET /api/search: scope, empty, IDOR", () => {
     );
     expect(hit.status).toBe(200);
     const found = (await hit.json()) as {
-      threads: Array<{ id: string; title: string }>;
+      threads: Array<{ id: string; title: string; projectOrigin?: string | null }>;
       notes: Array<{ id: string; preview: string }>;
       projects: Array<{ id: string; name: string }>;
       total: number;
@@ -136,6 +138,8 @@ describe.skipIf(SKIP_PG)("GET /api/search: scope, empty, IDOR", () => {
     expect(found.projects.some((p) => p.id.startsWith("ws-"))).toBe(false);
     expect(found.notes.some((n) => n.id === note.id)).toBe(true);
     expect(found.threads.some((t) => t.id === thread.id)).toBe(true);
+    const bound = found.threads.find((t) => t.id === thread.id);
+    expect(bound?.projectOrigin).toBe("workspace");
     expect(found.total).toBeGreaterThan(0);
 
     const scoped = await search(

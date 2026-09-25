@@ -3,8 +3,8 @@
 /**
  * Composer — auto-growing textarea. Enter sends, Shift+Enter inserts a
  * newline. Disabled while the agent is thinking/streaming (busy).
- * When the active thread is bound to a project, a small «Проект: …» chip
- * sits above the input (click → project screen).
+ * When the active thread is bound to a project or studio, a small chip
+ * sits above the input (click → project screen or workspace).
  *
  * Slash commands (Stage 4): typing "/" opens a command menu above the input —
  * mode switches, quick note prefix, create project, notebook, global search,
@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, FolderGit2, Loader2, Mic, Square } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -43,15 +43,20 @@ import {
   useVoiceRecorder,
   type VoiceClip,
 } from "@/hooks/use-voice-recorder";
+import { BoundThreadChip } from "@/components/app/bound-thread-chip";
 import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { api, ApiError } from "@/lib/api";
+import { boundChipFromLists } from "@/lib/composer-binding";
+import { CODE_PROJECT_SLASH, WORKSPACE_SLASH_COMMANDS } from "@/lib/slash-catalog";
 import { useAppUi } from "@/lib/store";
 import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
 import {
   COMPOSER_TEXTAREA_MAX_CHARS,
   composerSizeUi,
 } from "@/lib/message-send";
+import { THREAD_ARCHIVED_SEND } from "@/lib/thread-copy";
 
 const MAX_HEIGHT = 200;
 
@@ -66,10 +71,11 @@ export function Composer({
   const { busy, sendMessage, abortTurn, activeThread, updateThreadMode, sendError, clearSendError } =
     useThreads();
   const { getById } = useProjects();
-  const openProject = useAppUi((s) => s.openProject);
+  const { workspaces } = useWorkspaces();
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const openCreateProject = useAppUi((s) => s.openCreateProject);
+  const openCreateWorkspace = useAppUi((s) => s.openCreateWorkspace);
   const bumpProjectFiles = useAppUi((s) => s.bumpProjectFiles);
   const composerDraft = useAppUi((s) => s.composerDraft);
   const composerAutoSendProjectId = useAppUi((s) => s.composerAutoSendProjectId);
@@ -96,6 +102,10 @@ export function Composer({
   useEffect(() => {
     const pending = pendingAutoSend.current;
     if (!pending || busy || locked || !activeThread) return;
+    if (activeThread.archived) {
+      pendingAutoSend.current = null;
+      return;
+    }
     const have = activeThread.projectId ?? null;
     if (pending.projectId !== have) return;
     const size = composerSizeUi(pending.text);
@@ -111,7 +121,16 @@ export function Composer({
   const threadProjectId = activeThread?.projectId ?? null;
   const scoped =
     scopeProjectId === undefined || threadProjectId === scopeProjectId;
+  const boundWorkspace =
+    scoped && threadProjectId
+      ? workspaces.find((w) => w.id === threadProjectId) ?? null
+      : null;
   const boundProject = scoped ? getById(threadProjectId) : null;
+  const boundChip = boundChipFromLists({
+    id: threadProjectId,
+    workspace: boundWorkspace,
+    project: boundProject,
+  });
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
@@ -133,10 +152,24 @@ export function Composer({
           requestAnimationFrame(() => taRef.current?.focus());
         },
       },
+      ...WORKSPACE_SLASH_COMMANDS.map((spec) => ({
+        name: spec.name,
+        label: spec.label,
+        description: spec.description,
+        icon:
+          spec.type === "music"
+            ? SLASH_MISC_ICONS.track
+            : spec.type === "book"
+              ? SLASH_MISC_ICONS.book
+              : spec.type === "film"
+                ? SLASH_MISC_ICONS.film
+                : SLASH_MISC_ICONS.workspace,
+        run: () => openCreateWorkspace(spec.type),
+      })),
       {
-        name: "проект",
-        label: "Новый проект",
-        description: "Создать проект: шаблон, GitHub или zip",
+        name: CODE_PROJECT_SLASH.name,
+        label: CODE_PROJECT_SLASH.label,
+        description: CODE_PROJECT_SLASH.description,
         icon: SLASH_MISC_ICONS.project,
         run: () => openCreateProject(),
       },
@@ -150,7 +183,7 @@ export function Composer({
       {
         name: "поиск",
         label: "Поиск",
-        description: "Искать по диалогам, заметкам и проектам",
+        description: "Искать по диалогам, заметкам, воркспейсам и код-проектам",
         icon: SLASH_MISC_ICONS.search,
         run: () => setSearchOpen(true),
       },
@@ -248,6 +281,7 @@ export function Composer({
     boundProject,
     bumpProjectFiles,
     openCreateProject,
+    openCreateWorkspace,
     setMainArea,
     setSearchOpen,
     updateThreadMode,
@@ -326,9 +360,12 @@ export function Composer({
   }, [value]);
 
   const blocked = busy || locked || !scoped;
+  const archived = Boolean(activeThread?.archived);
   const size = composerSizeUi(value, sendError);
+  const hintError = archived ? THREAD_ARCHIVED_SEND : size.error;
   const canSend =
     !blocked &&
+    !archived &&
     !isRecording &&
     value.trim().length > 0 &&
     !size.disableSend;
@@ -397,17 +434,9 @@ export function Composer({
           onExecute={executeCommand}
         />
 
-        {boundProject && (
-          <button
-            type="button"
-            onClick={() => openProject(boundProject.id)}
-            aria-label={`Проект «${boundProject.name}» — открыть`}
-            className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-            <span className="truncate">Проект: {boundProject.name}</span>
-          </button>
-        )}
+        {boundChip && threadProjectId ? (
+          <BoundThreadChip chip={boundChip} id={threadProjectId} className="mb-2" />
+        ) : null}
         <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
           <label htmlFor="composer" className="sr-only">
             Сообщение
@@ -429,13 +458,15 @@ export function Composer({
             placeholder={
               isRecording
                 ? "Слушаем вас…"
-                : locked && !busy
-                  ? "Подключаем чат воркспейса…"
-                  : blocked
-                    ? "Студия печатает…"
-                    : "Напишите сообщение… или / для команд"
+                : archived
+                  ? THREAD_ARCHIVED_SEND
+                  : locked && !busy
+                    ? "Подключаем чат воркспейса…"
+                    : blocked
+                      ? "Студия печатает…"
+                      : "Напишите сообщение… или / для команд"
             }
-            disabled={blocked || isRecording}
+            disabled={blocked || isRecording || archived}
             maxLength={COMPOSER_TEXTAREA_MAX_CHARS}
             className="vf-scroll max-h-[200px] min-h-11 min-w-0 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
@@ -533,12 +564,12 @@ export function Composer({
           <p
             id="composer-hint"
             className={`min-w-0 flex-1 text-xs ${
-              size.error ? "text-destructive" : "text-muted-foreground"
+              hintError ? "text-destructive" : "text-muted-foreground"
             }`}
-            role={size.error ? "alert" : undefined}
+            role={hintError ? "alert" : undefined}
           >
-            {size.error
-              ? size.error
+            {hintError
+              ? hintError
               : isRecording
                 ? "Идёт запись голоса"
                 : voiceState === "processing"

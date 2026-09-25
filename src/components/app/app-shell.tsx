@@ -17,6 +17,7 @@ import { AiSettingsScreen } from "@/components/app/ai-settings-screen";
 import { ChatArea } from "@/components/app/chat-area";
 import { ContextPanel } from "@/components/app/context-panel";
 import { CreateProjectDialog } from "@/components/app/create-project-dialog";
+import { CreateWorkspaceDialog } from "@/components/workspaces/create-workspace-dialog";
 import { GlobalSearch } from "@/components/app/global-search";
 import { MobileNoteDialog } from "@/components/app/mobile-note-dialog";
 import { NotebookScreen } from "@/components/app/notebook-screen";
@@ -155,6 +156,7 @@ export function AppShell() {
       {/* ── Overlays ── */}
       <CaptureDialog />
       <CreateProjectDialog />
+      <CreateWorkspaceDialog />
       <MobileNoteDialog />
       <GlobalSearch />
     </div>

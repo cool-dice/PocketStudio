@@ -24,9 +24,9 @@ async function main() {
 
   // 3. Socket.io client (same transport the frontend uses).
   const socket = io("http://localhost:3003", {
-    path: "/",
+    path: "/socket.io",
     auth: { token },
-    transports: ["websocket", "polling"],
+    transports: ["polling", "websocket"],
   });
 
   const events: string[] = [];

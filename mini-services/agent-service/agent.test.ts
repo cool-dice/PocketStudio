@@ -163,7 +163,9 @@ describe("agent tool registry", () => {
   test("includes prototype ports", () => {
     const names = TOOLS.map((t) => t.name);
     for (const name of [
-      "retrieve_canon",
+      "create_workspace",
+      "list_workspaces",
+      "create_note",
       "retrieve_code",
       "apply_patch",
       "tag_note",

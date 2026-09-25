@@ -36,3 +36,7 @@ export const PALETTE_GENERATE_FAILED =
   "Не удалось собрать палитру — предыдущая карта на месте";
 export const PALETTE_GENERATE_FAILED_HINT =
   "Предыдущие цвета сохранены — попробуйте ещё раз или уточните бриф.";
+
+export const SECTION_AI_FAILED = "Не удалось вызвать ИИ — попробуйте ещё раз";
+export const SECTION_AI_UNCONFIGURED_HINT =
+  "Откройте Админ → Модели ИИ и назначьте модель для инструмента «Написать / переписать главу».";

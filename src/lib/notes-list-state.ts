@@ -28,3 +28,17 @@ export function notebookFeedView(
   if (noteCount === 0) return "empty";
   return "ready";
 }
+
+/**
+ * Full NoteDetail lives in the chat/notebook context rail on xl+.
+ * Workspace (and other studio areas) have no that rail — open a dialog
+ * on every viewport so «открыть заметку» is not a dead click on desktop.
+ */
+export function noteDetailSurface(
+  mainArea: string,
+  isNarrow: boolean,
+): "context-panel" | "dialog" {
+  if (isNarrow) return "dialog";
+  if (mainArea === "chat" || mainArea === "notebook") return "context-panel";
+  return "dialog";
+}
