@@ -23,7 +23,6 @@ import {
   NotebookPen,
   PenLine,
   Pencil,
-  Rocket,
   Search,
   Shield,
   Trash2,
@@ -570,13 +569,6 @@ export function SidebarContent({ onNavigate, sheetMode }: SidebarContentProps) {
             icon={Wrench}
             label="Инструменты"
             area="tools"
-            mainArea={mainArea}
-            onOpen={handleOpenStudio}
-          />
-          <StudioNavItem
-            icon={Rocket}
-            label="Деплой"
-            area="deploy"
             mainArea={mainArea}
             onOpen={handleOpenStudio}
           />

@@ -264,12 +264,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const { project } = (payload ?? {}) as WsProjectCreatedPayload;
       if (!project || typeof project.id !== "string") return;
       useAppUi.getState().bumpProjects();
-      toast.success(`Агент создал проект «${project.name}»`, {
-        action: {
-          label: "Открыть",
-          onClick: () => useAppUi.getState().openProject(project.id),
-        },
-      });
     };
 
     // File updates are frequent → silent bump; checkpoints toast (deduped

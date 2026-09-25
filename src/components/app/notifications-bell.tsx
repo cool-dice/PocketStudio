@@ -111,8 +111,6 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
           toast.error("Заметка не найдена — возможно, удалена");
           ui.setMainArea("notebook");
         });
-    } else if ((n.type === "project_created" || n.type === "checkpoint") && n.entityId) {
-      ui.openProject(n.entityId);
     }
     setOpen(false);
   };

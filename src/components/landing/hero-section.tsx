@@ -12,10 +12,10 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import {
   AudioWaveform,
-  BookOpenText,
   Clapperboard,
+  Film,
   ImagePlus,
-  Rocket,
+  ScrollText,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -58,8 +58,8 @@ export function HeroSection({
             Ранний доступ
           </Badge>
           <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-balance sm:text-5xl">
-            Студия, которая помещается{" "}
-            <span className="text-primary">в карман</span>
+            Киностудия{" "}
+            <span className="text-primary">от А до Я</span>
           </h1>
           <p className="max-w-xl text-pretty text-muted-foreground sm:text-lg">
             {LANDING_HERO_SUB}
@@ -147,39 +147,39 @@ function HeroTileDock() {
       {/* five studio-module tiles */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5 lg:gap-5">
         <FloatTile
-          icon={BookOpenText}
-          label="Книги"
-          caption="главы и черновики"
+          icon={ScrollText}
+          label="Сценарий"
+          caption="замысел и реплики"
           className="lg:-rotate-2 lg:-translate-y-2"
           duration={4.2}
         />
         <FloatTile
           icon={ImagePlus}
-          label="Изображения"
-          caption="обложки и концепты"
+          label="Кадры"
+          caption="раскадровка и концепты"
           className="lg:rotate-2 lg:translate-y-3"
           duration={5}
           delay={0.6}
         />
         <FloatTile
           icon={AudioWaveform}
-          label="Аудио"
-          caption="озвучка и музыка"
+          label="Озвучка"
+          caption="речь и саундтрек"
           className="lg:-translate-y-1"
           duration={4.4}
           delay={1.1}
         />
         <FloatTile
           icon={Clapperboard}
-          label="Видео"
-          caption="трейлеры и сцены"
+          label="Монтаж"
+          caption="сцены и трейлер"
           className="lg:-rotate-1 lg:translate-y-3"
           duration={5.2}
           delay={0.3}
         />
         <FloatTile
-          icon={Rocket}
-          label="Запуск"
+          icon={Film}
+          label="Выпуск"
           caption={LANDING_LAUNCH_CAPTION}
           className="col-span-2 sm:col-span-1 lg:rotate-1 lg:-translate-y-2"
           duration={4.6}

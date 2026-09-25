@@ -2,7 +2,7 @@
 
 /**
  * ChatArea — center zone: header (mobile nav, thread title, mode selector
- * dropdown, project chip, context toggle), scrollable messages with smart
+ * dropdown, context toggle), scrollable messages with smart
  * auto-scroll and a «к новым» pill, welcome screen for empty threads,
  * composer. `embedded` прячет мобильный хедер, когда ChatArea встроен
  * в другой экран со своим хедером (например, на Главной).
@@ -12,7 +12,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ChevronDown,
-  FolderGit2,
   HelpCircle,
   Map,
   Menu,
@@ -38,10 +37,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { formatPrefetchHint } from "@/lib/rag/prefetch";
-import { useAppUi } from "@/lib/store";
 import {
   MODE_DESCRIPTIONS,
   MODE_LABELS,
@@ -85,11 +82,6 @@ export function ChatArea({
     updateThreadMode,
     canonHint,
   } = useThreads();
-
-  const { getById } = useProjects();
-  const openProject = useAppUi((s) => s.openProject);
-
-  const boundProject = getById(activeThread?.projectId ?? null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -167,18 +159,6 @@ export function ChatArea({
             )}
           </div>
         </div>
-        {activeThread?.projectId && boundProject && (
-          <button
-            type="button"
-            onClick={() => openProject(boundProject.id)}
-            title={`Проект «${boundProject.name}»`}
-            aria-label={`Открыть проект «${boundProject.name}»`}
-            className="hidden min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60 sm:flex"
-          >
-            <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-            <span className="max-w-32 truncate">{boundProject.name}</span>
-          </button>
-        )}
         <Button
             variant="ghost"
             size="icon"

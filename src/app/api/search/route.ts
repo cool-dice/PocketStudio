@@ -108,6 +108,7 @@ export async function GET(req: Request) {
         name: true,
         description: true,
         origin: true,
+        type: true,
         updatedAt: true,
       },
     }),
@@ -178,6 +179,7 @@ export async function GET(req: Request) {
     }));
 
   const projectHits: SearchProjectHit[] = projects
+    .filter((p) => p.type !== "app")
     .filter((p) => searchMatches(p.name, needle) || searchMatches(p.description, needle))
     .slice(0, SEARCH_PER_GROUP)
     .map((p) => ({

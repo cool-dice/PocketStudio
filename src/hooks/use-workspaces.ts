@@ -18,7 +18,12 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
 import { workspacesListQuery } from "@/lib/workspace-copy";
+import { isOffFlowWorkspace } from "@/lib/workspace-data";
 import type { WorkspaceDto } from "@/lib/workspace-types";
+
+function inProductFlow(list: WorkspaceDto[]): WorkspaceDto[] {
+  return list.filter((ws) => !isOffFlowWorkspace(ws.type));
+}
 
 /** Module-level shared cache — живой список на все точки монтирования. */
 interface WorkspacesCache {
@@ -83,7 +88,9 @@ async function fetchWorkspaces(silent: boolean): Promise<void> {
   }
   const task = (async () => {
     try {
-      cache.workspaces = await api.listWorkspaces(workspacesListQuery(false));
+      cache.workspaces = inProductFlow(
+        await api.listWorkspaces(workspacesListQuery(false)),
+      );
       cache.error = false;
       cache.loadedOnce = true;
     } catch {
@@ -114,8 +121,8 @@ async function fetchArchivedWorkspaces(silent: boolean): Promise<void> {
   }
   const task = (async () => {
     try {
-      cache.archivedWorkspaces = await api.listWorkspaces(
-        workspacesListQuery(true),
+      cache.archivedWorkspaces = inProductFlow(
+        await api.listWorkspaces(workspacesListQuery(true)),
       );
       cache.archiveError = false;
       cache.archiveLoadedOnce = true;
@@ -295,7 +302,12 @@ export function useWorkspace(id: string | null) {
     api
       .getWorkspace(id)
       .then((workspace) => {
-        if (!cancelled) setLoaded({ id, workspace });
+        if (!cancelled) {
+          setLoaded({
+            id,
+            workspace: isOffFlowWorkspace(workspace.type) ? null : workspace,
+          });
+        }
       })
       .catch(() => {
         if (!cancelled) setLoaded({ id, workspace: null });

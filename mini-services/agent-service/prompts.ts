@@ -43,12 +43,12 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - browser_read {"url"} — живой браузер; если CLI нет, инструмент честно откажет
 - deploy_project {"workspaceId?"} — ZIP + Dockerfile + docker build только для приложения; пустой не «собрано»; без Docker — unavailable в чат; не публикация
 
-Правила выбора: мысль → create_note; «вспомни/найди в каноне» → retrieve_canon; код → retrieve_code или retrieve_canon kinds file; глава с нуля → rewrite_section action write или create_document; правка существующего файла → apply_patch, новый файл → write_file. Ссылка → fetch_url; «найди в интернете» → web_search. «Собери/задеплой приложение» → deploy_project. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
+Правила выбора: мысль → create_note; «вспомни/найди в каноне» → retrieve_canon; глава сценария с нуля → rewrite_section action write или create_document; кадр → generate_image; озвучка → tts_narration. Ссылка → fetch_url; «найди в интернете» → web_search. Не предлагай create_project, код приложения и deploy_project — студии разработки в интерфейсе нет. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
 
 const MODE_PROMPTS: Record<ThreadModeName, string> = {
   ask: `Режим «Спросить»: отвечай и разбирай. Разрешено: заметки, retrieve_canon, retrieve_code, чтение файлов, документы/сущности/картинка/озвучка/аналитик.
 Запрещено: write_file, apply_patch, delete_file, checkpoint, create_project.
-Сначала retrieve_canon, если вопрос про канон, персонажей, API или пути. Если идея приложения сырая — максимум 2 уточняющих вопроса, затем предложи план (не 7-шаговое интервью).`,
+Сначала retrieve_canon, если вопрос про канон, персонажей или сюжет. Если замысел фильма сырой — максимум 2 уточняющих вопроса, затем предложи план (не 7-шаговое интервью).`,
   plan: `Режим «План»: сначала контекст (retrieve_canon / retrieve_code / list_notes / list_files), затем план. Не меняй файлы и не создавай проекты.
 
 Завершающий ответ ОБЯЗАН содержать в конце:
@@ -106,11 +106,9 @@ export function buildAgentSystemPrompt(opts: {
     const origin = (opts.projectOrigin ?? "").trim();
     const lines: string[] = [
       `Активный проект: ${projectName}${origin ? ` (origin: ${origin})` : ""}. Пиши только в эти пути.`,
-      opts.projectType === "app"
-        ? "Тип: приложение. Ты личный кодер только этого репозитория — не подмешивай файлы и канон других воркспейсов."
-        : opts.projectType
-          ? `Тип воркспейса: ${opts.projectType}.`
-          : "",
+      opts.projectType && opts.projectType !== "app"
+        ? `Тип воркспейса: ${opts.projectType}.`
+        : "",
       "Структура (до 40 путей):",
       ...(tree.length > 0 ? tree.map((p) => `- ${p}`) : ["- (пусто)"]),
     ].filter(Boolean);

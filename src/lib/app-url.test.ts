@@ -52,6 +52,13 @@ describe("parseAppLocation", () => {
     });
   });
 
+  test("dev-studio areas and tabs stay out of the film flow", () => {
+    expect(parseAppLocation("/", new URLSearchParams("area=deploy")).mainArea).toBe("chat");
+    expect(parseAppLocation("/", new URLSearchParams("area=projects")).mainArea).toBe("chat");
+    expect(parseAppLocation("/w/ws1", new URLSearchParams("tab=code")).workspaceTab).toBe("chat");
+    expect(parseAppLocation("/w/ws1", new URLSearchParams("tab=deploy")).workspaceTab).toBe("chat");
+  });
+
   test("bare slash is global chat", () => {
     expect(parseAppLocation("/", new URLSearchParams())).toEqual({
       mainArea: "chat",

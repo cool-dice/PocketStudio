@@ -122,7 +122,7 @@ export function WorkspacesScreen({
       <ModuleHeader
         icon={FolderKanban}
         title="Воркспейсы"
-        description="Каждый замысел — отдельный контекст: от заметок до фильма и приложения"
+        description="Каждый замысел — отдельный контекст киностудии: сценарий, кадры, звук и монтаж"
         onOpenMobileNav={onOpenMobileNav}
       >
         <Button size="sm" onClick={() => setCreateOpen(true)}>

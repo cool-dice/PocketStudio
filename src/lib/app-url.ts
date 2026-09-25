@@ -60,10 +60,11 @@ export function parseAppLocation(
   const match = pathname.match(/^\/w\/([^/?#]+)/);
   if (match?.[1]) {
     const tabParam = search.get("tab");
-    const tab =
+    const requested =
       tabParam && TAB_SET.has(tabParam as WorkspaceTab)
         ? (tabParam as WorkspaceTab)
         : "chat";
+    const tab = requested === "code" || requested === "deploy" ? "chat" : requested;
     const docParam = search.get("doc");
     return {
       mainArea: "workspace",
@@ -74,6 +75,14 @@ export function parseAppLocation(
     };
   }
   const area = search.get("area");
+  if (area === "deploy" || area === "projects") {
+    return {
+      mainArea: "chat",
+      workspaceId: null,
+      workspaceTab: "chat",
+      workspaceDocId: null,
+    };
+  }
   if (area && AREA_SET.has(area as MainArea)) {
     return {
       mainArea: area as MainArea,

@@ -3,12 +3,8 @@
 /**
  * Composer — auto-growing textarea. Enter sends, Shift+Enter inserts a
  * newline. Disabled while the agent is thinking/streaming (busy).
- * When the active thread is bound to a project, a small «Проект: …» chip
- * sits above the input (click → project screen).
- *
- * Slash commands (Stage 4): typing "/" opens a command menu above the input —
- * mode switches, quick note prefix, create project, notebook, global search,
- * checkpoint and zip export (last two need a bound project).
+ * Slash commands: typing "/" opens a command menu above the input —
+ * mode switches, quick note prefix, notebook, global search.
  *
  * Voice (Stage 2): compact mic next to the send button — records via
  * useVoiceRecorder, the backend transcribes (POST /api/notes/voice → { text })
@@ -20,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, FolderGit2, Loader2, Mic, Square } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -43,7 +39,6 @@ import {
   useVoiceRecorder,
   type VoiceClip,
 } from "@/hooks/use-voice-recorder";
-import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { api, ApiError } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
@@ -65,12 +60,8 @@ export function Composer({
 }) {
   const { busy, sendMessage, abortTurn, activeThread, updateThreadMode, sendError, clearSendError } =
     useThreads();
-  const { getById } = useProjects();
-  const openProject = useAppUi((s) => s.openProject);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
-  const openCreateProject = useAppUi((s) => s.openCreateProject);
-  const bumpProjectFiles = useAppUi((s) => s.bumpProjectFiles);
   const composerDraft = useAppUi((s) => s.composerDraft);
   const composerAutoSendProjectId = useAppUi((s) => s.composerAutoSendProjectId);
   const setComposerDraft = useAppUi((s) => s.setComposerDraft);
@@ -111,7 +102,6 @@ export function Composer({
   const threadProjectId = activeThread?.projectId ?? null;
   const scoped =
     scopeProjectId === undefined || threadProjectId === scopeProjectId;
-  const boundProject = scoped ? getById(threadProjectId) : null;
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
@@ -134,13 +124,6 @@ export function Composer({
         },
       },
       {
-        name: "проект",
-        label: "Новый проект",
-        description: "Создать проект: шаблон, GitHub или zip",
-        icon: SLASH_MISC_ICONS.project,
-        run: () => openCreateProject(),
-      },
-      {
         name: "блокнот",
         label: "Блокнот",
         description: "Открыть все заметки",
@@ -150,7 +133,7 @@ export function Composer({
       {
         name: "поиск",
         label: "Поиск",
-        description: "Искать по диалогам, заметкам и проектам",
+        description: "Искать по диалогам, заметкам и воркспейсам",
         icon: SLASH_MISC_ICONS.search,
         run: () => setSearchOpen(true),
       },
@@ -182,72 +165,9 @@ export function Composer({
       }
     }
 
-    if (boundProject) {
-      list.push(
-        {
-          name: "чекпоинт",
-          label: "Чекпоинт",
-          description: `Сохранить изменения проекта «${boundProject.name}»`,
-          icon: SLASH_MISC_ICONS.checkpoint,
-          run: async () => {
-            try {
-              const checkpoint = await api.createProjectCheckpoint(
-                boundProject.id,
-                `Чекпоинт из диалога · ${new Date().toLocaleString("ru-RU")}`,
-              );
-              if (checkpoint.noop) {
-                toast.info("Изменений нет — чекпоинт не нужен");
-              } else {
-                toast.success("Чекпоинт создан", {
-                  description: `${checkpoint.commit?.short ?? ""} · ${checkpoint.filesChanged} файл(ов)`,
-                });
-                bumpProjectFiles();
-              }
-            } catch (err) {
-              toast.error(
-                err instanceof ApiError ? err.message : "Не удалось создать чекпоинт",
-              );
-            }
-          },
-        },
-        {
-          name: "скачать",
-          label: "Скачать zip",
-          description: `Скачать «${boundProject.name}» архивом`,
-          icon: SLASH_MISC_ICONS.download,
-          run: async () => {
-            try {
-              const res = await fetch(api.projectExportUrl(boundProject.id), {
-                credentials: "same-origin",
-              });
-              if (!res.ok) {
-                const body = (await res.json().catch(() => ({}))) as { error?: string };
-                throw new Error(body.error ?? "Не удалось упаковать проект");
-              }
-              const blob = await res.blob();
-              const objectUrl = URL.createObjectURL(blob);
-              const anchor = document.createElement("a");
-              anchor.href = objectUrl;
-              anchor.download = `pocketstudio-${boundProject.name}.zip`;
-              document.body.append(anchor);
-              anchor.click();
-              anchor.remove();
-              URL.revokeObjectURL(objectUrl);
-              toast.success("Архив проекта готов");
-            } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Не удалось упаковать проект");
-            }
-          },
-        },
-      );
-    }
-
     return list;
   }, [
     activeThread,
-    boundProject,
-    bumpProjectFiles,
-    openCreateProject,
     setMainArea,
     setSearchOpen,
     updateThreadMode,
@@ -397,17 +317,6 @@ export function Composer({
           onExecute={executeCommand}
         />
 
-        {boundProject && (
-          <button
-            type="button"
-            onClick={() => openProject(boundProject.id)}
-            aria-label={`Проект «${boundProject.name}» — открыть`}
-            className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary outline-none transition-colors duration-150 hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-            <span className="truncate">Проект: {boundProject.name}</span>
-          </button>
-        )}
         <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
           <label htmlFor="composer" className="sr-only">
             Сообщение

@@ -29,7 +29,7 @@ const STEPS = [
     step: "2",
     title: "Студия создаёт",
     description:
-      "Тексты, картинки, звук, видео и код приложения появляются в одном окне.",
+      "Сценарий, кадры, звук и монтаж появляются в одном окне.",
   },
   {
     step: "3",
@@ -74,7 +74,7 @@ export function HowItWorksSection({
           </Reveal>
           <Reveal delay={0.08}>
             <h2 className="max-w-xl text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
-              Готовы выпустить первую работу из кармана?
+              Готовы выпустить первый фильм из кармана?
             </h2>
           </Reveal>
           <Reveal delay={0.16}>

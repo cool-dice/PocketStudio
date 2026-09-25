@@ -80,7 +80,7 @@ export function LibraryScreen({
         api.listAllArtifacts(),
         api.listWorkspaces(),
       ]);
-      setArtifacts(all);
+      setArtifacts(all.filter((item) => item.type !== "app" && item.type !== "deploy"));
       setWorkspaces(ws);
     } catch (err) {
       setLoadError(

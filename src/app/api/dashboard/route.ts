@@ -43,7 +43,7 @@ export async function GET(req: Request) {
   }
 
   const workspaces = await db.project.findMany({
-    where: { userId: session.sub, origin: "workspace" },
+    where: { userId: session.sub, origin: "workspace", type: { not: "app" } },
     select: { id: true },
   });
   const workspaceIds = workspaces.map((w) => w.id);
@@ -53,7 +53,12 @@ export async function GET(req: Request) {
     await Promise.all([
       emptyIds
         ? Promise.resolve(0)
-        : db.artifact.count({ where: { projectId: { in: workspaceIds } } }),
+        : db.artifact.count({
+            where: {
+              projectId: { in: workspaceIds },
+              type: { notIn: ["app", "deploy"] },
+            },
+          }),
       db.note.count({
         where: {
           userId: session.sub,
@@ -64,13 +69,17 @@ export async function GET(req: Request) {
         where: {
           userId: session.sub,
           origin: "workspace",
+          type: { not: "app" },
           progress: { gt: 0, lt: 100 },
         },
       }),
       emptyIds
         ? Promise.resolve([])
         : db.artifact.findMany({
-            where: { projectId: { in: workspaceIds } },
+            where: {
+              projectId: { in: workspaceIds },
+              type: { notIn: ["app", "deploy"] },
+            },
             orderBy: { createdAt: "desc" },
             take: 12,
             select: {
