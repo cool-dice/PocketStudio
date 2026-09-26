@@ -102,7 +102,7 @@ export function HomeChatWidget() {
 
   return (
     <section
-      aria-label="Чат со студией"
+      aria-label="Чат киностудии"
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm"
     >
       {/* ── Шапка виджета ── */}
@@ -110,12 +110,12 @@ export function HomeChatWidget() {
         <LogoMark className="size-7 shrink-0 rounded-lg" />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold leading-tight">
-            Чат со студией
+            Чат киностудии
           </h2>
           <p className="truncate text-[11px] leading-tight text-muted-foreground">
             {activeThread?.projectId == null
               ? (activeThread?.title ?? "Новый диалог")
-              : "Диалог студии"}
+              : "Диалог киностудии"}
           </p>
         </div>
         {busy && (

@@ -46,8 +46,11 @@ describe("landing CTA and honesty copy", () => {
     expect(LANDING_MCP_BLURB).toMatch(/GitHub/i);
     expect(LANDING_MCP_BLURB).toMatch(/не подключ/i);
     expect(LANDING_MONETIZE_BLURB).toMatch(/карточная сеть не подключена/i);
-    expect(LANDING_CHAT_MOCK_PILL).toMatch(/симуляц/i);
+    expect(LANDING_CHAT_MOCK_PILL).toMatch(/выпуск/i);
     expect(LANDING_CHAT_MOCK_PILL).not.toMatch(/продаж/i);
+    expect(LANDING_CHAT_MOCK_PILL).not.toMatch(/оффер/i);
+    expect(blob).toMatch(/киностуд/i);
+    expect(blob).not.toMatch(/студия разработки|код-проект|next\.js/i);
     expect(LANDING_META_DESCRIPTION).toMatch(/отдельные шаги/i);
     expect(LANDING_META_DESCRIPTION).not.toMatch(/публикует его/i);
   });

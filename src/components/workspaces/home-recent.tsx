@@ -61,7 +61,7 @@ export function HomeRecent({ limit = 3 }: { limit?: number }) {
         </div>
       ) : items.length === 0 ? (
         <p className="rounded-xl border border-dashed px-4 py-8 text-center text-xs text-muted-foreground">
-          Пока нет ни одного воркспейса — создайте первый на дашборде.
+          Пока нет картин. Создайте фильм — книга и трек могут идти рядом.
         </p>
       ) : (
         <>

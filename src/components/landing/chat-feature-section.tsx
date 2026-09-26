@@ -13,7 +13,7 @@ import {
   ArrowUp,
   Check,
   Clapperboard,
-  Coins,
+  Film,
   ImagePlus,
   Layers,
   Loader2,
@@ -241,7 +241,7 @@ function ChatMock() {
           delay: 0.8,
         }}
       >
-        <Coins className="size-3.5 text-primary" />
+        <Film className="size-3.5 text-primary" />
         {LANDING_CHAT_MOCK_PILL}
       </motion.div>
       </div>

@@ -33,7 +33,7 @@ const STEPS = [
   },
   {
     step: "3",
-    title: "Соберите оффер и следите за кабинетом",
+    title: "Смонтируйте и выпустите",
     description: LANDING_HOW_STEP3,
   },
 ] as const;

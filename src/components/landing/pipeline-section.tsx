@@ -2,7 +2,7 @@
 
 /**
  * Pipeline — «Один конвейер — весь путь».
- * Идея → Создание → Монетизация: three big cards joined by animated arrow
+ * Сценарий → Кадры → Выпуск: three big cards joined by animated arrow
  * chips (vertical on mobile, horizontal with gradient dashes on desktop).
  */
 
@@ -10,14 +10,14 @@ import { motion } from "framer-motion";
 import {
   ArrowDown,
   ArrowRight,
-  Coins,
-  MessageSquareText,
-  Wand2,
+  Clapperboard,
+  Film,
+  ImagePlus,
   type LucideIcon,
 } from "lucide-react";
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
-import { LANDING_PIPELINE_MONETIZE } from "@/lib/landing-copy";
+import { LANDING_PIPELINE_RELEASE } from "@/lib/landing-copy";
 
 const STEPS: {
   step: string;
@@ -27,23 +27,23 @@ const STEPS: {
 }[] = [
   {
     step: "1",
-    icon: MessageSquareText,
-    title: "Идея",
+    icon: Clapperboard,
+    title: "Сценарий",
     description:
-      "Опишите мысль словами или голосом — оркестратор поймёт контекст.",
+      "Опишите фильм словами или голосом — оркестратор держит замысел и реплики.",
   },
   {
     step: "2",
-    icon: Wand2,
-    title: "Создание",
+    icon: ImagePlus,
+    title: "Кадры",
     description:
-      "Сценарий, раскадровка, кадры, озвучка и монтаж рождаются в одном диалоге.",
+      "Раскадровка, картинка и озвучка рождаются в одном диалоге, рядом со сценарием.",
   },
   {
     step: "3",
-    icon: Coins,
-    title: "Монетизация",
-    description: LANDING_PIPELINE_MONETIZE,
+    icon: Film,
+    title: "Выпуск",
+    description: LANDING_PIPELINE_RELEASE,
   },
 ];
 
@@ -54,7 +54,7 @@ export function PipelineSection() {
         <SectionHeader
           overline="Конвейер"
           title="Один конвейер — весь путь"
-          description="Никаких переключений между десятком сервисов: каждый шаг от замысла до дохода живёт в одном окне."
+          description="Никаких переключений между десятком сервисов: сценарий, кадры и выпуск живут в одном окне."
         />
         <div className="flex flex-col lg:grid lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-stretch lg:gap-2">
           <PipelineStep {...STEPS[0]} delay={0} />
