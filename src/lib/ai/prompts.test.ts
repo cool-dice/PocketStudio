@@ -11,6 +11,8 @@ import {
   IMAGE_PROMPT_PREFIX,
   sectionSystemFor,
   sectionAiAction,
+  SECTION_SELECTION_SYSTEM,
+  selectionRewriteUserPrompt,
   wrapSkillDocs,
 } from "./prompts";
 
@@ -47,6 +49,15 @@ describe("prompt library", () => {
     expect(sectionAiAction("")).toBe("write");
     expect(sectionAiAction("   ")).toBe("write");
     expect(sectionAiAction("уже есть текст")).toBe("rewrite");
+  });
+
+  test("selection rewrite asks only for the fragment", () => {
+    expect(SECTION_SELECTION_SYSTEM).toContain("ТОЛЬКО новый текст этого фрагмента");
+    expect(SECTION_SELECTION_SYSTEM).not.toContain("ПОЛНЫЙ новый текст главы");
+    const prompt = selectionRewriteUserPrompt("Шторм не стихал.", "сделай короче");
+    expect(prompt).toContain("Шторм не стихал.");
+    expect(prompt).toContain("Инструкция автора: сделай короче");
+    expect(prompt).not.toContain("Маяк");
   });
 
   test("skill wrapper does not duplicate identity", () => {

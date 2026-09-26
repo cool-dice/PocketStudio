@@ -103,6 +103,16 @@ export const SECTION_CONTINUE_SYSTEM = `Ты — соавтор PocketStudio. Н
 export const SECTION_CUSTOM_SYSTEM = `Ты — редактор PocketStudio. Выполни инструкцию автора и верни ПОЛНЫЙ новый текст главы.
 Без заголовка, без пояснений, без markdown-обёртки. Только текст главы.`;
 
+/** Floating selection chat. Same tool id as chapter rewrite: `rewrite_section`. */
+export const SECTION_SELECTION_SYSTEM = `Ты — редактор PocketStudio. Автор выделил фрагмент главы и написал, как его изменить.
+Верни ТОЛЬКО новый текст этого фрагмента.
+Не возвращай остальную главу, заголовок, кавычки вокруг всего ответа, markdown-ограждение и пояснения.
+Сохрани факты и тон, если инструкция этого не меняет. Язык — язык фрагмента.`;
+
+export function selectionRewriteUserPrompt(selection: string, instruction: string): string {
+  return [`Фрагмент:`, selection, ``, `Инструкция автора: ${instruction}`].join("\n");
+}
+
 /** Empty chapter → write-from-scratch; otherwise rewrite in place. */
 export function sectionAiAction(content: string): "write" | "rewrite" {
   return content.trim().length === 0 ? "write" : "rewrite";

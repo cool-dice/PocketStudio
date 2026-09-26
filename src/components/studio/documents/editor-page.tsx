@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import type { DocumentDto, DocumentSectionDto } from "@/lib/workspace-types";
 import type { SectionPatch } from "@/hooks/use-documents";
 import type { SaveState } from "./editor-toolbar";
+import { SelectionChat } from "./selection-chat";
 import { agoFromISO, charsLabel, docKindMeta, docProgress, formatNumber, wordsLabel } from "./types";
 
 const AUTOSAVE_DELAY_MS = 800;
@@ -300,6 +301,11 @@ export function EditorPage({
         spellCheck
         rows={16}
         className="mt-8 block min-h-[45vh] w-full resize-none rounded-xl bg-transparent font-serif text-[15px] leading-[1.85] text-foreground/90 outline-none placeholder:text-muted-foreground/60 sm:text-base"
+      />
+      <SelectionChat
+        textareaRef={textareaRef}
+        sectionId={section.id}
+        onReplace={onChange}
       />
     </article>
   );
