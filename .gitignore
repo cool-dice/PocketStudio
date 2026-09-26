@@ -59,3 +59,6 @@ db/custom.db
 db/custom.db-journal
 db/custom.db-shm
 db/custom.db-wal
+
+# Per-project git repos on disk (workspace/<id>). Never commit.
+/workspace/
