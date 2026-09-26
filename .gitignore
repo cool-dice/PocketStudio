@@ -66,3 +66,15 @@ db/custom.db-wal
 # Old VibeMind / Aiflow archives. Not part of the product.
 /prototypes/
 /public/gen/
+
+# JetBrains local state (shelf, workspace.xml, caches). Not changes.
+# The three files below are the shared project: one Git root, and
+# workspace/ + prototypes/ excluded so nested film repos are not roots.
+.idea/*
+!.idea/vcs.xml
+!.idea/modules.xml
+!.idea/PocketStudio.iml
+
+# Editor leftovers. Shared scan limit lives in settings.json.
+.vscode/*
+!.vscode/settings.json
