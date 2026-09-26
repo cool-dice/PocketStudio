@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Menu, Mic, Plus, RotateCcw } from "lucide-react";
+import { Menu, Mic, RotateCcw, AudioWaveform, BookOpenText, Clapperboard } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -108,7 +108,7 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
                 Привет{firstName ? `, ${firstName}` : ""}!
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Студия готова: спросите, создайте или продолжите начатое
+                Киностудия готова: сценарий, кадры, озвучка и монтаж. Книга и саундтрек — рядом с картиной.
               </p>
             </div>
 
@@ -122,15 +122,31 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
                 <Mic className="size-4" aria-hidden="true" />
                 Записать мысль
               </Button>
-              <Button onClick={() => openCreateWorkspace()} className="gap-2">
-                <Plus className="size-4" aria-hidden="true" />
-                Новый воркспейс
+              <Button
+                variant="outline"
+                onClick={() => openCreateWorkspace("book")}
+                className="gap-2"
+              >
+                <BookOpenText className="size-4" aria-hidden="true" />
+                Книга
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => openCreateWorkspace("music")}
+                className="gap-2"
+              >
+                <AudioWaveform className="size-4" aria-hidden="true" />
+                Трек
+              </Button>
+              <Button onClick={() => openCreateWorkspace("film")} className="gap-2">
+                <Clapperboard className="size-4" aria-hidden="true" />
+                Новый фильм
               </Button>
             </div>
           </header>
 
           {/* Статистика студии (живые счётчики /api/dashboard) */}
-          <section aria-label="Статистика студии">
+          <section aria-label="Статистика киностудии">
             {stats ? (
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {stats.map((stat) => (
@@ -156,7 +172,7 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
             ) : dashError ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-5">
                 <p className="text-sm text-muted-foreground">
-                  Не удалось загрузить статистику студии.
+                  Не удалось загрузить статистику киностудии.
                 </p>
                 <Button variant="outline" size="sm" onClick={reloadDashboard}>
                   <RotateCcw className="size-3.5" aria-hidden="true" />
@@ -167,7 +183,7 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
               <div
                 className="grid grid-cols-2 gap-3 md:grid-cols-4"
                 role="status"
-                aria-label="Загрузка статистики студии"
+                aria-label="Загрузка статистики киностудии"
               >
                 {Array.from({ length: 4 }, (_, i) => (
                   <div key={i} className="rounded-xl border bg-card p-4">
@@ -197,7 +213,7 @@ export function HomeScreen({ onOpenMobileNav }: { onOpenMobileNav: () => void })
           <HomeRecent />
 
           <p className="pb-2 text-center text-[11px] text-muted-foreground">
-            Статистика, активность и воркспейсы — живые данные из БД студии · Фаза A.
+            Сценарий, кадры, звук и монтаж — живые данные киностудии.
           </p>
         </div>
       </div>

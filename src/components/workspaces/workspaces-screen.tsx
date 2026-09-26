@@ -219,7 +219,7 @@ export function WorkspacesScreen({
         )}
 
         <p className="mt-6 pb-1 text-center text-[10px] text-muted-foreground">
-          Воркспейсы, стадии и счётчики — живые данные из БД студии · Фаза A
+          Воркспейсы, стадии и счётчики — живые данные киностудии
         </p>
       </div>
     </div>

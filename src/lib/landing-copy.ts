@@ -33,7 +33,7 @@ export function landingHeroNote(firstUserBecomesAdmin = false): string {
     .join(" ");
 }
 
-export const LANDING_LAUNCH_CAPTION = "оффер в студии, не прокат";
+export const LANDING_LAUNCH_CAPTION = "черновой выпуск, не прокат";
 
 export const LANDING_DEPLOY_BLURB =
   "Dockerfile и zip готовы. Сборка образа — если docker есть на машине, иначе честный статус «нет демона». Это не публикация на хост.";
@@ -44,26 +44,26 @@ export const LANDING_MCP_BLURB =
 export const LANDING_MONETIZE_BLURB =
   "Офферы и кабинет выплат. Карточная сеть не подключена: статус ставит админ или симуляция.";
 
-export const LANDING_PIPELINE_MONETIZE =
-  "Соберите оффер и кабинет выплат. Карточная сеть не подключена: статус «оплачено» ставит админ или симуляция.";
+export const LANDING_PIPELINE_RELEASE =
+  "Смонтируйте картину и заберите файлы. Прокат на площадках — отдельный шаг, не эта кнопка.";
 
 export const LANDING_HOW_DESCRIPTION =
-  "Три шага от пустого экрана до оффера в студии. Внешний хост и карточные выплаты — не часть этой кнопки.";
+  "Три шага от пустого экрана до чернового выпуска фильма. Прокат на площадках и карточные выплаты — отдельные шаги.";
 
 export const LANDING_HOW_STEP3 =
-  "Цена и статус живут в студии. Живой эквайринг ещё не подключён — симуляция и пометка админа, не фейковый «ушло на хост».";
+  "Монтаж собирает черновой выпуск в студии. Прокат и живые выплаты сюда не входят.";
 
 export const LANDING_CHAT_SECTION =
-  "Не переключайтесь между редакторами и генераторами: оркестратор слушает, модули снимают фильм. Выпуск — оффер в студии, не прокат на площадке.";
+  "Не переключайтесь между редакторами и генераторами: оркестратор слушает, модули снимают фильм — от сценария до монтажа.";
 
 export const LANDING_CHAT_MOCK_LABEL = "Макет диалога — не живой чат";
 
-export const LANDING_CHAT_MOCK_PILL = "Оффер · симуляция";
+export const LANDING_CHAT_MOCK_PILL = "Черновой выпуск · не прокат";
 
 export function landingCtaBandNote(firstUserBecomesAdmin = false): string {
   const admin = firstUserAdminHint(firstUserBecomesAdmin);
   return [
-    "Регистрация занимает минуту — студия уже ждёт первую идею.",
+    "Регистрация занимает минуту — киностудия уже ждёт первый замысел.",
     admin,
   ]
     .filter(Boolean)
@@ -80,7 +80,7 @@ export function landingMarketingBlob(): string {
     LANDING_DEPLOY_BLURB,
     LANDING_MCP_BLURB,
     LANDING_MONETIZE_BLURB,
-    LANDING_PIPELINE_MONETIZE,
+    LANDING_PIPELINE_RELEASE,
     LANDING_HOW_DESCRIPTION,
     LANDING_HOW_STEP3,
     LANDING_CHAT_SECTION,
