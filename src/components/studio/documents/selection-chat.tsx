@@ -91,6 +91,17 @@ function textareaCaretViewport(
   return { top: rect.top + top, left: rect.left + left };
 }
 
+function revealCaret(el: HTMLTextAreaElement, position: number): void {
+  const point = textareaCaretViewport(el, position);
+  const scroller = el.closest(".vf-scroll");
+  if (!(scroller instanceof HTMLElement)) return;
+  const rect = scroller.getBoundingClientRect();
+  const topBound = rect.top + 36;
+  const bottomBound = Math.min(rect.bottom, window.innerHeight) - 150;
+  if (point.top >= topBound && point.top <= bottomBound) return;
+  scroller.scrollTop += point.top - (rect.top + 96);
+}
+
 function excerptOf(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length <= 160) return flat;
@@ -226,8 +237,10 @@ export function SelectionChat({
 
   useLayoutEffect(() => {
     if (!target) return;
+    const el = textareaRef.current;
+    if (el) revealCaret(el, target.end);
     setTick((n) => n + 1);
-  }, [target]);
+  }, [target, textareaRef]);
 
   const pos = useMemo(() => {
     if (!target || typeof window === "undefined") return null;
@@ -283,6 +296,7 @@ export function SelectionChat({
         return;
       }
       writeRange(el, pinned.start, pinned.end, replacement);
+      revealCaret(el, pinned.start);
       onReplace(el.value);
       toast.success("Фрагмент изменён", {
         description: "Остальной текст главы на месте.",
