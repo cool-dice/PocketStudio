@@ -12,13 +12,13 @@ export const VIDEO_MODULE_DESCRIPTION =
   "Раскадровка, монтажный стол и сборка WebM — не Premiere";
 
 export const DESIGN_LANDING_BLURB =
-  "Растр и макет для ручных правок. Это не Photoshop и не Figma.";
+  "Титры, постеры и мудборд картины — ручная доводка кадра.";
 
 export const AUDIO_LANDING_BLURB =
-  "Озвучка и карманная DAW. Это не FL Studio.";
+  "Речь героев и саундтрек собираются рядом со сценарием.";
 
 export const VIDEO_LANDING_BLURB =
-  "Сценарий, раскадровка и базовый монтаж. Это не Premiere.";
+  "Раскадровка, сцены и черновой монтаж трейлера в одном окне.";
 
 export const NLE_SCOPE_HINT =
   "Базовый монтажный стол: V1–V2, бритва, LUT. Не Premiere и не двухчасовой пайплайн.";

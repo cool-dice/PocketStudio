@@ -38,15 +38,15 @@ const BULLETS: {
 }[] = [
   {
     icon: Layers,
-    title: "Контекст всей студии — в одном чате",
+    title: "Вся картина — в одном чате",
     description:
-      "Сценарий, кадры и последние правки уже в памяти: не пересказывайте каждый раз заново.",
+      "Сценарий, кадры и последние правки уже в памяти: не пересказывайте сцену заново.",
   },
   {
     icon: MousePointerClick,
-    title: "Правки прямо в превью",
+    title: "Правки прямо в кадре",
     description:
-      "Выделите элемент и скажите, что поменять, — студия внесёт изменение сама.",
+      "Укажите кадр или реплику и скажите, что поменять, — студия поправит сама.",
   },
   {
     icon: Mic,
@@ -62,8 +62,8 @@ export function ChatFeatureSection() {
       <div className="mx-auto grid w-full max-w-6xl items-center gap-12 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:py-20">
         <div>
           <SectionHeader
-            overline="Пульт управления"
-            title="Диалог — главный пульт"
+            overline="Съёмка"
+            title="Диалог ведёт картину"
             description={LANDING_CHAT_SECTION}
           />
           <ul className="space-y-6">
@@ -213,7 +213,7 @@ function ChatMock() {
           {/* composer */}
           <div className="pointer-events-none flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-xs text-muted-foreground">
             <span className="flex-1 truncate">
-              Опишите задачу… или / для команд
+              Опишите сцену… или / для команд
             </span>
             <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <ArrowUp className="size-3" />

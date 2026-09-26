@@ -8,11 +8,11 @@
 
 import {
   AudioWaveform,
-  Blocks,
   BookOpenText,
   Clapperboard,
   Coins,
   ImagePlus,
+  NotebookPen,
   PenTool,
   Wand2,
   type LucideIcon,
@@ -20,8 +20,9 @@ import {
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
 import {
-  LANDING_MCP_BLURB,
+  LANDING_CRAFT_BLURB,
   LANDING_MONETIZE_BLURB,
+  LANDING_NOTES_BLURB,
 } from "@/lib/landing-copy";
 import {
   AUDIO_LANDING_BLURB,
@@ -36,42 +37,42 @@ const MODULES: {
 }[] = [
   {
     icon: BookOpenText,
-    title: "Документы",
-    description: "Сценарии, синопсисы и исходные тексты со структурой глав и ИИ-редактором.",
+    title: "Сценарий",
+    description: "Синопсис, сцены и реплики со структурой глав.",
   },
   {
     icon: ImagePlus,
-    title: "Изображения",
-    description: "Раскадровка, концепты и постеры по текстовому описанию.",
+    title: "Кадры",
+    description: "Раскадровка, концепты и ключевые кадры по описанию сцены.",
   },
   {
     icon: PenTool,
-    title: "Дизайн",
+    title: "Постеры",
     description: DESIGN_LANDING_BLURB,
   },
   {
     icon: AudioWaveform,
-    title: "Аудио",
+    title: "Озвучка",
     description: AUDIO_LANDING_BLURB,
   },
   {
     icon: Clapperboard,
-    title: "Видео",
+    title: "Монтаж",
     description: VIDEO_LANDING_BLURB,
   },
   {
-    icon: Blocks,
-    title: "Интеграции",
-    description: LANDING_MCP_BLURB,
+    icon: NotebookPen,
+    title: "Заметки",
+    description: LANDING_NOTES_BLURB,
   },
   {
     icon: Wand2,
-    title: "Скиллы",
-    description: "Импортируйте и создавайте навыки оркестратора.",
+    title: "Приёмы",
+    description: LANDING_CRAFT_BLURB,
   },
   {
     icon: Coins,
-    title: "Монетизация",
+    title: "Кабинет",
     description: LANDING_MONETIZE_BLURB,
   },
 ];
@@ -83,7 +84,7 @@ export function ModulesSection() {
         <SectionHeader
           overline="Модули"
           title="Киностудия — в одном окне"
-          description="Модули закрывают путь от замысла до выпуска: сценарий, кадры, звук, монтаж и оффер, не выпуская картину из диалога."
+          description="Сценарий, кадры, озвучка, монтаж и выпуск — в одном окне, не выходя из диалога."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {MODULES.map((module, i) => (

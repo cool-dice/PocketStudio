@@ -1,3 +1,8 @@
+import {
+  AUDIO_LANDING_BLURB,
+  DESIGN_LANDING_BLURB,
+  VIDEO_LANDING_BLURB,
+} from "./studio-copy";
 /**
  * Guest landing + auth CTA copy.
  * Do not promise live hosting, card payouts, or a connected GitHub MCP.
@@ -21,7 +26,7 @@ export const LANDING_META_DESCRIPTION =
   "PocketStudio — карманная киностудия от А до Я: диалог с ИИ ведёт фильм от замысла и сценария до кадров, озвучки, монтажа и выпуска. Прокат на площадках и карточные выплаты — отдельные шаги.";
 
 export const LANDING_HERO_SUB =
-  "PocketStudio ведёт фильм целиком: замысел, сценарий, раскадровка, кадры, озвучка, монтаж и выпуск. Книга и музыка остаются рядом, если картине нужны исходник и саундтрек. Выплаты симулируются: карточная сеть не подключена.";
+  "От замысла до выпуска: сценарий, раскадровка, кадры, озвучка и монтаж. Книга и музыка остаются рядом, если картине нужны исходник и саундтрек.";
 
 export function landingHeroNote(firstUserBecomesAdmin = false): string {
   return [
@@ -38,11 +43,14 @@ export const LANDING_LAUNCH_CAPTION = "черновой выпуск, не пр�
 export const LANDING_DEPLOY_BLURB =
   "Dockerfile и zip готовы. Сборка образа — если docker есть на машине, иначе честный статус «нет демона». Это не публикация на хост.";
 
-export const LANDING_MCP_BLURB =
-  "Fetch, файлы и браузер работают в чате. GitHub и другие stdio — сохранённый конфиг, процесс не подключён.";
+export const LANDING_NOTES_BLURB =
+  "Замысел, персонажи и обрывки реплик не теряются между сессиями.";
+
+export const LANDING_CRAFT_BLURB =
+  "Жанр, тон и привычки студии помнятся от сцены к сцене.";
 
 export const LANDING_MONETIZE_BLURB =
-  "Офферы и кабинет выплат. Карточная сеть не подключена: статус ставит админ или симуляция.";
+  "Цена и статус картины живут в кабинете. Карточная сеть не подключена.";
 
 export const LANDING_PIPELINE_RELEASE =
   "Смонтируйте картину и заберите файлы. Прокат на площадках — отдельный шаг, не эта кнопка.";
@@ -54,7 +62,7 @@ export const LANDING_HOW_STEP3 =
   "Монтаж собирает черновой выпуск в студии. Прокат и живые выплаты сюда не входят.";
 
 export const LANDING_CHAT_SECTION =
-  "Не переключайтесь между редакторами и генераторами: оркестратор слушает, модули снимают фильм — от сценария до монтажа.";
+  "Один диалог ведёт картину: сценарий, кадры, озвучка и монтаж, без прыжков между сервисами.";
 
 export const LANDING_CHAT_MOCK_LABEL = "Макет диалога — не живой чат";
 
@@ -77,9 +85,12 @@ export function landingMarketingBlob(): string {
     landingHeroNote(false),
     landingHeroNote(true),
     LANDING_LAUNCH_CAPTION,
-    LANDING_DEPLOY_BLURB,
-    LANDING_MCP_BLURB,
+    LANDING_NOTES_BLURB,
+    LANDING_CRAFT_BLURB,
     LANDING_MONETIZE_BLURB,
+    DESIGN_LANDING_BLURB,
+    AUDIO_LANDING_BLURB,
+    VIDEO_LANDING_BLURB,
     LANDING_PIPELINE_RELEASE,
     LANDING_HOW_DESCRIPTION,
     LANDING_HOW_STEP3,

@@ -135,10 +135,10 @@ function HeroTileDock() {
           </span>
           <span className="text-left">
             <span className="block text-sm leading-tight font-semibold">
-              Оркестратор
+              Диалог
             </span>
             <span className="block text-[11px] leading-tight text-muted-foreground">
-              держит весь контекст
+              ведёт картину целиком
             </span>
           </span>
         </motion.div>
