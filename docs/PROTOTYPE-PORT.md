@@ -1,8 +1,6 @@
 # Prototype port — gap analysis
 
-`prototypes/proto1` is an **empty directory** in this repo. Proto1 (VibeMind)
-behavior is reconstructed from `worklog.md` and already-migrated notebook code.
-`prototypes/proto2/Aiflow-main` is present; Gitea, BullMQ, and Docker sandboxes stay replaced per `worklog.md`. **PostgreSQL + pgvector RAG is required** (not a leftover toy): main chat sees the current user's workspaces; workspace chat never leaves that `Project.id`. A personal coder in an app workspace must not see another repo.
+Каталог `prototypes/` из репозитория убран. Ниже — что из VibeMind и Aiflow уже живёт в продукте. **PostgreSQL + pgvector RAG обязателен**: главный чат видит воркспейсы текущего пользователя; чат воркспейса не выходит за `Project.id`.
 
 ## proto1 VibeMind
 

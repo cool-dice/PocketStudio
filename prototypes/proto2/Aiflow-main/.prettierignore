@@ -1,9 +1,0 @@
-node_modules/
-.yarn/
-.next/
-dist/
-build/
-coverage/
-generated/
-*.log
-yarn.lock

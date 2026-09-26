@@ -62,3 +62,6 @@ db/custom.db-wal
 
 # Per-project git repos on disk (workspace/<id>). Never commit.
 /workspace/
+
+# Old VibeMind / Aiflow archives. Not part of the product.
+/prototypes/
