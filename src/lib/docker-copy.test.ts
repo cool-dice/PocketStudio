@@ -3,9 +3,12 @@ import { describe, expect, test } from "bun:test";
 import {
   DOCKERFILE_MISSING_ERROR,
   DOCKERFILE_NOT_PUBLISHED,
+  DOCKERFILE_NOT_PUBLISHED_CODE,
   DOCKER_BUILD_LOCAL_ONLY,
   DOCKER_DAEMON_MISSING_LOG,
   DEPLOY_APP_ONLY_ERROR,
+  DEPLOY_CODE_READY_HINT,
+  DEPLOY_SANDBOX_BLURB,
   DEPLOY_SCREEN_DESCRIPTION,
   DEPLOY_SCREEN_TITLE,
   DEPLOY_ZIP_HINT,
@@ -24,6 +27,9 @@ describe("deploy honesty copy", () => {
   test("generate and empty copy never claim a published image", () => {
     const blob = [
       DOCKERFILE_NOT_PUBLISHED,
+      DOCKERFILE_NOT_PUBLISHED_CODE,
+      DEPLOY_CODE_READY_HINT,
+      DEPLOY_SANDBOX_BLURB,
       EMPTY_APP_BUILD_ERROR,
       DOCKERFILE_MISSING_ERROR,
       DOCKER_DAEMON_MISSING_LOG,
@@ -31,7 +37,10 @@ describe("deploy honesty copy", () => {
     ].join("\n");
     expect(blob).not.toMatch(FAKE_SUCCESS);
     expect(DOCKERFILE_NOT_PUBLISHED).toMatch(/не опубликован/i);
-    expect(EMPTY_APP_BUILD_ERROR).toMatch(/пустой/i);
+    expect(DOCKERFILE_NOT_PUBLISHED_CODE).toMatch(/хоста нет/i);
+    expect(DEPLOY_CODE_READY_HINT).not.toMatch(/https?:\/\//i);
+    expect(DEPLOY_SANDBOX_BLURB).toMatch(/не деплой/i);
+    expect(EMPTY_APP_BUILD_ERROR).toMatch(/пуст/i);
     expect(dockerCliMissingLog("abc12345", "/tmp/app")).toMatch(/docker build/i);
     expect(DOCKER_BUILD_LOCAL_ONLY).toMatch(/не публикация/i);
     expect(DOCKER_BUILD_LOCAL_ONLY).not.toMatch(FAKE_SUCCESS);

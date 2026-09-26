@@ -28,7 +28,8 @@
 // final answer streams (nothing slow may run after message:end — the busy
 // flag clears as soon as the turn returns).
 //
-// Path MUST be "/" (Caddy gateway requirement), port 3003 (hardcoded).
+// Path is `/socket.io` so Next :3000 can rewrite it; Caddy :81 still
+// routes by `?XTransformPort=3003`. Port 3003 is hardcoded.
 
 import { createServer } from "http";
 import { randomUUID } from "node:crypto";
@@ -94,6 +95,8 @@ import {
   MESSAGE_SEND_MAX_PACKET_BYTES,
   parseMessageSend,
 } from "../../src/lib/message-send";
+import { AGENT_SOCKET_PATH } from "../../src/lib/agent-socket";
+import { THREAD_NOT_FOUND, threadLookupError } from "../../src/lib/thread-copy";
 
 const PORT = 3003;
 const HISTORY_LIMIT = 30; // last N message rows fed to the LLM (all roles)
@@ -116,8 +119,9 @@ const ORCHESTRATE_MIN_CHARS = 24; // act-mode request length gate for planning
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
-  // DO NOT change the path — Caddy uses it to forward to this port.
-  path: "/",
+  // `/socket.io` (not `/`) so Next :3000 can rewrite without colliding
+  // with the app shell. Caddy :81 still keys off `?XTransformPort=3003`.
+  path: AGENT_SOCKET_PATH,
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
@@ -851,6 +855,32 @@ async function executeToolCall(opts: {
           p.id,
         );
       }
+    } else if (call.tool === "create_workspace") {
+      const w = resultObject(r.workspace);
+      if (w && typeof w.id === "string") {
+        if (r.bound === true) thread.projectId = w.id;
+        io.to(userRoom).emit("project:created", {
+          project: {
+            id: w.id,
+            name: w.name,
+            origin: w.origin ?? "workspace",
+          },
+        });
+        io.to(userRoom).emit("project:updated", {
+          projectId: w.id,
+          reason: "workspace",
+        });
+        await createNotification(
+          io,
+          userId,
+          "project_created",
+          `Агент создал воркспейс «${w.name}»`,
+          r.bound === true
+            ? "Студия создана и привязана к диалогу"
+            : "Студия создана; текущий диалог не перепривязан",
+          w.id,
+        );
+      }
     } else if (
       (call.tool === "write_file" || call.tool === "delete_file" || call.tool === "apply_patch") &&
       thread.projectId
@@ -1360,8 +1390,12 @@ io.on("connection", async (socket: Socket) => {
         return;
       }
       const thread = await db.thread.findUnique({ where: { id: threadId } });
-      if (!thread || thread.userId !== user.sub) {
-        socket.emit("error", { message: "Диалог не найден" });
+      const lookup = threadLookupError(
+        thread ? { userId: thread.userId } : null,
+        user.sub,
+      );
+      if (lookup) {
+        socket.emit("error", { message: lookup });
         return;
       }
       socket.join(`thread:${threadId}`);
@@ -1370,7 +1404,7 @@ io.on("connection", async (socket: Socket) => {
       }
     } catch (err) {
       console.error("[ws] thread:join failed:", err instanceof Error ? err.message : String(err));
-      socket.emit("error", { message: "Диалог не найден" });
+      socket.emit("error", { message: THREAD_NOT_FOUND });
     }
   });
 
@@ -1395,8 +1429,13 @@ io.on("connection", async (socket: Socket) => {
       const { threadId, text } = parsed;
 
       const thread = await db.thread.findUnique({ where: { id: threadId } });
-      if (!thread || thread.userId !== user.sub) {
-        socket.emit("error", { message: "Диалог не найден" });
+      const lookup = threadLookupError(
+        thread ? { userId: thread.userId, archived: thread.archived } : null,
+        user.sub,
+        { rejectArchived: true },
+      );
+      if (lookup || !thread) {
+        socket.emit("error", { message: lookup ?? THREAD_NOT_FOUND });
         return;
       }
 
@@ -1430,8 +1469,12 @@ io.on("connection", async (socket: Socket) => {
       return;
     }
     const thread = await db.thread.findUnique({ where: { id: threadId } });
-    if (!thread || thread.userId !== user.sub) {
-      socket.emit("error", { message: "Диалог не найден" });
+    const lookup = threadLookupError(
+      thread ? { userId: thread.userId } : null,
+      user.sub,
+    );
+    if (lookup) {
+      socket.emit("error", { message: lookup });
       return;
     }
     runningThreads.get(threadId)?.abort();

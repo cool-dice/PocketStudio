@@ -1,20 +1,16 @@
 "use client";
 
 /**
- * DeployScreen (5-c) — «Экспорт и деплой».
- *
- * Честно: деплой в облако в песочнице недоступен (задел на будущее —
- * домены, сборка, релизы). Рабочая часть — экспорт воркспейса в ZIP
- * со всеми реальными артефактами: GET /api/workspaces/[id]/export
- * (медиа-файлы + manifest, документы .md, сущности, находки, README).
- *
- * Вкладка воркспейса (workspaceId) и глобальный экран с чипами.
+ * DeployScreen — ZIP export + local Dockerfile/docker build.
+ * Studios use /api/workspaces; code apps use /api/projects.
+ * No invented host URL; empty is not «собрано».
  */
 
 import { useCallback, useEffect, useState } from "react";
 import {
   CloudOff,
   FileArchive,
+  FileCode2,
   Loader2,
   Rocket,
   ShieldCheck,
@@ -30,18 +26,25 @@ import { WorkspacePickerStatus } from "@/components/studio/shared/workspace-pick
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
 import { useWorkspaces } from "@/hooks/use-workspaces";
-import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import { isCodeProjectOrigin } from "@/lib/code-project-origins";
 import {
+  DEPLOY_CODE_READY_HINT,
+  DEPLOY_CODE_ZIP_HINT,
+  DEPLOY_CODE_ZIP_TITLE,
+  DEPLOY_PICKER_HINT,
+  DEPLOY_PICKER_TITLE,
+  DEPLOY_SANDBOX_BLURB,
   DEPLOY_SCREEN_DESCRIPTION,
   DEPLOY_SCREEN_TITLE,
+  DEPLOY_STUDIO_ZIP_HINT,
+  DEPLOY_STUDIO_ZIP_TITLE,
 } from "@/lib/docker-copy";
-import type { WorkspaceDto } from "@/lib/workspace-types";
 import type { ProjectListItem } from "@/lib/types";
+import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
+import type { WorkspaceDto } from "@/lib/workspace-types";
 import { DockerfileCard } from "./dockerfile-card";
 import { ReadinessCard } from "./readiness-card";
-import { FileCode2 } from "lucide-react";
 
-/** Транслитерация RU → lat для имени скачиваемого файла. */
 const RU_MAP: Record<string, string> = {
   а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z",
   и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r",
@@ -49,7 +52,7 @@ const RU_MAP: Record<string, string> = {
   щ: "sch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya",
 };
 
-function fileSlug(name: string): string {
+function fileSlug(name: string, fallback: string): string {
   const slug = name
     .toLowerCase()
     .split("")
@@ -58,29 +61,30 @@ function fileSlug(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 50);
-  return slug || "workspace";
+  return slug || fallback;
 }
 
 export function DeployScreen({
   onOpenMobileNav,
   workspaceId,
 }: ModuleScreenProps & { workspaceId?: string }) {
-  /* Глобальный экран без воркспейса: список воркспейсов + код-проектов. */
   const { workspaces, loading: wsLoading, error: wsError, load: loadWorkspaces } =
     useWorkspaces();
   const [codeProjects, setCodeProjects] = useState<ProjectListItem[]>([]);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
 
-  /* Готовность выбранного воркспейса. */
   const [workspace, setWorkspace] = useState<WorkspaceDto | null>(null);
+  const [codeTarget, setCodeTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [entitiesCount, setEntitiesCount] = useState<number | null>(null);
   const [openFindings, setOpenFindings] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  /* Код-проекты для глобального экрана (воркспейсы — из useWorkspaces). */
   useEffect(() => {
     if (workspaceId) return;
     let cancelled = false;
@@ -88,25 +92,24 @@ export function DeployScreen({
       .listProjects()
       .then((projects) => {
         if (!cancelled) {
-          // Тип ProjectOrigin не знает origin «workspace» (контентные
-          // воркспейсы), но API их возвращает — фильтруем по строке.
           setCodeProjects(
-            projects.filter((p) => String(p.origin) !== "workspace"),
+            projects.filter((p) => isCodeProjectOrigin(String(p.origin))),
           );
         }
       })
-      .catch(() => {
-        // код-проекты — необязательная часть списка
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [workspaceId]);
 
-  /* Готовность: воркспейс + сущности + открытые находки. */
+  const isCodePick =
+    !workspaceId && codeProjects.some((p) => p.id === effectiveId);
+
   const loadReadiness = useCallback(async () => {
     if (!effectiveId) {
       setWorkspace(null);
+      setCodeTarget(null);
       setEntitiesCount(null);
       setOpenFindings(null);
       return;
@@ -114,16 +117,26 @@ export function DeployScreen({
     setLoading(true);
     setLoadError(null);
     try {
+      if (isCodePick) {
+        const project = await api.getProject(effectiveId);
+        setCodeTarget({ id: project.id, name: project.name });
+        setWorkspace(null);
+        setEntitiesCount(null);
+        setOpenFindings(null);
+        return;
+      }
       const [ws, entities, findings] = await Promise.all([
         api.getWorkspace(effectiveId),
         api.listEntities(effectiveId),
         api.listFindings(effectiveId, "open"),
       ]);
       setWorkspace(ws);
+      setCodeTarget(null);
       setEntitiesCount(entities.length);
       setOpenFindings(findings.length);
     } catch (err) {
       setWorkspace(null);
+      setCodeTarget(null);
       setEntitiesCount(null);
       setOpenFindings(null);
       setLoadError(
@@ -132,28 +145,33 @@ export function DeployScreen({
     } finally {
       setLoading(false);
     }
-  }, [effectiveId]);
+  }, [effectiveId, isCodePick]);
 
   useEffect(() => {
     void loadReadiness();
   }, [loadReadiness]);
 
-  /* Рабочий экспорт: fetch → blob → download. */
   const downloadZip = useCallback(async () => {
     if (!effectiveId || exporting) return;
     setExporting(true);
+    const asCode = Boolean(codeTarget);
     try {
-      const blob = await api.exportWorkspaceZip(effectiveId);
+      const blob = asCode
+        ? await api.exportProjectZip(effectiveId)
+        : await api.exportWorkspaceZip(effectiveId);
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
-      anchor.download = `${fileSlug(workspace?.name ?? "workspace")}-export.zip`;
+      const name = asCode ? codeTarget?.name : workspace?.name;
+      anchor.download = `${fileSlug(name ?? "export", asCode ? "project" : "workspace")}-export.zip`;
       document.body.append(anchor);
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
-      toast.success("Архив воркспейса готов", {
-        description: "Все артефакты, документы и данные внутри",
+      toast.success(asCode ? "Архив код-проекта готов" : "Архив воркспейса готов", {
+        description: asCode
+          ? "Исходники с диска. Это не публикация."
+          : "Артефакты, документы и данные внутри",
       });
     } catch (err) {
       toast.error(
@@ -162,9 +180,11 @@ export function DeployScreen({
     } finally {
       setExporting(false);
     }
-  }, [effectiveId, exporting, workspace]);
+  }, [effectiveId, exporting, workspace, codeTarget]);
 
   const showContent = Boolean(effectiveId);
+  const zipTitle = codeTarget ? DEPLOY_CODE_ZIP_TITLE : DEPLOY_STUDIO_ZIP_TITLE;
+  const zipHint = codeTarget ? DEPLOY_CODE_ZIP_HINT : DEPLOY_STUDIO_ZIP_HINT;
 
   return (
     <section
@@ -180,7 +200,6 @@ export function DeployScreen({
       />
 
       <main className="vf-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
-        {/* Честная карточка: что доступно в песочнице. */}
         <section
           aria-label="О деплое в песочнице"
           className="rounded-xl border border-dashed bg-card p-4 sm:p-6"
@@ -194,28 +213,19 @@ export function DeployScreen({
             </span>
             <div className="min-w-0">
               <h2 className="text-sm font-semibold">
-                Деплой в облако — за пределами песочницы
+                Облачного хоста нет
               </h2>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                Карманная студия работает в изолированной среде без внешних
-                доменов и реестров. В полноценной версии здесь будут: домены,
-                сборка, релизы и откаты. Сейчас — рабочий экспорт всего
-                воркспейса в ZIP.
+                {DEPLOY_SANDBOX_BLURB}
               </p>
             </div>
           </div>
         </section>
 
-        {/* Глобальный экран: выбор воркспейса чипами. */}
         {!workspaceId ? (
-          <section
-            aria-label="Выбор воркспейса"
-            className="rounded-xl border bg-card p-4"
-          >
-            <h2 className="text-sm font-medium">Какой воркспейс экспортируем?</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Готовность и экспорт живут внутри воркспейса — выберите нужный.
-            </p>
+          <section aria-label="Выбор цели" className="rounded-xl border bg-card p-4">
+            <h2 className="text-sm font-medium">{DEPLOY_PICKER_TITLE}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">{DEPLOY_PICKER_HINT}</p>
             <WorkspacePickerStatus
               loading={!workspaceId && wsLoading}
               error={!workspaceId && wsError}
@@ -229,34 +239,34 @@ export function DeployScreen({
               onRetry={loadWorkspaces}
             >
               {workspaces.map((ws) => {
-                  const Meta = WORKSPACE_TYPE_META[ws.type];
-                  const Icon = Meta.icon;
-                  return (
-                    <SelectableChip
-                      key={ws.id}
-                      label={ws.name}
-                      icon={Icon}
-                      selected={pickedId === ws.id}
-                      count={ws.progress}
-                      onClick={() =>
-                        setPickedId(pickedId === ws.id ? null : ws.id)
-                      }
-                      className="max-w-full"
-                    />
-                  );
-                })}
-                {codeProjects.map((p) => (
+                const Meta = WORKSPACE_TYPE_META[ws.type];
+                const Icon = Meta.icon;
+                return (
                   <SelectableChip
-                    key={p.id}
-                    label={p.name}
-                    icon={FileCode2}
-                    selected={pickedId === p.id}
+                    key={ws.id}
+                    label={ws.name}
+                    icon={Icon}
+                    selected={pickedId === ws.id}
+                    count={ws.progress}
                     onClick={() =>
-                      setPickedId(pickedId === p.id ? null : p.id)
+                      setPickedId(pickedId === ws.id ? null : ws.id)
                     }
                     className="max-w-full"
                   />
-                ))}
+                );
+              })}
+              {codeProjects.map((p) => (
+                <SelectableChip
+                  key={p.id}
+                  label={`Код: ${p.name}`}
+                  icon={FileCode2}
+                  selected={pickedId === p.id}
+                  onClick={() =>
+                    setPickedId(pickedId === p.id ? null : p.id)
+                  }
+                  className="max-w-full"
+                />
+              ))}
             </WorkspacePickerStatus>
           </section>
         ) : null}
@@ -268,7 +278,7 @@ export function DeployScreen({
               aria-hidden="true"
             />
             <p className="text-sm text-muted-foreground">
-              Выберите воркспейс — покажем готовность и экспорт
+              Выберите студию или код-проект
             </p>
           </div>
         ) : loadError ? (
@@ -280,31 +290,41 @@ export function DeployScreen({
           </div>
         ) : (
           <>
-            <ReadinessCard
-              workspace={workspace}
-              entitiesCount={entitiesCount}
-              openFindings={openFindings}
-              loading={loading}
-            />
+            {loading ? (
+              <ReadinessCard
+                workspace={null}
+                entitiesCount={null}
+                openFindings={null}
+                loading
+              />
+            ) : codeTarget ? (
+              <p className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
+                {DEPLOY_CODE_READY_HINT}
+              </p>
+            ) : (
+              <ReadinessCard
+                workspace={workspace}
+                entitiesCount={entitiesCount}
+                openFindings={openFindings}
+                loading={false}
+              />
+            )}
 
-            {/* Dockerfile для воркспейсов с кодом (Фаза D). */}
-            {workspace && (workspace.origin !== "workspace" || workspace.type === "app") ? (
-              <DockerfileCard workspace={workspace} />
+            {codeTarget ? (
+              <DockerfileCard targetId={codeTarget.id} surface="project" />
+            ) : null}
+            {workspace?.type === "app" ? (
+              <DockerfileCard targetId={workspace.id} surface="workspace" />
             ) : null}
 
-            {/* Главный экран действия: экспорт ZIP. */}
             <section
-              aria-label="Экспорт воркспейса"
+              aria-label="Экспорт ZIP"
               className="rounded-xl border bg-card p-4 shadow-sm sm:p-6"
             >
               <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
                 <div className="min-w-0">
-                  <h2 className="text-base font-semibold">
-                    Скачать ZIP воркспейса
-                  </h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Архив собирается на сервере из реальных данных — без моков
-                  </p>
+                  <h2 className="text-base font-semibold">{zipTitle}</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{zipHint}</p>
                 </div>
                 <Button
                   type="button"
@@ -321,42 +341,37 @@ export function DeployScreen({
                   ) : (
                     <>
                       <FileArchive className="size-4" aria-hidden="true" />
-                      Скачать ZIP воркспейса
+                      {zipTitle}
                     </>
                   )}
                 </Button>
               </div>
 
-              <ul className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                <li className="flex items-start gap-2 rounded-lg border bg-background/60 p-2.5">
-                  <ShieldCheck
-                    className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-                    aria-hidden="true"
-                  />
-                  artifacts/ — все артефакты: медиа-файлы и manifest.json
-                </li>
-                <li className="flex items-start gap-2 rounded-lg border bg-background/60 p-2.5">
-                  <ShieldCheck
-                    className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-                    aria-hidden="true"
-                  />
-                  documents/ — рукописи и спеки как .md по секциям
-                </li>
-                <li className="flex items-start gap-2 rounded-lg border bg-background/60 p-2.5">
-                  <ShieldCheck
-                    className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-                    aria-hidden="true"
-                  />
-                  entities.json и findings.json — картотека и находки
-                </li>
-                <li className="flex items-start gap-2 rounded-lg border bg-background/60 p-2.5">
-                  <ShieldCheck
-                    className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-                    aria-hidden="true"
-                  />
-                  README.md — сводка: стадия, прогресс и состав архива
-                </li>
-              </ul>
+              {codeTarget ? (
+                <p className="mt-4 text-xs text-muted-foreground">
+                  В архиве — файлы репозитория. Dockerfile, если сгенерирован, тоже.
+                </p>
+              ) : (
+                <ul className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                  {[
+                    "artifacts/ — медиа и manifest.json",
+                    "documents/ — рукописи и спеки как .md",
+                    "entities.json и findings.json",
+                    "README.md — сводка состава архива",
+                  ].map((line) => (
+                    <li
+                      key={line}
+                      className="flex items-start gap-2 rounded-lg border bg-background/60 p-2.5"
+                    >
+                      <ShieldCheck
+                        className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                        aria-hidden="true"
+                      />
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </>
         )}

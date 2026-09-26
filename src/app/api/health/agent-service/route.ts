@@ -10,8 +10,8 @@
 //   POST → probe; if down: spawn the supervisor, re-probe → { up, started }
 //
 // JSON never includes DATABASE_URL, AUTH_SECRET, paths, or stack traces.
-// The frontend calls POST from use-socket on connect failure — the app
-// heals itself on the next socket.io auto-reconnect attempt.
+// The frontend POSTs on authenticated app load and on socket connect_error
+// so the agent-service supervisor is spawned from the Next process.
 
 import { NextResponse } from "next/server";
 import { spawn } from "node:child_process";

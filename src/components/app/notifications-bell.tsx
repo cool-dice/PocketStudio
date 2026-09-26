@@ -5,7 +5,7 @@
  *
  * Popover with the persistent history (latest 50): per-type icons, unread
  * markers, relative timestamps, click-through navigation (analysis → note,
- * project events → project screen) and mark-all-read / clear actions.
+ * studio events → workspace) and mark-all-read / clear actions.
  * Live updates arrive through the notifications store (WS notification:new).
  *
  * side: "right" (desktop aside) | "bottom" (mobile Sheet — a right-side
@@ -43,10 +43,13 @@ import {
   BELL_RETRY,
   bellListView,
 } from "@/lib/notification-copy";
+import { notificationOpensWorkspace } from "@/lib/composer-binding";
+import { isOffFlowWorkspace } from "@/lib/workspace-data";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
 import type { Notification, NotificationType } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { peekOwnedWorkspace } from "@/hooks/use-workspaces";
 
 const TYPE_META: Record<
   NotificationType,
@@ -60,7 +63,7 @@ const TYPE_META: Record<
   project_created: {
     icon: FolderKanban,
     iconClass: "text-amber-600 dark:text-amber-400",
-    ariaLabel: "Создан проект",
+    ariaLabel: "Создан воркспейс или проект",
   },
   checkpoint: {
     icon: GitCommitHorizontal,
@@ -78,6 +81,36 @@ const TYPE_META: Record<
     ariaLabel: "Системное",
   },
 };
+
+function openStudioNotification(
+  id: string,
+  title: string,
+  body: string | null,
+) {
+  const ui = useAppUi.getState();
+  const cached = peekOwnedWorkspace(id);
+  if (cached) {
+    if (!isOffFlowWorkspace(cached.type)) ui.openWorkspace(id);
+    return;
+  }
+  void api.getWorkspace(id).then(
+    (workspace) => {
+      if (!isOffFlowWorkspace(workspace.type)) ui.openWorkspace(id);
+    },
+    () => {
+      if (
+        notificationOpensWorkspace({
+          cachedStudio: false,
+          fetchOk: false,
+          title,
+          body,
+        })
+      ) {
+        ui.openWorkspace(id);
+      }
+    },
+  );
+}
 
 export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom" }) {
   const { notifications, unread, loaded, loadError } = useNotifications();
@@ -111,6 +144,8 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
           toast.error("Заметка не найдена — возможно, удалена");
           ui.setMainArea("notebook");
         });
+    } else if ((n.type === "project_created" || n.type === "checkpoint") && n.entityId) {
+      openStudioNotification(n.entityId, n.title, n.body);
     }
     setOpen(false);
   };

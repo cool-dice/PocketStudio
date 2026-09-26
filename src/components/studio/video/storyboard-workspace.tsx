@@ -8,7 +8,7 @@
  * воркспейса, и глобальным экраном (после выбора воркспейса чипом).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Film } from "lucide-react";
 import { toast } from "sonner";
 
@@ -46,6 +46,15 @@ import {
 } from "./storyboard-panes";
 import { StoryboardPlayer } from "./storyboard-player";
 import {
+  VIDEO_STORYBOARD_CREATED,
+  VIDEO_STORYBOARD_CREATED_HINT,
+  VIDEO_STORYBOARD_CREATE_FAILED,
+  VIDEO_STORYBOARD_LOAD_ERROR,
+  storyboardListView,
+  storyboardSeedSceneTitles,
+  storyboardShowsScriptChips,
+} from "@/lib/video-copy";
+import {
   SCENE_IMAGE_SIZE,
   buildScenes,
   sceneReady,
@@ -71,6 +80,7 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
 
   /* Диалог «Сборка фильма» (настоящий WebM-рендер). */
   const [assembleOpen, setAssembleOpen] = useState(false);
+  const skipSceneReloadRef = useRef(false);
 
   const loadWorkspace = useCallback(async () => {
     setLoadError(null);
@@ -89,7 +99,7 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
       setScripts([]);
       setArtifacts([]);
       setLoadError(
-        err instanceof ApiError ? err.message : "Не удалось загрузить сценарии",
+        err instanceof ApiError ? err.message : VIDEO_STORYBOARD_LOAD_ERROR,
       );
     }
   }, [projectId]);
@@ -111,7 +121,9 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
       return undefined;
     }
     let cancelled = false;
-    setSectionsLoading(true);
+    const seeded = skipSceneReloadRef.current;
+    skipSceneReloadRef.current = false;
+    if (!seeded) setSectionsLoading(true);
     api
       .getDocument(scriptId)
       .then((doc) => {
@@ -120,6 +132,7 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        if (seeded) return;
         setSections([]);
         toast.error("Не удалось загрузить сцены", {
           description: err instanceof ApiError ? err.message : undefined,
@@ -176,6 +189,7 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
     if (creatingScript) return;
     setCreatingScript(true);
     try {
+      const titles = storyboardSeedSceneTitles();
       const doc = await api.createDocument(projectId, {
         title: "Раскадровка фильма",
         kind: "script",
@@ -185,21 +199,40 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
       const first = doc.sections?.[0];
       const created: DocumentSectionDto[] = [];
       if (first) {
-        created.push(await api.updateSection(first.id, { title: "Сцена 1" }));
+        created.push(await api.updateSection(first.id, { title: titles[0] }));
       } else {
-        created.push(await api.createSection(doc.id, "Сцена 1"));
+        created.push(await api.createSection(doc.id, titles[0]));
       }
-      for (let i = 2; i <= 4; i += 1) {
-        created.push(await api.createSection(doc.id, `Сцена ${i}`));
+      for (const title of titles.slice(1)) {
+        created.push(await api.createSection(doc.id, title));
       }
-      setScripts((prev) => [...(prev ?? []), doc]);
+      let nextSections = created.sort((a, b) => a.order - b.order);
+      try {
+        const fresh = await api.getDocument(doc.id);
+        if ((fresh.sections?.length ?? 0) > 0) {
+          nextSections = [...(fresh.sections ?? [])].sort(
+            (a, b) => a.order - b.order,
+          );
+        }
+      } catch {
+        /* Local seeded sections still render if the refetch fails. */
+      }
+      skipSceneReloadRef.current = true;
+      setScripts((prev) => [
+        ...(prev ?? []).filter((row) => row.id !== doc.id),
+        {
+          ...doc,
+          sections: nextSections,
+          sectionsCount: nextSections.length,
+        },
+      ]);
       setScriptId(doc.id);
-      setSections(created.sort((a, b) => a.order - b.order));
-      toast.success("Сценарий создан", {
-        description: "Четыре сцены-заготовки — напишите текст и соберите фильм.",
+      setSections(nextSections);
+      toast.success(VIDEO_STORYBOARD_CREATED, {
+        description: VIDEO_STORYBOARD_CREATED_HINT,
       });
     } catch (err) {
-      toast.error("Не удалось создать сценарий", {
+      toast.error(VIDEO_STORYBOARD_CREATE_FAILED, {
         description: err instanceof ApiError ? err.message : undefined,
       });
     } finally {
@@ -350,20 +383,29 @@ export function StoryboardWorkspace({ projectId }: { projectId: string }) {
     toast.success("Фильм собран и в библиотеке");
   }, []);
 
+  const listView = storyboardListView(scripts, loadError);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Сценарии раскадровки */}
-      <ScriptChipsBar
-        scripts={scripts}
-        scriptId={scriptId}
-        onSelect={selectScript}
-        onAddScene={() => void addScene()}
-        addingScene={addingScene}
-      />
+      {/* Чипы только при живом сценарии — пустой бар без скрипта выглядит сломанным. */}
+      {storyboardShowsScriptChips(listView) ? (
+        <ScriptChipsBar
+          scripts={scripts}
+          scriptId={scriptId}
+          onSelect={selectScript}
+          onAddScene={() => void addScene()}
+          addingScene={addingScene}
+        />
+      ) : null}
 
-      {loadError ? (
-        <LoadErrorCard message={loadError} onRetry={() => void loadWorkspace()} />
-      ) : !scriptId ? (
+      {listView === "error" ? (
+        <LoadErrorCard message={loadError ?? VIDEO_STORYBOARD_LOAD_ERROR} onRetry={() => void loadWorkspace()} />
+      ) : listView === "loading" ? (
+        <main className="flex min-h-0 flex-1 flex-col gap-3 p-4 sm:p-6" aria-busy="true" aria-label="Загрузка раскадровки">
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="h-52 w-full rounded-xl" />
+        </main>
+      ) : listView === "empty" || !scriptId ? (
         <NoScriptCard
           creating={creatingScript}
           onCreate={() => void createScript()}

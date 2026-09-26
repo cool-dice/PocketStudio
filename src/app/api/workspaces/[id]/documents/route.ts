@@ -20,7 +20,10 @@ export async function GET(req: Request, { params }: Params) {
   const documents = await db.document.findMany({
     where: { projectId: id },
     orderBy: { updatedAt: "desc" },
-    include: { sections: { select: { content: true } } },
+    include: {
+      _count: { select: { sections: true } },
+      sections: { select: { content: true } },
+    },
   });
 
   return NextResponse.json({

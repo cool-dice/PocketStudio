@@ -4,7 +4,9 @@ import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { emptyRaster, emptyLayout } from "@/lib/design-model";
 import { emptyTimeline } from "@/lib/nle-model";
-import { defaultDawState } from "@/lib/daw-model";
+import { defaultDawState, dawHasAudibleContent } from "@/lib/daw-model";
+import { POST as createWorkspace } from "./workspaces/route";
+import { GET as listProjects } from "./projects/route";
 
 import { GET as getDesign, PUT as putDesign } from "./workspaces/[id]/design/route";
 import { GET as getTimeline, PUT as putTimeline } from "./workspaces/[id]/timeline/route";
@@ -61,7 +63,12 @@ describe.skipIf(SKIP_PG)("studio persist: design / NLE / DAW", () => {
       role: "client",
     });
     const ws = await db.project.create({
-      data: { userId: user.id, name: "Студия persist", type: "universal" },
+      data: {
+        userId: user.id,
+        name: "Студия persist",
+        type: "universal",
+        origin: "workspace",
+      },
     });
     return { token, wsId: ws.id };
   }
@@ -265,5 +272,97 @@ describe.skipIf(SKIP_PG)("studio persist: design / NLE / DAW", () => {
     expect(compileJson.error).toMatch(/пустой таймлайн/i);
     const after = await db.artifact.count({ where: { projectId: wsId, type: "video" } });
     expect(after).toBe(before);
+  });
+
+  test("music workspace create has empty DAW; GET is not a fake mix", async () => {
+    const user = await db.user.create({
+      data: {
+        name: "MusicDaw",
+        email: `music-daw-${stamp}@example.test`,
+        passwordHash: await hashPassword("password-ok"),
+        role: "client",
+      },
+    });
+    ids.push(user.id);
+    const token = await signSession({
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      role: "client",
+    });
+    const created = await createWorkspace(
+      jsonRequest(
+        "http://localhost/api/workspaces",
+        "POST",
+        { type: "music", name: `Трек пустой ${stamp}` },
+        token,
+      ),
+    );
+    expect(created.status).toBe(201);
+    const createdJson = (await created.json()) as { workspace: { id: string } };
+    const wsId = createdJson.workspace.id;
+    const row = await db.dawProject.findUnique({ where: { projectId: wsId } });
+    expect(row).toBeTruthy();
+    expect(JSON.parse(row!.tracks)).toEqual([]);
+
+    const code = await db.project.create({
+      data: {
+        userId: user.id,
+        name: `Код рядом ${stamp}`,
+        origin: "template",
+        type: "app",
+      },
+    });
+    const listed = await listProjects(
+      jsonRequest("http://localhost/api/projects", "GET", undefined, token),
+    );
+    expect(listed.status).toBe(200);
+    const listedJson = (await listed.json()) as { projects: Array<{ id: string; origin: string }> };
+    const idsListed = listedJson.projects.map((p) => p.id);
+    expect(idsListed).toContain(code.id);
+    expect(idsListed).not.toContain(wsId);
+
+    const dawGet = await getDaw(
+      jsonRequest(`http://localhost/api/workspaces/${wsId}/daw`, "GET", undefined, token),
+      { params: Promise.resolve({ id: wsId }) },
+    );
+    expect(dawGet.status).toBe(200);
+    const dawJson = (await dawGet.json()) as {
+      project: { tracks: unknown[]; bpm: number };
+      error?: string;
+    };
+    expect(dawJson.error).toBeUndefined();
+    expect(dawJson.project.tracks).toEqual([]);
+    expect(
+      dawHasAudibleContent({
+        bpm: dawJson.project.bpm,
+        bars: 4,
+        masterVolume: 0.85,
+        transpose: 0,
+        metronome: false,
+        tracks: [],
+      }),
+    ).toBe(false);
+
+    const leftover = await db.project.create({
+      data: {
+        userId: user.id,
+        name: `Старый трек ${stamp}`,
+        type: "music",
+        origin: "workspace",
+      },
+    });
+    const lazy = await getDaw(
+      jsonRequest(
+        `http://localhost/api/workspaces/${leftover.id}/daw`,
+        "GET",
+        undefined,
+        token,
+      ),
+      { params: Promise.resolve({ id: leftover.id }) },
+    );
+    expect(lazy.status).toBe(200);
+    const lazyJson = (await lazy.json()) as { project: { tracks: unknown[] } };
+    expect(lazyJson.project.tracks).toEqual([]);
   });
 });

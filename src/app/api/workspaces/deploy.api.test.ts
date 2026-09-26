@@ -82,15 +82,38 @@ describe.skipIf(SKIP_PG)("deploy zip / Dockerfile / docker-build honesty", () =>
     });
 
     const book = await db.project.create({
-      data: { userId: owner.id, name: "Канон деплоя", type: "book" },
+      data: {
+        userId: owner.id,
+        name: "Канон деплоя",
+        type: "book",
+        origin: "workspace",
+      },
     });
     const emptyApp = await db.project.create({
-      data: { userId: owner.id, name: "Пустое приложение", type: "app" },
+      data: {
+        userId: owner.id,
+        name: "Пустое приложение",
+        type: "app",
+        origin: "workspace",
+      },
     });
     const codeApp = await db.project.create({
-      data: { userId: owner.id, name: "Код приложения", type: "app" },
+      data: {
+        userId: owner.id,
+        name: "Код приложения",
+        type: "app",
+        origin: "workspace",
+      },
     });
-    projectIds.push(book.id, emptyApp.id, codeApp.id);
+    const imported = await db.project.create({
+      data: {
+        userId: owner.id,
+        name: "Импорт шаблона",
+        type: "app",
+        origin: "template",
+      },
+    });
+    projectIds.push(book.id, emptyApp.id, codeApp.id, imported.id);
 
     await db.document.create({
       data: {
@@ -297,5 +320,22 @@ describe.skipIf(SKIP_PG)("deploy zip / Dockerfile / docker-build honesty", () =>
       expect(buildJson.imageTag).toBeNull();
       expect(buildJson.log).toMatch(/docker/i);
     }
+
+    const importedDf = await generateDockerfile(
+      jsonRequest(
+        `http://localhost/api/workspaces/${imported.id}/dockerfile`,
+        "POST",
+        { overwrite: true },
+        ownerToken,
+      ),
+      { params: Promise.resolve({ id: imported.id }) },
+    );
+    expect(importedDf.status).toBe(404);
+    const importedDfJson = (await importedDf.json()) as {
+      dockerfile?: string;
+      published?: boolean;
+    };
+    expect(importedDfJson.dockerfile).toBeUndefined();
+    expect(importedDfJson.published).toBeUndefined();
   });
 });

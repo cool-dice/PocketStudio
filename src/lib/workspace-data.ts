@@ -167,7 +167,7 @@ export const WORKSPACE_STAGES: Record<WorkspaceType, string[]> = {
 export const WORKSPACE_TABS_BY_TYPE: Record<WorkspaceType, WorkspaceTab[]> = {
   film: ["chat", "overview", "notes", "documents", "images", "video", "design", "monetize"],
   book: ["chat", "overview", "notes", "documents", "design", "monetize"],
-  music: ["chat", "overview", "notes", "audio", "design", "monetize"],
+  music: ["chat", "overview", "notes", "documents", "audio", "design", "monetize"],
   app: ["chat", "overview", "notes", "code", "design", "deploy", "monetize"],
   universal: [
     "chat", "overview", "notes", "documents", "images", "audio", "video", "design", "monetize",

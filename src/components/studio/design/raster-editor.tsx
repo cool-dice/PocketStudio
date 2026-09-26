@@ -18,6 +18,7 @@ import { api, ApiError } from "@/lib/api";
 import {
   emptyRaster,
   parseDesignPayload,
+  designPreviewUrl,
   type DesignTool,
   type RasterDoc,
   type RasterLayer,
@@ -157,7 +158,7 @@ export function RasterEditor({
       await api.saveDesign(workspaceId, {
         mode: "raster",
         payload: next,
-        previewUrl: dataUrl,
+        previewUrl: designPreviewUrl(dataUrl),
       });
       toast.success("Холст сохранён");
     } catch (err) {

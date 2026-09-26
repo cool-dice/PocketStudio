@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { workspacesListQuery } from "@/lib/workspace-copy";
 import { isOffFlowWorkspace } from "@/lib/workspace-data";
 import type { WorkspaceDto } from "@/lib/workspace-types";
@@ -178,6 +178,15 @@ export function upsertWorkspace(workspace: WorkspaceDto): void {
   notify();
 }
 
+/** Live or archived row already in memory — no extra GET. */
+export function peekOwnedWorkspace(id: string): WorkspaceDto | null {
+  return (
+    cache.workspaces.find((ws) => ws.id === id) ??
+    cache.archivedWorkspaces.find((ws) => ws.id === id) ??
+    null
+  );
+}
+
 /** Сброс при выходе — иначе следующий пользователь видит чужой список. */
 export function resetWorkspacesCache(): void {
   cache.workspaces = [];
@@ -288,10 +297,10 @@ export function useWorkspacesGrid() {
 
 /** Одиночный воркспейс по id: скелетон → данные из api.getWorkspace(id). */
 export function useWorkspace(id: string | null) {
-  /** Успешно загруженный воркспейс для конкретного id (null внутри — ошибка). */
   const [loaded, setLoaded] = useState<{
     id: string;
     workspace: WorkspaceDto | null;
+    status: number;
   } | null>(null);
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((t) => t + 1), []);
@@ -306,31 +315,35 @@ export function useWorkspace(id: string | null) {
           setLoaded({
             id,
             workspace: isOffFlowWorkspace(workspace.type) ? null : workspace,
+            status: 200,
           });
         }
       })
-      .catch(() => {
-        if (!cancelled) setLoaded({ id, workspace: null });
+      .catch((err) => {
+        if (cancelled) return;
+        const status = err instanceof ApiError ? err.status : 0;
+        setLoaded({
+          id,
+          workspace: status === 404 ? null : peekOwnedWorkspace(id),
+          status,
+        });
       });
     return () => {
       cancelled = true;
     };
   }, [id, tick]);
 
-  /** Данные для открытого id (или null — грузится/сменился id). */
   const current = loaded && loaded.id === id ? loaded : null;
-  /** Оптимистичный старт: свежесозданный/недавно открытый есть в кэше списка. */
   const workspace = current
     ? current.workspace
     : id
-      ? cache.workspaces.find((ws) => ws.id === id) ??
-        cache.archivedWorkspaces.find((ws) => ws.id === id) ??
-        null
+      ? peekOwnedWorkspace(id)
       : null;
 
   return {
     workspace,
     loading: Boolean(id) && !current,
+    status: current?.status ?? null,
     error: Boolean(id && current && current.workspace === null),
     reload,
   };

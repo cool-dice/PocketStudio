@@ -4,6 +4,7 @@ import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { diskFilesWhere } from "@/lib/project-api";
 import { scheduleReindexProjectFiles } from "@/lib/rag";
 import {
   WorkspaceError,
@@ -33,7 +34,7 @@ export async function POST(
   const { id } = await params;
 
   const project = await db.project.findFirst({
-    where: { id, userId: session.sub },
+    where: diskFilesWhere(id, session.sub),
   });
   if (!project) {
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });

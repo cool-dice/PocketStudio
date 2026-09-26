@@ -148,6 +148,16 @@ export function applyAbortTurn(messages: ChatMessage[]): ChatMessage[] {
 }
 
 /**
+ * A rejected send must not stay on «отправляется…». Drop the optimistic
+ * user row the same way a failed socket connect does.
+ */
+export function dropFailedOptimisticSend(
+  messages: ChatMessage[],
+): ChatMessage[] {
+  return messages.filter((m) => !(m.pending && m.id.startsWith("temp-")));
+}
+
+/**
  * Socket reconnect: REST is behind the live buffer (DB writes empty on
  * start, full text only on end). Keep the longer live content.
  */

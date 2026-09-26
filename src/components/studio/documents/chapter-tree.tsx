@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { ApiError } from "@/lib/api";
+import { toast } from "sonner";
 import type { DocumentDto, DocumentSectionDto } from "@/lib/workspace-types";
 import { formatNumber, pluralRu } from "./types";
 
@@ -79,8 +81,10 @@ export function ChapterTree({
         onSelect(section.id);
       }
       setDialog(null);
-    } catch {
-      /* toast уже показан в хуке */
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Не удалось создать главу",
+      );
     } finally {
       setBusy(false);
     }

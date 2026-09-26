@@ -7,7 +7,7 @@
  * мобильный фолбэк (< lg).
  */
 
-import { ArrowUpDown, Check, Search, X } from "lucide-react";
+import { ArrowUpDown, Check, RotateCcw, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { DocumentDto, DocumentKind } from "@/lib/workspace-types";
 import { DocListItem, ShelfHeader } from "./doc-list-item";
-import type { DocShelf } from "@/hooks/use-documents";
+import { DOCUMENTS_LOAD_ERROR, DOCUMENTS_RETRY } from "@/lib/documents-list";
 import { DOC_KIND_FILTERS, docKindMeta, formatNumber, pluralRu } from "./types";
 
 type DocFilter = DocumentKind | "all";
@@ -49,6 +49,8 @@ export function DocumentLibrary({
   onSelect,
   onRemove,
   loading,
+  loadError,
+  onRetry,
 }: {
   /** Режим одного воркспейса: плоский список. */
   docs?: DocumentDto[];
@@ -58,6 +60,8 @@ export function DocumentLibrary({
   onSelect: (id: string) => void;
   onRemove?: (id: string) => void;
   loading?: boolean;
+  loadError?: boolean;
+  onRetry?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<DocFilter>("all");
@@ -195,6 +199,16 @@ export function DocumentLibrary({
             {Array.from({ length: 4 }).map((_, index) => (
               <Skeleton key={index} className="h-16 w-full" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div role="alert" className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+            <p className="text-xs text-muted-foreground">{DOCUMENTS_LOAD_ERROR}</p>
+            {onRetry ? (
+              <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+                {DOCUMENTS_RETRY}
+              </Button>
+            ) : null}
           </div>
         ) : visible.length === 0 ? (
           <p className="px-3 py-8 text-center text-xs text-muted-foreground">

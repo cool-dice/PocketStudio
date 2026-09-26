@@ -22,6 +22,7 @@ import {
   Zap,
 } from "lucide-react";
 
+import { BoundThreadChip } from "@/components/app/bound-thread-chip";
 import { Composer } from "@/components/app/composer";
 import { MessageBubble } from "@/components/app/message-bubble";
 import { PlanCard } from "@/components/app/plan-card";
@@ -38,6 +39,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useThreads } from "@/hooks/use-threads";
+import { useWorkspaces } from "@/hooks/use-workspaces";
+import { boundChipFromLists } from "@/lib/composer-binding";
+import { isOffFlowWorkspace } from "@/lib/workspace-data";
 import { formatPrefetchHint } from "@/lib/rag/prefetch";
 import {
   MODE_DESCRIPTIONS,
@@ -72,7 +76,6 @@ export function ChatArea({
 }: ChatAreaProps) {
   const {
     activeThread,
-    activeThreadId,
     messages,
     messagesLoading,
     busy,
@@ -82,6 +85,19 @@ export function ChatArea({
     updateThreadMode,
     canonHint,
   } = useThreads();
+
+  const { workspaces } = useWorkspaces();
+  const boundId = activeThread?.projectId ?? null;
+  const boundWorkspace = boundId
+    ? workspaces.find(
+        (w) => w.id === boundId && !isOffFlowWorkspace(w.type),
+      ) ?? null
+    : null;
+  const boundChip = boundChipFromLists({
+    id: boundId,
+    workspace: boundWorkspace,
+    project: null,
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -159,6 +175,13 @@ export function ChatArea({
             )}
           </div>
         </div>
+        {boundId && boundChip ? (
+          <BoundThreadChip
+            chip={boundChip}
+            id={boundId}
+            className="hidden max-w-40 shrink-0 sm:inline-flex"
+          />
+        ) : null}
         <Button
             variant="ghost"
             size="icon"

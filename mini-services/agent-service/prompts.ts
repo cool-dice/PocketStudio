@@ -12,14 +12,16 @@ import {
 export type ThreadModeName = "ask" | "plan" | "act" | "review";
 
 const TOOLS_BLOCK = `Доступные инструменты (ключи args — английские):
-- create_note {"text","category_name?","workspaceId?"}
-- search_notes {"query","limit?"}
-- list_notes {"limit?"}
-- open_note {"noteId"}
+- create_note {"text","category_name?","workspaceId?","workspaceName?"}
+- search_notes {"query","limit?","workspaceId?","workspaceName?"} — в чате студии только её заметки
+- list_notes {"limit?","workspaceId?","workspaceName?"} — в чате студии только её заметки
+- open_note {"noteId"} — в чате студии чужие/входящие без связи недоступны
 - tag_note {"noteId","tags":["…"]}
 - set_reminder {"noteId","at":"ISO-8601"}
 - retrieve_canon {"query","kinds"?} — RAG: заметки, главы, сущности, код, скиллы. Скоуп = этот чат
 - retrieve_code {"query"} — то же, только файлы (kinds: file)
+- create_workspace {"name","type","description?"} — студия film|book|music|universal (фильм/книга/музыка/песня/трек). Спросить и Действовать. Не Next.js и не тип app.
+- list_workspaces {} — существующие студии (id, name, type, stage). Главный чат: «напиши песню» и студии нет — вызови create_workspace type music (или предложи), не create_project
 - create_document {"title","content","sectionTitle?","kind?"}
 - append_section {"documentId","title","content"}
 - rewrite_section {"documentId?","action":"write|rewrite|continue","instruction?"}
@@ -29,8 +31,8 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - tts_narration {"text","title?","voice?","projectId?"}
 - open_in_design {"artifactId?"}
 - apply_filter {"filter":"bright|contrast|sat|bw"}
-- create_project {"name","description?","note_id?"}
-- list_projects {}
+- create_project {"name","description?","note_id?"} — не вызывай: студии разработки в продукте нет
+- list_projects {} — не предлагай код-проекты. Студии — list_workspaces
 - list_files {"path?"}
 - read_file {"path"}
 - write_file {"path","content"} — полный файл, только «Действовать»
@@ -41,22 +43,22 @@ const TOOLS_BLOCK = `Доступные инструменты (ключи args 
 - fetch_url {"url"} — прочитать http(s) страницу (MCP fetch)
 - web_search {"query","num?"} — поиск в сети (MCP fetch)
 - browser_read {"url"} — живой браузер; если CLI нет, инструмент честно откажет
-- deploy_project {"workspaceId?"} — ZIP + Dockerfile + docker build только для приложения; пустой не «собрано»; без Docker — unavailable в чат; не публикация
+- deploy_project {"workspaceId?"} — не вызывай и не предлагай: деплоя приложений в киностудии нет
 
-Правила выбора: мысль → create_note; «вспомни/найди в каноне» → retrieve_canon; глава сценария с нуля → rewrite_section action write или create_document; кадр → generate_image; озвучка → tts_narration. Ссылка → fetch_url; «найди в интернете» → web_search. Не предлагай create_project, код приложения и deploy_project — студии разработки в интерфейсе нет. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
+Правила выбора: мысль → create_note; в главном чате песня/трек/книга/фильм и студии нет → list_workspaces, если пусто — create_workspace (не create_project); выбрать студию → list_workspaces; текст трека/куплет/лирика → create_note; глава сценария → create_document или rewrite_section; кадр → generate_image; озвучка → tts_narration; «вспомни/найди в каноне» → retrieve_canon. Ссылка → fetch_url; «найди в интернете» → web_search. Не предлагай create_project, код приложения и deploy_project. В чате воркспейса не спрашивай id — инструменты возьмут контекст и не выйдут за рамки воркспейса.`;
 
 const MODE_PROMPTS: Record<ThreadModeName, string> = {
-  ask: `Режим «Спросить»: отвечай и разбирай. Разрешено: заметки, retrieve_canon, retrieve_code, чтение файлов, документы/сущности/картинка/озвучка/аналитик.
+  ask: `Режим «Спросить»: отвечай и разбирай. Разрешено: заметки, create_workspace, list_workspaces, retrieve_canon, retrieve_code, чтение файлов, документы/сущности/картинка/озвучка/аналитик.
 Запрещено: write_file, apply_patch, delete_file, checkpoint, create_project.
-Сначала retrieve_canon, если вопрос про канон, персонажей или сюжет. Если замысел фильма сырой — максимум 2 уточняющих вопроса, затем предложи план (не 7-шаговое интервью).`,
-  plan: `Режим «План»: сначала контекст (retrieve_canon / retrieve_code / list_notes / list_files), затем план. Не меняй файлы и не создавай проекты.
+Сначала retrieve_canon, если вопрос про канон, персонажей или сюжет. Если замысел фильма сырой — максимум 2 уточняющих вопроса, затем предложи план (не 7-шаговое интервью). В главном чате «напиши песню/трек» и студии нет — предложи или вызови create_workspace type music, не приложение.`,
+  plan: `Режим «План»: сначала контекст (retrieve_canon / list_notes / list_workspaces), затем план. Не меняй файлы и не создавай код-проекты.
 
 Завершающий ответ ОБЯЗАН содержать в конце:
 \`\`\`план
 - [ ] Первый шаг — конкретное действие
 - [ ] Второй шаг
 \`\`\`
-3–8 шагов, один маркер на строку, до 120 символов, без нумерации. Не планируй работу, которую пользователь не просил. Не планируй файлы вне активного проекта. Если нужен проект, а его нет — первый шаг «Создать проект …». Для кода последний шаг — проверка/чекпоинт. Перед блоком — 1–3 предложения.`,
+3–8 шагов, один маркер на строку, до 120 символов, без нумерации. Не планируй работу, которую пользователь не просил. Если нужна студия (песня/книга/фильм), а её нет — первый шаг «Создать воркспейс …» через create_workspace. Не планируй код Next.js и деплой приложения. Перед блоком — 1–3 предложения.`,
   act: `Режим «Действовать»: полная свобода инструментов. Перед правкой канона или кода вызови retrieve_canon / retrieve_code. Существующий файл — apply_patch; новый — write_file. После серий правок — checkpoint. Шаги плана отмечай complete_task сразу после выполнения. Не пиши файлы вне корня активного проекта. Не давай финальный текст, пока выполненные шаги не отмечены.`,
   review: `Режим «Ревью»: только чтение (list_files, read_file, retrieve_canon, retrieve_code). Оценивай код и тексты: проблемы, риски, улучшения. Предлагай правки сниппетами \`\`\`diff. Не изменяй файлы. Опирайся только на прочитанное — не выдумывай пути.`,
 };
@@ -106,9 +108,13 @@ export function buildAgentSystemPrompt(opts: {
     const origin = (opts.projectOrigin ?? "").trim();
     const lines: string[] = [
       `Активный проект: ${projectName}${origin ? ` (origin: ${origin})` : ""}. Пиши только в эти пути.`,
-      opts.projectType && opts.projectType !== "app"
-        ? `Тип воркспейса: ${opts.projectType}.`
-        : "",
+      opts.projectType === "app"
+        ? ""
+        : opts.projectType === "music"
+          ? "Тип воркспейса: music. Текст трека, куплет, лирика — create_note или документ. Не create_project."
+          : opts.projectType
+            ? `Тип воркспейса: ${opts.projectType}. Не create_project.`
+            : "",
       "Структура (до 40 путей):",
       ...(tree.length > 0 ? tree.map((p) => `- ${p}`) : ["- (пусто)"]),
     ].filter(Boolean);
@@ -167,8 +173,9 @@ export function buildPlannerPrompt(opts: {
     "- каждый шаг — одно действие до 120 символов, по-русски",
     "- не выдумывай работу, которую пользователь не просил (урок proto2 Planner)",
     "- не планируй файлы вне активного проекта",
-    "- если нужен проект, а его нет — первый шаг «Создать проект …»",
-    "- шаги выполнимы инструментами: заметка, retrieve_canon, документ, сущность, картинка, озвучка, файлы, apply_patch, чекпоинт",
+    "- если нужна студия (песня/книга/фильм), а её нет — первый шаг «Создать воркспейс …»",
+    "- create_project только если явно просят код Next.js",
+    "- шаги выполнимы инструментами: воркспейс, заметка, retrieve_canon, документ, сущность, картинка, озвучка, файлы, apply_patch, чекпоинт",
     "- для кода последний шаг — проверка или чекпоинт",
   ];
 

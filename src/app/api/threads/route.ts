@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { WORKSPACE_OR_CODE_NOT_FOUND } from "@/lib/composer-binding";
 import { readJsonBody } from "@/lib/json-body-limit";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +84,10 @@ export async function POST(req: Request) {
       select: { id: true },
     });
     if (!project) {
-      return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+      return NextResponse.json(
+        { error: WORKSPACE_OR_CODE_NOT_FOUND },
+        { status: 404 },
+      );
     }
     projectId = project.id;
   }

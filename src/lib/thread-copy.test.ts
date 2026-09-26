@@ -18,16 +18,25 @@ import {
   THREADS_SHOW_ARCHIVE,
   THREADS_UNARCHIVE_ACTION,
   THREADS_UNARCHIVE_FAILED,
+  THREAD_ARCHIVED_SEND,
+  THREAD_LOAD_FAILED,
+  THREAD_NOT_FOUND,
+  composerSendGuard,
   composerTargetAfterArchive,
   composerTargetAfterDelete,
+  isThreadComposerSurface,
+  isThreadLookupError,
   nextThreadIdAfterDelete,
   renamedTitle,
   resolveSendThreadId,
+  shouldToastThreadLookupError,
   sidebarThreadsAfterArchive,
   sidebarThreadsAfterDelete,
   threadArchiveToast,
+  threadLookupError,
   threadsEmptyCopy,
   threadsListView,
+  workspaceThreadBindAction,
 } from "./thread-copy";
 
 describe("thread list empty vs error copy", () => {
@@ -167,6 +176,130 @@ describe("delete honesty: sidebar + composer", () => {
     expect(resolveSendThreadId("ghost", known, deleted)).toBeNull();
     expect(resolveSendThreadId("live", known, deleted)).toBe("live");
     expect(resolveSendThreadId(null, known, deleted)).toBeNull();
+  });
+});
+
+describe("send-guard: archived thread refuses instead of hanging", () => {
+  test("archived active thread is a Russian refuse, not a new send id", () => {
+    const known = ["arch"];
+    expect(
+      composerSendGuard({
+        activeId: "arch",
+        knownIds: known,
+        deletedIds: [],
+        archived: true,
+      }),
+    ).toEqual({ ok: false, message: THREAD_ARCHIVED_SEND });
+    expect(THREAD_ARCHIVED_SEND).toMatch(/[А-Яа-яЁё]/);
+    expect(THREAD_ARCHIVED_SEND).toMatch(/архив/i);
+    expect(THREAD_ARCHIVED_SEND).not.toBe(THREADS_ARCHIVED);
+    expect(THREAD_ARCHIVED_SEND).not.toMatch(/отправляется/i);
+  });
+
+  test("live thread still resolves; missing id still means create-new", () => {
+    expect(
+      composerSendGuard({
+        activeId: "live",
+        knownIds: ["live"],
+        deletedIds: [],
+        archived: false,
+      }),
+    ).toEqual({ ok: true, threadId: "live" });
+    expect(
+      composerSendGuard({
+        activeId: null,
+        knownIds: [],
+        deletedIds: [],
+        archived: false,
+      }),
+    ).toEqual({ ok: true, threadId: null });
+    expect(
+      composerSendGuard({
+        activeId: "gone",
+        knownIds: ["live"],
+        deletedIds: ["gone"],
+        archived: false,
+      }),
+    ).toEqual({ ok: true, threadId: null });
+  });
+
+  test("server send rejects archived; join still finds the row", () => {
+    const row = { userId: "u1", archived: true };
+    expect(threadLookupError(null, "u1")).toBe(THREAD_NOT_FOUND);
+    expect(threadLookupError({ userId: "other" }, "u1")).toBe(THREAD_NOT_FOUND);
+    expect(threadLookupError(row, "u1")).toBeNull();
+    expect(threadLookupError(row, "u1", { rejectArchived: true })).toBe(
+      THREAD_ARCHIVED_SEND,
+    );
+    expect(
+      threadLookupError({ userId: "u1", archived: false }, "u1", {
+        rejectArchived: true,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("workspace thread bind vs film/video lookup toast", () => {
+  test("video/storyboard is not a composer surface", () => {
+    expect(
+      isThreadComposerSurface({ mainArea: "workspace", workspaceTab: "video" }),
+    ).toBe(false);
+    expect(
+      isThreadComposerSurface({ mainArea: "workspace", workspaceTab: "chat" }),
+    ).toBe(true);
+    expect(isThreadComposerSurface({ mainArea: "chat" })).toBe(true);
+    expect(isThreadComposerSurface({ mainArea: "home" })).toBe(true);
+    expect(isThreadComposerSurface({ mainArea: "video" })).toBe(false);
+  });
+
+  test("missing global thread does not toast on /w/{id}?tab=video", () => {
+    expect(isThreadLookupError(THREAD_NOT_FOUND)).toBe(true);
+    expect(isThreadLookupError(THREAD_LOAD_FAILED)).toBe(true);
+    expect(isThreadLookupError("Нет соединения")).toBe(false);
+    expect(
+      shouldToastThreadLookupError(THREAD_NOT_FOUND, {
+        mainArea: "workspace",
+        workspaceTab: "video",
+      }),
+    ).toBe(false);
+    expect(
+      shouldToastThreadLookupError(THREAD_NOT_FOUND, {
+        mainArea: "chat",
+      }),
+    ).toBe(true);
+    expect(
+      shouldToastThreadLookupError("Агент ещё отвечает…", {
+        mainArea: "workspace",
+        workspaceTab: "video",
+      }),
+    ).toBe(true);
+  });
+
+  test("bind picks the live workspace thread or creates; skips archived", () => {
+    const rows = [
+      { id: "global", projectId: null, archived: false },
+      { id: "old", projectId: "ws1", archived: true },
+      { id: "live", projectId: "ws1", archived: false },
+    ];
+    expect(workspaceThreadBindAction("ws1", "ws1", rows)).toEqual({
+      action: "noop",
+    });
+    expect(workspaceThreadBindAction("ws1", null, rows)).toEqual({
+      action: "select",
+      threadId: "live",
+    });
+    expect(workspaceThreadBindAction("ws1", "other", rows)).toEqual({
+      action: "select",
+      threadId: "live",
+    });
+    expect(workspaceThreadBindAction("ws-new", null, rows)).toEqual({
+      action: "create",
+    });
+    expect(
+      workspaceThreadBindAction("ws1", null, [
+        { id: "old", projectId: "ws1", archived: true },
+      ]),
+    ).toEqual({ action: "create" });
   });
 });
 

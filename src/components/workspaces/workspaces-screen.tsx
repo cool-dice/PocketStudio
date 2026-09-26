@@ -14,7 +14,6 @@ import { FolderKanban, Plus, RotateCcw, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ModuleHeader } from "@/components/studio/shared/module-header";
-import { CreateWorkspaceDialog } from "@/components/workspaces/create-workspace-dialog";
 import { WorkspacesCard } from "@/components/workspaces/workspaces-card";
 import { WorkspacesFilterBar } from "@/components/workspaces/workspaces-filters";
 import {
@@ -49,6 +48,7 @@ export function WorkspacesScreen({
   onOpenMobileNav: () => void;
 }) {
   const openWorkspace = useAppUi((s) => s.openWorkspace);
+  const openCreateWorkspace = useAppUi((s) => s.openCreateWorkspace);
   const {
     workspaces,
     loading,
@@ -62,7 +62,6 @@ export function WorkspacesScreen({
   const [type, setType] = useState<WorkspacesTypeFilter>("all");
   const [stage, setStage] = useState<string>("all");
   const [sort, setSort] = useState<WorkspacesSort>("updated");
-  const [createOpen, setCreateOpen] = useState(false);
 
   /** Фасетная база: поиск не влияет на счётчики чипов и список стадий. */
   const searchBase = useMemo(
@@ -125,7 +124,7 @@ export function WorkspacesScreen({
         description="Каждый замысел — отдельный контекст киностудии: сценарий, кадры, звук и монтаж"
         onOpenMobileNav={onOpenMobileNav}
       >
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
+        <Button size="sm" onClick={() => openCreateWorkspace()}>
           <Plus aria-hidden="true" />
           Создать воркспейс
         </Button>
@@ -223,8 +222,6 @@ export function WorkspacesScreen({
           Воркспейсы, стадии и счётчики — живые данные из БД студии · Фаза A
         </p>
       </div>
-
-      <CreateWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
 }

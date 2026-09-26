@@ -8,6 +8,7 @@ import { ragScopeFromThread } from "@/lib/rag/scope";
 import { MAX_SECTION_CONTENT_CHARS } from "@/lib/section-content";
 
 import { GET as getDocument } from "./[id]/route";
+import { GET as listDocuments } from "../workspaces/[id]/documents/route";
 import { PATCH as patchSection } from "../sections/[id]/route";
 import {
   GET as listRevisions,
@@ -237,5 +238,68 @@ describe.skipIf(SKIP_PG)("documents: shared 200k section content cap", () => {
     expect(over.status).toBe(400);
     const still = await db.documentSection.findUnique({ where: { id: section.id } });
     expect(still?.content.length).toBe(50_001);
+  });
+});
+
+describe.skipIf(SKIP_PG)("documents list: sectionsCount is not a fake empty", () => {
+  const ids: string[] = [];
+
+  afterAll(async () => {
+    for (const id of ids.reverse()) {
+      await db.user.delete({ where: { id } }).catch(() => {});
+    }
+  });
+
+  test("GET list reports four chapters when only content is selected", async () => {
+    const owner = await db.user.create({
+      data: {
+        name: "ListCount",
+        email: `doc-list-${stamp}@example.test`,
+        passwordHash: await hashPassword("password-ok"),
+        role: "client",
+      },
+    });
+    ids.push(owner.id);
+    const token = await signSession({
+      sub: owner.id,
+      email: owner.email,
+      name: owner.name,
+      role: owner.role,
+    });
+    const ws = await db.project.create({
+      data: { userId: owner.id, name: "Фильм list", type: "film" },
+    });
+    const document = await db.document.create({
+      data: {
+        projectId: ws.id,
+        title: "Раскадровка фильма",
+        kind: "script",
+        sections: {
+          create: [
+            { title: "Сцена 1", order: 0, content: "кадр" },
+            { title: "Сцена 2", order: 1, content: "кадр" },
+            { title: "Сцена 3", order: 2, content: "кадр" },
+            { title: "Сцена 4", order: 3, content: "кадр" },
+          ],
+        },
+      },
+    });
+
+    const listed = await listDocuments(
+      jsonRequest(
+        `http://localhost/api/workspaces/${ws.id}/documents`,
+        "GET",
+        undefined,
+        token,
+      ),
+      { params: Promise.resolve({ id: ws.id }) },
+    );
+    expect(listed.status).toBe(200);
+    const json = (await listed.json()) as {
+      documents: { id: string; sectionsCount?: number; sections?: unknown[] }[];
+    };
+    const row = json.documents.find((d) => d.id === document.id);
+    expect(row?.sectionsCount).toBe(4);
+    expect(row?.sections ?? []).toEqual([]);
   });
 });

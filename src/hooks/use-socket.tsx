@@ -2,8 +2,9 @@
 
 /**
  * SocketProvider — socket.io connection to the agent-service
- * (mini-services/agent-service, port 3003, engine path "/") through the
- * sandbox gateway: io("/?XTransformPort=3003").
+ * (mini-services/agent-service, port 3003, engine path "/socket.io").
+ * Same-origin `/?XTransformPort=3003` still works through Caddy :81.
+ * Without Caddy, Next rewrites `/socket.io` to :3003 (`bun run dev`).
  *
  * The provider is mounted only for authenticated users and is keyed by
  * user id (see src/app/page.tsx), so the socket lives exactly one session.
@@ -33,6 +34,15 @@ import { io, type Socket } from "socket.io-client";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import {
+  agentLinkStatus,
+  requestAgentStart,
+  type AgentLinkStatus,
+} from "@/lib/agent-link";
+import {
+  agentSocketClientUri,
+  agentSocketIoClientOptions,
+} from "@/lib/agent-socket";
 import { textPreview } from "@/lib/format";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
@@ -56,6 +66,7 @@ type NoteEventListener = (event: NoteEvent) => void;
 interface SocketContextValue {
   socket: Socket | null;
   connected: boolean;
+  linkStatus: AgentLinkStatus;
   /** Make sure the socket is connected. Resolves false on timeout. */
   ensureConnected: () => Promise<boolean>;
   /**
@@ -69,6 +80,7 @@ interface SocketContextValue {
 const SocketContext = createContext<SocketContextValue>({
   socket: null,
   connected: false,
+  linkStatus: "reconnecting",
   ensureConnected: async () => false,
   onNoteEvent: () => () => {},
 });
@@ -81,25 +93,38 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   // (io() reuses the same instance for identical url+namespace, so React
   // StrictMode double-invocation is harmless). The auth callback fetches a
   // fresh ws-token on every connect attempt.
-  const [socket] = useState<Socket>(() =>
-    io("/?XTransformPort=3003", {
-      path: "/",
-      transports: ["websocket", "polling"],
+  const [socket] = useState<Socket>(() => {
+    let firstToken: Promise<string | null> | null =
+      typeof window === "undefined"
+        ? null
+        : api
+            .wsToken()
+            .then((r) => r.token)
+            .catch(() => null);
+    return io(agentSocketClientUri(), {
+      ...agentSocketIoClientOptions(
+        typeof window === "undefined" ? "" : window.location.port,
+      ),
       reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 10000,
+      reconnectionDelay: 200,
+      reconnectionDelayMax: 2000,
+      timeout: 4000,
       autoConnect: false,
       auth: (cb) => {
-        api
-          .wsToken()
-          .then(({ token }) => cb({ token }))
-          .catch(() => cb({}));
+        const pending = firstToken;
+        firstToken = null;
+        void (pending ??
+          api
+            .wsToken()
+            .then((r) => r.token)
+            .catch(() => null)
+        ).then((token) => cb(token ? { token } : {}));
       },
-    }),
-  );
+    });
+  });
 
   const [connected, setConnected] = useState(false);
+  const [healthUp, setHealthUp] = useState<boolean | null>(null);
   const authRetryRef = useRef(false);
   const disposedRef = useRef(false);
 
@@ -121,6 +146,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     const handleConnect = () => {
       authRetryRef.current = false;
       setConnected(true);
+      setHealthUp(true);
       // Reconnect resync: if the socket dropped while the open note was
       // mid-analysis (e.g. the service was reaped and self-healed), a
       // terminal event may have been missed — refetch the open note so it
@@ -171,20 +197,19 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     };
 
     // Debounced self-heal: at most one POST per 30s per provider lifetime.
+    // Boot always POSTs once so the composer is not stuck reconnecting
+    // until the first connect_error. Connect is not gated on the POST —
+    // if the agent is already up the handshake should finish first.
     const healRef = { last: 0 };
-    async function healAgentService() {
+    async function healAgentService(force = false) {
       if (disposedRef.current) return;
       const now = Date.now();
-      if (now - healRef.last < 30000) return;
+      if (!force && now - healRef.last < 30000) return;
       healRef.last = now;
-      try {
-        await fetch("/api/health/agent-service", {
-          method: "POST",
-          credentials: "same-origin",
-        });
-      } catch {
-        // Next app unreachable — nothing we can do from here
-      }
+      const result = await requestAgentStart();
+      if (disposedRef.current) return;
+      setHealthUp(result.up);
+      if (result.up && !s.connected) s.connect();
     }
 
     /* ── Note analysis pipeline (Stage 2) ── */
@@ -264,6 +289,15 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const { project } = (payload ?? {}) as WsProjectCreatedPayload;
       if (!project || typeof project.id !== "string") return;
       useAppUi.getState().bumpProjects();
+      if (project.origin === "workspace") {
+        invalidateWorkspaces();
+        toast.success(`Агент создал воркспейс «${project.name}»`, {
+          action: {
+            label: "Открыть",
+            onClick: () => useAppUi.getState().openWorkspace(project.id),
+          },
+        });
+      }
     };
 
     // File updates are frequent → silent bump; checkpoints toast (deduped
@@ -300,6 +334,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     s.on("project:updated", handleProjectUpdated);
 
     s.connect();
+    void healAgentService(true);
 
     return () => {
       disposedRef.current = true;
@@ -332,9 +367,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
   }, [socket]);
 
+  const linkStatus = agentLinkStatus({
+    socketConnected: connected,
+    healthUp,
+  });
+
   return (
     <SocketContext.Provider
-      value={{ socket, connected, ensureConnected, onNoteEvent }}
+      value={{ socket, connected, linkStatus, ensureConnected, onNoteEvent }}
     >
       {children}
     </SocketContext.Provider>

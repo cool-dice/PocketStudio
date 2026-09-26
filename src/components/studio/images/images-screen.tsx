@@ -52,9 +52,10 @@ export function ImagesScreen({
   const [pickedId, setPickedId] = useState<string | null>(null);
   const effectiveId = workspaceId ?? pickedId;
 
-  /* Галерея живых артефактов. */
+  /* Галерея живых артефактов. Вкладка воркспейса стартует со скелетонов,
+     а не с «пока нет картинок» до первого fetch. */
   const [tiles, setTiles] = useState<GalleryTile[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => Boolean(workspaceId));
   const [loadError, setLoadError] = useState<string | null>(null);
 
   /* Каталогизация. */

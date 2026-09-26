@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { readJsonBody } from "@/lib/json-body-limit";
 
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
 import { workspaceCounts, workspaceDto } from "@/lib/workspace-shapes";
-import { WORKSPACE_STAGES } from "@/lib/workspace-data";
-import type { WorkspaceKind } from "@/lib/workspace-types";
-import { ensureCodeWorkspace } from "@/lib/workspace";
+import {
+  createTypedWorkspace,
+  validateWorkspaceCreate,
+} from "@/lib/create-typed-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -60,20 +60,6 @@ export async function GET(req: Request) {
 
 /* ── POST /api/workspaces — создать воркспейс ── */
 
-const createSchema = z.object({
-  type: z.enum(["film", "book", "music", "app", "universal"]),
-  name: z
-    .string()
-    .trim()
-    .min(1, "Название не может быть пустым")
-    .max(80, "Название не может превышать 80 символов"),
-  description: z
-    .string()
-    .trim()
-    .max(500, "Описание не может превышать 500 символов")
-    .optional(),
-});
-
 export async function POST(req: Request) {
   const session = await getUserFromRequest(req);
   if (!session) {
@@ -82,44 +68,20 @@ export async function POST(req: Request) {
 
   const jsonRead = await readJsonBody(req, { fallback: {} });
   if (!jsonRead.ok) return jsonRead.response;
-  const parsed = createSchema.safeParse(jsonRead.value);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Некорректный запрос" },
-      { status: 400 },
-    );
-  }
-  const { type, name, description } = parsed.data;
-
-  const stage = WORKSPACE_STAGES[type as WorkspaceKind][0];
-  const project = await db.project.create({
-    data: {
-      userId: session.sub,
-      name,
-      description: description || null,
-      origin: "workspace",
-      type,
-      stage,
-      stageIndex: 1,
-      progress: 0,
-    },
+  const body =
+    jsonRead.value && typeof jsonRead.value === "object"
+      ? (jsonRead.value as Record<string, unknown>)
+      : {};
+  const parsed = validateWorkspaceCreate({
+    name: body.name,
+    type: body.type,
+    description: body.description,
   });
-
-  if (type === "app") {
-    try {
-      const root = await ensureCodeWorkspace(project.id);
-      await db.project.update({
-        where: { id: project.id },
-        data: { rootPath: root },
-      });
-    } catch (err) {
-      console.error(
-        "[workspaces] code scaffold failed:",
-        err instanceof Error ? err.message : err,
-      );
-    }
+  if ("error" in parsed) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
+  const project = await createTypedWorkspace(db, session.sub, parsed);
   return NextResponse.json(
     { workspace: workspaceDto(project, await workspaceCounts(project.id)) },
     { status: 201 },

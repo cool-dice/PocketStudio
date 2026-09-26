@@ -18,7 +18,7 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { useAppUi } from "@/lib/store";
-import { isStaleSectionSave, nextSaveSeq } from "@/lib/section-save-race";
+import { documentsAfterCreate } from "@/lib/documents-list";
 import type {
   DocumentDto,
   DocumentKind,
@@ -56,6 +56,7 @@ export function useDocuments(workspaceId?: string | null) {
       setLoadError(false);
     } catch {
       if (seq !== seqRef.current) return;
+      setDocuments([]);
       setLoadError(true);
     } finally {
       if (seq === seqRef.current) setLoading(false);
@@ -75,7 +76,7 @@ export function useDocuments(workspaceId?: string | null) {
     async (body: { title: string; kind?: DocumentKind }) => {
       if (!workspaceId) throw new Error("Нет активного воркспейса");
       const doc = await api.createDocument(workspaceId, body);
-      setDocuments((prev) => [doc, ...prev]);
+      setDocuments((prev) => documentsAfterCreate(prev, doc));
       return doc;
     },
     [workspaceId],
@@ -337,6 +338,7 @@ export function useDocumentShelves() {
       );
       setLoadError(false);
     } catch {
+      setShelves([]);
       setLoadError(true);
     } finally {
       setLoading(false);

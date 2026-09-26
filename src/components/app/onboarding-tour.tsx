@@ -7,6 +7,12 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppUi } from "@/lib/store";
+import {
+  onboardingBlocksTour,
+  readOnboardingDone,
+  shouldOpenOnboarding,
+  writeOnboardingDone,
+} from "@/lib/onboarding-gate";
 
 const STEPS = [
   {
@@ -27,24 +33,6 @@ const STEPS = [
   },
 ];
 
-const ONBOARDING_DONE_KEY = "pocketstudio-onboarding-done";
-
-function readLocalOnboardingDone(): boolean {
-  try {
-    return window.localStorage.getItem(ONBOARDING_DONE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeLocalOnboardingDone() {
-  try {
-    window.localStorage.setItem(ONBOARDING_DONE_KEY, "1");
-  } catch {
-    /* ignore */
-  }
-}
-
 export function OnboardingTour() {
   const { user, markOnboardingDone } = useAuth();
   const [open, setOpen] = useState(false);
@@ -52,33 +40,77 @@ export function OnboardingTour() {
   const finishing = useRef(false);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setCaptureOpen = useAppUi((s) => s.setCaptureOpen);
+  const createWorkspaceOpen = useAppUi((s) => s.createWorkspaceOpen);
+  const createProjectOpen = useAppUi((s) => s.createProjectOpen);
+  const captureOpen = useAppUi((s) => s.captureOpen);
+  const mainArea = useAppUi((s) => s.mainArea);
+  const blocksTour = onboardingBlocksTour({
+    createWorkspaceOpen,
+    createProjectOpen,
+    captureOpen,
+    mainArea,
+  });
 
   useEffect(() => {
-    if (!user || user.onboardingDone || readLocalOnboardingDone() || finishing.current) {
+    if (!user) return;
+    const localDone = readOnboardingDone(user.id);
+    if (
+      !shouldOpenOnboarding({
+        userId: user.id,
+        userDone: Boolean(user.onboardingDone),
+        localDone,
+        finishing: finishing.current,
+        blocksTour,
+      })
+    ) {
+      if (blocksTour || localDone || user.onboardingDone || finishing.current) {
+        setOpen(false);
+      }
       return;
     }
     let cancelled = false;
     api
       .getOnboarding()
       .then((r) => {
-        if (!cancelled && !r.onboardingDone && !readLocalOnboardingDone()) setOpen(true);
+        if (cancelled || finishing.current) return;
+        const ui = useAppUi.getState();
+        if (
+          shouldOpenOnboarding({
+            userId: user.id,
+            userDone: r.onboardingDone || Boolean(user.onboardingDone),
+            localDone: readOnboardingDone(user.id),
+            finishing: finishing.current,
+            blocksTour: onboardingBlocksTour(ui),
+          })
+        ) {
+          setOpen(true);
+        }
       })
       .catch(() => {
-        if (!cancelled && !readLocalOnboardingDone() && !user.onboardingDone) setOpen(true);
+        if (cancelled || finishing.current) return;
+        const ui = useAppUi.getState();
+        if (
+          shouldOpenOnboarding({
+            userId: user.id,
+            userDone: Boolean(user.onboardingDone),
+            localDone: readOnboardingDone(user.id),
+            finishing: finishing.current,
+            blocksTour: onboardingBlocksTour(ui),
+          })
+        ) {
+          setOpen(true);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [user]);
-
-  if (!open) return null;
-  const current = STEPS[step]!;
-  const last = step === STEPS.length - 1;
+  }, [user, blocksTour]);
 
   async function finish(andQuest: boolean) {
+    if (!user) return;
     finishing.current = true;
     setOpen(false);
-    writeLocalOnboardingDone();
+    writeOnboardingDone(user.id);
     markOnboardingDone();
     try {
       await api.setOnboardingDone(true);
@@ -95,12 +127,17 @@ export function OnboardingTour() {
     }
   }
 
+  if (!open || blocksTour) return null;
+  const current = STEPS[step]!;
+  const last = step === STEPS.length - 1;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <div
         role="dialog"
+        aria-modal="false"
         aria-labelledby="onboarding-title"
-        className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-xl"
+        className="pointer-events-auto w-full max-w-md rounded-2xl border bg-card p-6 shadow-xl"
       >
         <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Sparkles className="size-5" aria-hidden="true" />

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getUserFromRequest } from "@/lib/auth";
+import { findOwnedCodeProject } from "@/lib/project-api";
 import {
   WorkspaceError,
   projectRoot,
@@ -18,7 +19,7 @@ const patchSchema = z.object({
 });
 
 async function getOwnedProject(id: string, userId: string) {
-  return db.project.findFirst({ where: { id, userId } });
+  return findOwnedCodeProject(id, userId);
 }
 
 /* ── GET /api/projects/[id] — detail with stats ── */

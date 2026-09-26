@@ -14,7 +14,7 @@
  *   re-run action next to the section title for processed notes.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import {
   AlertTriangle,
@@ -42,6 +42,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { LinkedTargets } from "@/components/app/linked-targets";
 import { NoteTranscriptionBlock } from "@/components/app/note-transcription";
 import { useThreads } from "@/hooks/use-threads";
 import { formatNoteDate, textPreview } from "@/lib/format";
@@ -701,6 +702,7 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
           </Button>
         </div>
 
+        <LinkedTargets noteId={note.id} />
       </div>
 
       {/* ── Delete confirmation ── */}

@@ -28,11 +28,14 @@ export function AiSettingsScreen({
 }) {
   const [data, setData] = useState<UserAiSettingsDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
 
   const reload = useCallback(async () => {
-    setData(await api.userAiSettings());
+    const next = await api.userAiSettings();
+    setData(next);
+    setLoadError(null);
   }, []);
 
   useEffect(() => {
@@ -41,7 +44,10 @@ export function AiSettingsScreen({
       try {
         await reload();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Не удалось загрузить настройки");
+        const message =
+          err instanceof Error ? err.message : "Не удалось загрузить настройки";
+        if (!cancelled) setLoadError(message);
+        toast.error(message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -107,8 +113,42 @@ export function AiSettingsScreen({
 
       <div className="vf-scroll min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-6">
-          {loading || !data ? (
-            <div className="h-48 animate-pulse rounded-2xl border bg-muted/40" />
+          {loading ? (
+            <div
+              className="h-48 animate-pulse rounded-2xl border bg-muted/40"
+              role="status"
+              aria-label="Загрузка настроек ИИ"
+            />
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card p-10 text-center">
+              <p className="text-sm text-muted-foreground">{loadError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                onClick={() => {
+                  setLoading(true);
+                  void reload()
+                    .catch((err) => {
+                      setLoadError(
+                        err instanceof Error
+                          ? err.message
+                          : "Не удалось загрузить настройки",
+                      );
+                    })
+                    .finally(() => setLoading(false));
+                }}
+              >
+                <RefreshCw className="size-4" aria-hidden="true" />
+                Повторить
+              </Button>
+            </div>
+          ) : !data ? (
+            <div
+              className="h-48 animate-pulse rounded-2xl border bg-muted/40"
+              role="status"
+              aria-label="Загрузка настроек ИИ"
+            />
           ) : (
             <>
               <section className="rounded-2xl border bg-card p-4 sm:p-6">

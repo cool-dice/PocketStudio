@@ -3,6 +3,11 @@
  * failed TTS is not a playable track.
  */
 
+export const DAW_EMPTY_TRACKS = "Дорожек пока нет";
+export const DAW_EMPTY_TRACKS_HINT =
+  "Добавьте барабаны, бас или пэд — и соберите карманный трек. Это не ошибка загрузки.";
+export const DAW_LOAD_ERROR = "Не удалось загрузить студию";
+
 export const AUDIO_LIBRARY_EMPTY = "Аудио пока нет";
 export const AUDIO_LIBRARY_EMPTY_HINT =
   "Озвучьте текст во вкладке «Озвучка» или соберите трек в «Студии» — готовые записи и миксы появятся здесь.";

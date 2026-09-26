@@ -21,7 +21,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { db } from "./db-client";
-import { abortedToolResult, isAbortFlag, throwIfAborted } from "../../src/lib/abort-flag";
+import { abortedToolResult, isAbortFlag } from "../../src/lib/abort-flag";
 import { generateLLMResponse } from "./agent";
 import {
   generateImage as gatewayGenerateImage,
@@ -68,6 +68,11 @@ import {
   sectionContentFromToolArg,
 } from "../../src/lib/section-content";
 import type { ToolContext, ToolDef } from "./tools";
+import {
+  pickString,
+  resolveWorkspace as resolveWorkspaceShared,
+  type WorkspaceRow,
+} from "../../src/lib/resolve-workspace";
 
 // ─────────────────────────── shared helpers ───────────────────────────
 
@@ -86,75 +91,21 @@ function saveGenFile(data: Buffer, ext: "png" | "wav"): string {
   return `/gen/${name}`;
 }
 
-interface WorkspaceRow {
-  id: string;
-  name: string;
-  type: string;
-}
-
-/**
- * Найти воркспейс пользователя: по id (workspaceId/projectId) или по
- * названию (регистр и кириллица — через JS, как findCategoryByName). Приоритет: точное
- * совпадение → «начинается с» → «содержит».
- */
 async function resolveWorkspace(
   userId: string,
   args: Record<string, unknown>,
   ctx?: ToolContext,
 ): Promise<WorkspaceRow | { error: string }> {
-  throwIfAborted(ctx?.signal);
-  const idArg = pickString(args, ["workspaceId", "projectId"]);
-  if (idArg) {
-    const byId = await db.project.findFirst({
-      where: { id: idArg, userId },
-      select: { id: true, name: true, type: true },
-    });
-    if (byId) return byId;
-    return { error: "Воркспейс с таким id не найден" };
-  }
-
-  const name = pickString(args, ["workspaceName", "projectName"]);
-  if (name) {
-    const all = await db.project.findMany({
-      where: { userId },
-      select: { id: true, name: true, type: true },
-      orderBy: { updatedAt: "desc" },
-    });
-    const lower = name.toLowerCase();
-    const found =
-      all.find((p) => p.name.toLowerCase() === lower) ??
-      all.find((p) => p.name.toLowerCase().startsWith(lower)) ??
-      all.find((p) => p.name.toLowerCase().includes(lower));
-    if (found) return found;
+  const result = await resolveWorkspaceShared(db, userId, args, ctx, {
+    required: true,
+  });
+  if (result === null) {
     return {
-      error: `Воркспейс «${name}» не найден — проверьте название или передайте workspaceId`,
+      error:
+        "Укажите воркспейс: откройте чат внутри воркспейса или передайте workspaceId / workspaceName",
     };
   }
-
-  if (ctx?.projectId) {
-    const byCtx = await db.project.findFirst({
-      where: { id: ctx.projectId, userId },
-      select: { id: true, name: true, type: true },
-    });
-    if (byCtx) return byCtx;
-  }
-
-  return {
-    error:
-      "Укажите воркспейс: откройте чат внутри воркспейса или передайте workspaceId / workspaceName",
-  };
-}
-
-/** Первая непустая строка из перечисленных ключей аргументов. */
-function pickString(
-  args: Record<string, unknown>,
-  keys: string[],
-): string | null {
-  for (const key of keys) {
-    const v = args[key];
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return null;
+  return result;
 }
 
 /** Опциональная строка (null → null). */

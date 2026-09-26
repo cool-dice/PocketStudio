@@ -4,6 +4,7 @@ import { hashPassword, signSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 import { GET as getWorkspace } from "./workspaces/[id]/route";
+import { GET as listWorkspaces } from "./workspaces/route";
 import { GET as getNote } from "./notes/[id]/route";
 import { GET as listNotebook } from "./notes/route";
 import { POST as searchRag } from "./rag/search/route";
@@ -115,6 +116,25 @@ describe.skipIf(SKIP_PG)("IDOR: other user's ids are 404", () => {
       ),
     );
     expect(rag.status).toBe(404);
+  });
+
+  test("GET /api/workspaces does not list another user's studios", async () => {
+    await seedAttacker();
+    const secret = await db.project.create({
+      data: {
+        userId: ownerId!,
+        name: "Секретный список",
+        type: "music",
+        origin: "workspace",
+      },
+    });
+    const listed = await listWorkspaces(
+      jsonRequest("http://localhost/api/workspaces", "GET", undefined, attackerToken!),
+    );
+    expect(listed.status).toBe(200);
+    const json = (await listed.json()) as { workspaces: Array<{ id: string; name: string }> };
+    expect(json.workspaces.some((w) => w.id === secret.id)).toBe(false);
+    expect(JSON.stringify(json)).not.toContain("Секретный список");
   });
 
   test("thread GET/PATCH/DELETE are 404 for another user", async () => {

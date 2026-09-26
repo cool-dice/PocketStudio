@@ -70,6 +70,7 @@ export async function GET(req: Request) {
         mode: true,
         projectId: true,
         updatedAt: true,
+        project: { select: { origin: true } },
         messages: {
           orderBy: { createdAt: "desc" },
           take: 3,
@@ -159,6 +160,7 @@ export async function GET(req: Request) {
         title: t.title,
         mode: t.mode as SearchThreadHit["mode"],
         projectId: t.projectId,
+        projectOrigin: (t.project?.origin ?? null) as SearchThreadHit["projectOrigin"],
         updatedAt: t.updatedAt.toISOString(),
         preview: message ? searchExcerpt(message.content, needle) : null,
       };

@@ -17,7 +17,7 @@ export function unauthorized(): NextResponse {
   return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });
 }
 
-/** Проверить, что воркспейс принадлежит пользователю. */
+/** Проверить, что проект принадлежит пользователю. */
 export async function ensureWorkspace(
   req: Request,
   projectId: string,

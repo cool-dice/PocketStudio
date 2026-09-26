@@ -3,8 +3,11 @@
 /**
  * Composer — auto-growing textarea. Enter sends, Shift+Enter inserts a
  * newline. Disabled while the agent is thinking/streaming (busy).
+ * When the active thread is bound to a studio, a small chip sits above
+ * the input (click → workspace).
+ *
  * Slash commands: typing "/" opens a command menu above the input —
- * mode switches, quick note prefix, notebook, global search.
+ * mode switches, quick note, film/book/music studios, notebook, search.
  *
  * Voice (Stage 2): compact mic next to the send button — records via
  * useVoiceRecorder, the backend transcribes (POST /api/notes/voice → { text })
@@ -39,14 +42,20 @@ import {
   useVoiceRecorder,
   type VoiceClip,
 } from "@/hooks/use-voice-recorder";
+import { BoundThreadChip } from "@/components/app/bound-thread-chip";
 import { useThreads } from "@/hooks/use-threads";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { api, ApiError } from "@/lib/api";
+import { boundChipFromLists } from "@/lib/composer-binding";
+import { WORKSPACE_SLASH_COMMANDS } from "@/lib/slash-catalog";
+import { isOffFlowWorkspace } from "@/lib/workspace-data";
 import { useAppUi } from "@/lib/store";
 import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
 import {
   COMPOSER_TEXTAREA_MAX_CHARS,
   composerSizeUi,
 } from "@/lib/message-send";
+import { THREAD_ARCHIVED_SEND } from "@/lib/thread-copy";
 
 const MAX_HEIGHT = 200;
 
@@ -60,8 +69,10 @@ export function Composer({
 }) {
   const { busy, sendMessage, abortTurn, activeThread, updateThreadMode, sendError, clearSendError } =
     useThreads();
+  const { workspaces } = useWorkspaces();
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
+  const openCreateWorkspace = useAppUi((s) => s.openCreateWorkspace);
   const composerDraft = useAppUi((s) => s.composerDraft);
   const composerAutoSendProjectId = useAppUi((s) => s.composerAutoSendProjectId);
   const setComposerDraft = useAppUi((s) => s.setComposerDraft);
@@ -87,6 +98,10 @@ export function Composer({
   useEffect(() => {
     const pending = pendingAutoSend.current;
     if (!pending || busy || locked || !activeThread) return;
+    if (activeThread.archived) {
+      pendingAutoSend.current = null;
+      return;
+    }
     const have = activeThread.projectId ?? null;
     if (pending.projectId !== have) return;
     const size = composerSizeUi(pending.text);
@@ -102,6 +117,17 @@ export function Composer({
   const threadProjectId = activeThread?.projectId ?? null;
   const scoped =
     scopeProjectId === undefined || threadProjectId === scopeProjectId;
+  const boundWorkspace =
+    scoped && threadProjectId
+      ? workspaces.find(
+          (w) => w.id === threadProjectId && !isOffFlowWorkspace(w.type),
+        ) ?? null
+      : null;
+  const boundChip = boundChipFromLists({
+    id: threadProjectId,
+    workspace: boundWorkspace,
+    project: null,
+  });
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
   const finalizingRef = useRef(false);
@@ -123,6 +149,20 @@ export function Composer({
           requestAnimationFrame(() => taRef.current?.focus());
         },
       },
+      ...WORKSPACE_SLASH_COMMANDS.map((spec) => ({
+        name: spec.name,
+        label: spec.label,
+        description: spec.description,
+        icon:
+          spec.type === "music"
+            ? SLASH_MISC_ICONS.track
+            : spec.type === "book"
+              ? SLASH_MISC_ICONS.book
+              : spec.type === "film"
+                ? SLASH_MISC_ICONS.film
+                : SLASH_MISC_ICONS.workspace,
+        run: () => openCreateWorkspace(spec.type),
+      })),
       {
         name: "блокнот",
         label: "Блокнот",
@@ -168,6 +208,7 @@ export function Composer({
     return list;
   }, [
     activeThread,
+    openCreateWorkspace,
     setMainArea,
     setSearchOpen,
     updateThreadMode,
@@ -246,9 +287,12 @@ export function Composer({
   }, [value]);
 
   const blocked = busy || locked || !scoped;
+  const archived = Boolean(activeThread?.archived);
   const size = composerSizeUi(value, sendError);
+  const hintError = archived ? THREAD_ARCHIVED_SEND : size.error;
   const canSend =
     !blocked &&
+    !archived &&
     !isRecording &&
     value.trim().length > 0 &&
     !size.disableSend;
@@ -317,6 +361,9 @@ export function Composer({
           onExecute={executeCommand}
         />
 
+        {boundChip && threadProjectId ? (
+          <BoundThreadChip chip={boundChip} id={threadProjectId} className="mb-2" />
+        ) : null}
         <div className="flex min-w-0 items-end gap-2 rounded-2xl border bg-card p-1.5 pl-3 transition-shadow duration-200 focus-within:ring-2 focus-within:ring-ring/60">
           <label htmlFor="composer" className="sr-only">
             Сообщение
@@ -338,13 +385,15 @@ export function Composer({
             placeholder={
               isRecording
                 ? "Слушаем вас…"
-                : locked && !busy
-                  ? "Подключаем чат воркспейса…"
-                  : blocked
-                    ? "Студия печатает…"
-                    : "Напишите сообщение… или / для команд"
+                : archived
+                  ? THREAD_ARCHIVED_SEND
+                  : locked && !busy
+                    ? "Подключаем чат воркспейса…"
+                    : blocked
+                      ? "Студия печатает…"
+                      : "Напишите сообщение… или / для команд"
             }
-            disabled={blocked || isRecording}
+            disabled={blocked || isRecording || archived}
             maxLength={COMPOSER_TEXTAREA_MAX_CHARS}
             className="vf-scroll max-h-[200px] min-h-11 min-w-0 flex-1 resize-none self-center bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           />
@@ -442,12 +491,12 @@ export function Composer({
           <p
             id="composer-hint"
             className={`min-w-0 flex-1 text-xs ${
-              size.error ? "text-destructive" : "text-muted-foreground"
+              hintError ? "text-destructive" : "text-muted-foreground"
             }`}
-            role={size.error ? "alert" : undefined}
+            role={hintError ? "alert" : undefined}
           >
-            {size.error
-              ? size.error
+            {hintError
+              ? hintError
               : isRecording
                 ? "Идёт запись голоса"
                 : voiceState === "processing"

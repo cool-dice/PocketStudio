@@ -225,7 +225,7 @@ export function NleTimeline({
         <Button
           size="sm"
           variant="outline"
-          disabled={compiling || !filmRenderSupported() || !timelineHasRenderableClips(tl)}
+          disabled={compiling || !filmRenderSupported()}
           onClick={() => void assemble()}
         >
           <Film className="size-3.5" /> {compiling ? "Сборка…" : "Собрать"}

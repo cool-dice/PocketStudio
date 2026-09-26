@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { displayedSectionsCount } from "@/lib/documents-list";
 import type { DocumentDto } from "@/lib/workspace-types";
 import { WORKSPACE_TYPE_META } from "@/lib/workspace-data";
 import { agoFromISO, docKindMeta, formatNumber, pluralRu } from "./types";
@@ -57,7 +58,7 @@ export function DocListItem({
 }) {
   const kind = docKindMeta(doc.kind);
   const Icon = kind.icon;
-  const sections = doc.sections?.length ?? doc.sectionsCount ?? 0;
+  const sections = displayedSectionsCount(doc);
 
   return (
     <li>

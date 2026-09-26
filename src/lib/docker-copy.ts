@@ -15,10 +15,13 @@ const SCAFFOLD_FILES = new Set([
 ]);
 
 export const DOCKERFILE_NOT_PUBLISHED =
-  "Dockerfile сохранён в проекте. Образ не собран и не опубликован.";
+  "Dockerfile сохранён в корне. Образ не собран и не опубликован.";
+
+export const DOCKERFILE_NOT_PUBLISHED_CODE =
+  "Dockerfile сохранён в код-проекте. Образ не собран и не опубликован — хоста нет.";
 
 export const EMPTY_APP_BUILD_ERROR =
-  "Пустой воркспейс: нет исходников для сборки образа. Добавьте файлы приложения.";
+  "Пустое приложение: нет исходников для сборки образа. Добавьте файлы.";
 
 export const DOCKERFILE_MISSING_ERROR =
   "Сначала сгенерируйте Dockerfile — без него docker build запускать нечего.";
@@ -37,7 +40,21 @@ export const DEPLOY_ZIP_HINT =
 
 export const DEPLOY_SCREEN_TITLE = "Экспорт и деплой";
 export const DEPLOY_SCREEN_DESCRIPTION =
-  "Dockerfile, docker build если демон есть, ZIP и локальный preview — без фейкового «опубликовано».";
+  "Dockerfile, docker build если демон есть, ZIP и локальный preview — без фейкового «опубликовано» и без выдуманного хоста.";
+
+export const DEPLOY_CODE_ZIP_TITLE = "Скачать ZIP код-проекта";
+export const DEPLOY_CODE_ZIP_HINT =
+  "Архив исходников с диска. Это не публикация и не замена хостинга.";
+export const DEPLOY_STUDIO_ZIP_TITLE = "Скачать ZIP воркспейса";
+export const DEPLOY_STUDIO_ZIP_HINT =
+  "Архив собирается на сервере из артефактов, документов и данных — без моков.";
+export const DEPLOY_PICKER_TITLE = "Что экспортируем?";
+export const DEPLOY_PICKER_HINT =
+  "Студия — ZIP контента. Код-проект — исходники, Dockerfile и docker build (не хост).";
+export const DEPLOY_CODE_READY_HINT =
+  "Код-проект: ZIP исходников и Dockerfile. Облачного хоста нет — не ждите URL публикации.";
+export const DEPLOY_SANDBOX_BLURB =
+  "Карманная студия работает без внешнего реестра и доменов. Сборка образа — локальный docker build, если демон есть. ZIP — архив, не деплой.";
 
 const TYPE_LABELS: Record<string, string> = {
   film: "фильм",

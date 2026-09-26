@@ -16,6 +16,7 @@ import {
   IMAGE_MISSING_FILE,
   IMAGE_MISSING_FILE_HINT,
   displayableImageSrc,
+  galleryListView,
   isHonestImageUrl,
 } from "./image-copy";
 
@@ -47,6 +48,13 @@ describe("image / gallery honesty copy", () => {
     expect(IMAGE_GALLERY_FILTER_EMPTY).not.toBe(IMAGE_GALLERY_LOAD_ERROR);
     expect(IMAGE_GALLERY_EMPTY).toMatch(/[А-Яа-яЁё]/);
     expect(IMAGE_GALLERY_LOAD_ERROR).toMatch(/[А-Яа-яЁё]/);
+  });
+
+  test("loading is not empty; error wins over a zero count", () => {
+    expect(galleryListView(true, null, 0)).toBe("loading");
+    expect(galleryListView(false, "boom", 0)).toBe("error");
+    expect(galleryListView(false, null, 0)).toBe("empty");
+    expect(galleryListView(false, null, 2)).toBe("ready");
   });
 
   test("failed generation copy is not a ready PNG", () => {

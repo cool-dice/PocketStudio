@@ -45,6 +45,7 @@ export function WorkspaceCodeTab({
       <ProjectScreen
         key={workspace.id}
         projectId={workspace.id}
+        surface="workspace"
         onOpenMobileNav={onOpenMobileNav}
       />
     </WorkspaceModuleFrame>

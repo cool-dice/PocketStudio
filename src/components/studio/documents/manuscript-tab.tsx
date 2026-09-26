@@ -7,13 +7,20 @@
  * тулбаре, живой счётчик слов), справа — дерево структуры и ИИ-помощник.
  */
 
-import { BookOpenText } from "lucide-react";
+import { BookOpenText, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DocumentDto, DocumentSectionDto, EntityDto } from "@/lib/workspace-types";
 import type { DocShelf, SectionPatch } from "@/hooks/use-documents";
 import { api } from "@/lib/api";
+import {
+  DOCUMENTS_LOAD_ERROR,
+  DOCUMENTS_LOAD_ERROR_HINT,
+  DOCUMENTS_RETRY,
+  documentsListView,
+} from "@/lib/documents-list";
 import { AiAssistantPanel } from "./ai-assistant-panel";
 import { ChapterTree } from "./chapter-tree";
 import { DocChipsBar, DocumentLibrary } from "./doc-library";
@@ -46,6 +53,8 @@ export interface ManuscriptTabProps {
   onRenameDoc: (id: string, title: string) => void;
   /** Открывает диалог «Новый документ» на уровне экрана. */
   onCreateDoc: () => void;
+  loadError?: boolean;
+  onRetryLoad?: () => void;
   saveSection: (id: string, patch: SectionPatch) => Promise<DocumentSectionDto | null>;
   createSection: (title: string) => Promise<DocumentSectionDto>;
   deleteSection: (id: string) => Promise<void>;
@@ -66,6 +75,8 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
     onRemoveDoc,
     onRenameDoc,
     onCreateDoc,
+    loadError = false,
+    onRetryLoad,
     saveSection,
     createSection,
     deleteSection,
@@ -192,6 +203,8 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
           onSelect={onSelectDoc}
           onRemove={onRemoveDoc}
           loading={loading}
+          loadError={loadError}
+          onRetry={onRetryLoad}
         />
       </nav>
 
@@ -206,7 +219,23 @@ export function ManuscriptTab(props: ManuscriptTabProps) {
           />
         ) : null}
         <div className="vf-scroll min-h-0 flex-1 overflow-y-auto">
-          {docLoading && !doc ? (
+          {documentsListView(loading, loadError, docs.length) === "error" ? (
+            <div
+              role="alert"
+              className="flex min-h-full flex-col items-center justify-center gap-2 px-6 py-16 text-center"
+            >
+              <p className="text-sm font-medium">{DOCUMENTS_LOAD_ERROR}</p>
+              <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
+                {DOCUMENTS_LOAD_ERROR_HINT}
+              </p>
+              {onRetryLoad ? (
+                <Button type="button" size="sm" variant="outline" onClick={onRetryLoad}>
+                  <RotateCcw className="size-3.5" aria-hidden="true" />
+                  {DOCUMENTS_RETRY}
+                </Button>
+              ) : null}
+            </div>
+          ) : docLoading && !doc ? (
             <EditorSkeleton />
           ) : doc ? (
             <>

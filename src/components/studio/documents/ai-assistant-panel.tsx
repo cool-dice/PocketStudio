@@ -12,7 +12,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
+import { UNCONFIGURED_TOOL_MESSAGE } from "@/lib/ai/tools";
 import { sectionAiAction } from "@/lib/ai/prompts";
+import { SECTION_AI_FAILED, SECTION_AI_UNCONFIGURED_HINT } from "@/lib/studio-copy";
 import type { DocumentSectionDto } from "@/lib/workspace-types";
 
 export function AiAssistantPanel({
@@ -59,10 +61,13 @@ export function AiAssistantPanel({
         { description: "Старый текст сохранён в истории версий." },
       );
     } catch (err) {
+      const unconfigured =
+        err instanceof ApiError && err.message === UNCONFIGURED_TOOL_MESSAGE;
       toast.error(
-        err instanceof ApiError
-          ? err.message
-          : "Не удалось вызвать ИИ — попробуйте ещё раз",
+        unconfigured ? UNCONFIGURED_TOOL_MESSAGE : SECTION_AI_FAILED,
+        {
+          description: unconfigured ? SECTION_AI_UNCONFIGURED_HINT : undefined,
+        },
       );
     } finally {
       setBusy(null);
