@@ -53,41 +53,45 @@ export function WorkspacesCard({
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg">
       {/* ── Градиентная обложка ── */}
-      <button
-        type="button"
-        onClick={() => onOpen(workspace.id)}
-        title={`Открыть воркспейс «${workspace.name}»`}
-        aria-label={`Открыть воркспейс «${workspace.name}»`}
-        className={cn(
-          "relative block h-28 w-full overflow-hidden bg-gradient-to-br text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:h-32",
-          meta.gradient,
-        )}
-      >
-        <span
-          aria-hidden="true"
-          className="absolute inset-0 bg-[radial-gradient(140%_120%_at_85%_-10%,rgba(255,255,255,0.25),transparent_55%)]"
-        />
-        <span
-          aria-hidden="true"
-          className="absolute left-4 top-4 flex size-10 items-center justify-center rounded-xl bg-white/15 text-white backdrop-blur-sm"
+      {/* Звезда — сосед кнопки открытия: в HTML button не может быть внутри button. */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => onOpen(workspace.id)}
+          title={`Открыть воркспейс «${workspace.name}»`}
+          aria-label={`Открыть воркспейс «${workspace.name}»`}
+          className={cn(
+            "relative block h-28 w-full overflow-hidden bg-gradient-to-br text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:h-32",
+            meta.gradient,
+          )}
         >
-          <Icon className="size-5" />
-        </span>
-        <Icon
-          aria-hidden="true"
-          className="absolute -bottom-3 -right-2 size-20 text-white/15 transition-transform duration-300 group-hover:scale-110"
-        />
-        <Badge
-          className="absolute bottom-3 left-3 border-transparent bg-background/85 text-foreground backdrop-blur-sm hover:bg-background/85"
-          title={`Стадия: ${stage}`}
-        >
-          {stage}
-        </Badge>
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 bg-[radial-gradient(140%_120%_at_85%_-10%,rgba(255,255,255,0.25),transparent_55%)]"
+          />
+          <span
+            aria-hidden="true"
+            className="absolute left-4 top-4 flex size-10 items-center justify-center rounded-xl bg-white/15 text-white backdrop-blur-sm"
+          >
+            <Icon className="size-5" />
+          </span>
+          <Icon
+            aria-hidden="true"
+            className="absolute -bottom-3 -right-2 size-20 text-white/15 transition-transform duration-300 group-hover:scale-110"
+          />
+          <Badge
+            className="absolute bottom-3 left-3 border-transparent bg-background/85 text-foreground backdrop-blur-sm hover:bg-background/85"
+            title={`Стадия: ${stage}`}
+          >
+            {stage}
+          </Badge>
+        </button>
         {onToggleFavorite ? (
           <button
             type="button"
-            className="absolute right-3 top-3 rounded-full bg-background/80 p-1.5 text-white backdrop-blur-sm"
+            className="absolute right-3 top-3 z-10 rounded-full bg-background/80 p-1.5 text-white backdrop-blur-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             aria-label={workspace.favorite ? "Убрать из избранного" : "В избранное"}
+            aria-pressed={workspace.favorite}
             onClick={(e) => {
               e.stopPropagation();
               onToggleFavorite(workspace.id, !workspace.favorite);
@@ -101,7 +105,7 @@ export function WorkspacesCard({
             />
           </button>
         ) : null}
-      </button>
+      </div>
 
       {/* ── Тело карточки ── */}
       <button
