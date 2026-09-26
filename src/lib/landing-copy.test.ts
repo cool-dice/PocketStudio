@@ -5,7 +5,6 @@ import {
   LANDING_CHAT_MOCK_PILL,
   LANDING_DEPLOY_BLURB,
   LANDING_LOGIN_HREF,
-  LANDING_MCP_BLURB,
   LANDING_META_DESCRIPTION,
   LANDING_MONETIZE_BLURB,
   LANDING_REGISTER_HREF,
@@ -43,8 +42,7 @@ describe("landing CTA and honesty copy", () => {
     const blob = landingMarketingBlob();
     expect(blob).not.toMatch(FORBIDDEN);
     expect(LANDING_DEPLOY_BLURB).toMatch(/не публикация на хост/i);
-    expect(LANDING_MCP_BLURB).toMatch(/GitHub/i);
-    expect(LANDING_MCP_BLURB).toMatch(/не подключ/i);
+    expect(blob).not.toMatch(/dockerfile|github|stdio|\bfetch\b|next\.js|photoshop|figma|premiere|fl studio|\bdaw\b|оффер|интеграц/i);
     expect(LANDING_MONETIZE_BLURB).toMatch(/карточная сеть не подключена/i);
     expect(LANDING_CHAT_MOCK_PILL).toMatch(/выпуск/i);
     expect(LANDING_CHAT_MOCK_PILL).not.toMatch(/продаж/i);
