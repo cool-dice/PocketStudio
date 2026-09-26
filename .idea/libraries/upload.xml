@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="upload">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/upload/1.zip!/" />
+      <root url="jar://$PROJECT_DIR$/upload/Aiflow-main.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

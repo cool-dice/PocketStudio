@@ -65,3 +65,4 @@ db/custom.db-wal
 
 # Old VibeMind / Aiflow archives. Not part of the product.
 /prototypes/
+/public/gen/
