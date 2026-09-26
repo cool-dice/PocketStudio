@@ -1440,6 +1440,19 @@ export const api = {
     });
   },
 
+  /** ИИ: переписать только выделенный фрагмент главы (не всю главу). */
+  aiRewriteSelection(body: {
+    sectionId: string;
+    selection: string;
+    instruction: string;
+  }): Promise<string> {
+    return request<{ text: string }>("/api/ai/selection", {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: 120_000,
+    }).then((r) => r.text);
+  },
+
   /** ИИ: переписать / продолжить / править главу по инструкции. */
   aiRewriteSection(body: {
     sectionId: string;
