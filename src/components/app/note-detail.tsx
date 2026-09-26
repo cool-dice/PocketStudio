@@ -23,7 +23,6 @@ import {
   Loader2,
   MessageCircle,
   RotateCcw,
-  Rocket,
   Sparkles,
   Star,
   ThumbsUp,
@@ -328,8 +327,6 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [reanalyzeBusy, setReanalyzeBusy] = useState(false);
-  const openCreateProject = useAppUi((s) => s.openCreateProject);
-
   const chipStyle = note.category
     ? categoryColorStyle(note.category.color)
     : null;
@@ -693,16 +690,6 @@ export function NoteDetail({ note, onDismiss }: NoteDetailProps) {
           >
             <MessageCircle className="size-3.5" aria-hidden="true" />
             Обсудить
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-9 shrink-0 rounded-xl hover:border-primary/40 hover:text-primary"
-            onClick={() => openCreateProject(note.id)}
-            aria-label="Создать код-проект из заметки"
-            title="В код-проект"
-          >
-            <Rocket className="size-3.5" aria-hidden="true" />
           </Button>
           <Button
             variant="outline"

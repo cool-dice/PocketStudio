@@ -35,7 +35,6 @@ export const WORKSPACES_TYPE_CHIPS: {
   { id: "film", label: "Фильмы" },
   { id: "book", label: "Книга" },
   { id: "music", label: "Музыка" },
-  { id: "app", label: "Приложение" },
   { id: "universal", label: "Универсальный" },
 ];
 

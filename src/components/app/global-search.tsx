@@ -3,9 +3,9 @@
 /**
  * GlobalSearch — Ctrl+P / ⌘P command palette: GET /api/search for the
  * current user (workspace-scoped when a workspace is open). Empty ≠ error.
- * Workspace hits open /w/[id]; code-project hits open the Next.js shell.
- * documents open /w/{id}?tab=documents&doc=; entities open the documents
- * module (or the workspace + query); artifacts open images or library.
+ * Workspace hits open /w/[id]. documents open /w/{id}?tab=documents&doc=;
+ * entities open the documents module (or the workspace + query); artifacts
+ * open images or library.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -43,7 +43,6 @@ import {
   SEARCH_ERROR,
   SEARCH_ERROR_HINT,
   SEARCH_GROUP_ARTIFACTS,
-  SEARCH_GROUP_CODE_PROJECTS,
   SEARCH_GROUP_DOCUMENTS,
   SEARCH_GROUP_ENTITIES,
   SEARCH_GROUP_NOTES,
@@ -67,7 +66,6 @@ export function GlobalSearch() {
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
   const setMainArea = useAppUi((s) => s.setMainArea);
   const openWorkspace = useAppUi((s) => s.openWorkspace);
-  const openProject = useAppUi((s) => s.openProject);
   const activeWorkspaceId = useAppUi((s) => s.activeWorkspaceId);
   const mainArea = useAppUi((s) => s.mainArea);
 
@@ -142,8 +140,6 @@ export function GlobalSearch() {
         close();
         if (projectId && searchHitIsStudio(projectOrigin)) {
           openWorkspace(projectId);
-        } else if (projectId) {
-          openProject(projectId);
         } else {
           setMainArea("chat");
         }
@@ -160,10 +156,6 @@ export function GlobalSearch() {
       workspace: (id: string) => {
         close();
         openWorkspace(id);
-      },
-      code: (id: string) => {
-        close();
-        openProject(id);
       },
       href: (href: string, projectId: string, docId?: string) => {
         close();
@@ -186,7 +178,7 @@ export function GlobalSearch() {
         if (doc) useAppUi.getState().setWorkspaceDocId(doc);
       },
     }),
-    [close, openWorkspace, openProject, setMainArea, selectThread],
+    [close, openWorkspace, setMainArea, selectThread],
   );
 
   return (
@@ -242,13 +234,6 @@ export function GlobalSearch() {
               heading={SEARCH_GROUP_WORKSPACES}
               items={results.projects.filter((p) => searchHitIsStudio(p.origin))}
               onPick={go.workspace}
-              kind="workspace"
-            />
-            <SearchProjectGroup
-              heading={SEARCH_GROUP_CODE_PROJECTS}
-              items={results.projects.filter((p) => !searchHitIsStudio(p.origin))}
-              onPick={go.code}
-              kind="project"
             />
           </>
         )}
@@ -394,21 +379,18 @@ function SearchProjectGroup({
   heading,
   items,
   onPick,
-  kind,
 }: {
   heading: string;
   items: SearchProjectHit[];
   onPick: (id: string) => void;
-  kind: "workspace" | "project";
 }) {
   if (items.length === 0) return null;
-  const prefix = kind === "workspace" ? "воркспейс" : "код-проект";
   return (
     <CommandGroup heading={heading}>
       {items.map((p) => (
         <CommandItem
-          key={`${kind}-${p.id}`}
-          value={`${prefix} ${p.name} ${p.description ?? ""}`}
+          key={`workspace-${p.id}`}
+          value={`воркспейс ${p.name} ${p.description ?? ""}`}
           onSelect={() => onPick(p.id)}
           className="gap-3"
         >

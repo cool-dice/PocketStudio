@@ -297,14 +297,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
             onClick: () => useAppUi.getState().openWorkspace(project.id),
           },
         });
-        return;
       }
-      toast.success(`Агент создал проект «${project.name}»`, {
-        action: {
-          label: "Открыть",
-          onClick: () => useAppUi.getState().openProject(project.id),
-        },
-      });
     };
 
     // File updates are frequent → silent bump; checkpoints toast (deduped

@@ -2,7 +2,7 @@
 
 /**
  * CreateWorkspaceSteps — шаги мастера создания воркспейса (PS-3-a):
- * выбор типа (5 крупных карточек), название с описанием и чипом типа,
+ * выбор типа (фильм, книга, музыка, универсальный), название и чип типа,
  * финальное превью с пайплайном типа. Управление шагами — в диалоге.
  */
 
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  FLOW_WORKSPACE_TYPES,
   WORKSPACE_STAGES,
   WORKSPACE_TYPE_META,
   type WorkspaceType,
@@ -41,7 +42,7 @@ export function StepType({
         role="radiogroup"
         aria-label="Тип воркспейса"
       >
-        {(Object.keys(WORKSPACE_TYPE_META) as WorkspaceType[]).map((t) => {
+        {FLOW_WORKSPACE_TYPES.map((t) => {
           const meta = WORKSPACE_TYPE_META[t];
           const active = selected === t;
           return (

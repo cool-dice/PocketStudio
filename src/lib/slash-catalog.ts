@@ -17,13 +17,13 @@ export const WORKSPACE_SLASH_COMMANDS: readonly WorkspaceSlashSpec[] = [
   {
     name: "воркспейс",
     label: "Новый воркспейс",
-    description: "Создать студию: фильм, книга, трек, приложение или универсальный",
+    description: "Создать студию: фильм, книга, трек или универсальный",
     type: undefined,
   },
   {
     name: "студия",
     label: "Новая студия",
-    description: "Создать творческий воркспейс (не код Next.js)",
+    description: "Создать творческий воркспейс",
     type: undefined,
   },
   {

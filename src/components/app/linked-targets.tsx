@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Note-detail chips for NoteLink rows. A studio must open /w/{id}, not the
- * Next.js project shell; copy must not call a track/book a «проект».
+ * Note-detail chips for NoteLink rows that belong to a studio.
+ * Code projects and the app workspace type stay out of the product flow.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -22,8 +22,11 @@ import {
 import { useAppUi } from "@/lib/store";
 import type { NoteProjectLink } from "@/lib/types";
 
+function isFlowStudio(link: NoteProjectLink): boolean {
+  return link.project.origin === "workspace" && link.project.type !== "app";
+}
+
 export function LinkedTargets({ noteId }: { noteId: string }) {
-  const openProject = useAppUi((s) => s.openProject);
   const openWorkspace = useAppUi((s) => s.openWorkspace);
   const projectsVersion = useAppUi((s) => s.projectsVersion);
   const [links, setLinks] = useState<NoteProjectLink[] | null>(null);
@@ -46,15 +49,11 @@ export function LinkedTargets({ noteId }: { noteId: string }) {
     void loadLinks();
   }, [loadLinks, projectsVersion]);
 
+  const studios = (links ?? []).filter(isFlowStudio);
+
   const openLinked = (link: NoteProjectLink) => {
-    const chip = boundThreadChip({
-      name: link.project.name,
-      origin: link.project.origin,
-      type: link.project.type,
-      id: link.project.id,
-    });
-    if (chip.kind === "workspace") openWorkspace(link.project.id);
-    else openProject(link.project.id);
+    if (!isFlowStudio(link)) return;
+    openWorkspace(link.project.id);
   };
 
   const unlink = async (link: NoteProjectLink) => {
@@ -94,13 +93,13 @@ export function LinkedTargets({ noteId }: { noteId: string }) {
             Повторить
           </button>
         </div>
-      ) : links.length === 0 ? (
+      ) : studios.length === 0 ? (
         <p className="mt-1.5 px-1 text-xs leading-relaxed text-muted-foreground">
           {LINKED_TARGETS_EMPTY}
         </p>
       ) : (
         <ul className="mt-2 flex flex-wrap gap-1.5">
-          {links.map((link) => (
+          {studios.map((link) => (
             <LinkedChip
               key={link.id}
               link={link}

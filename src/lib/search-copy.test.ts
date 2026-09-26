@@ -4,7 +4,6 @@ import {
   SEARCH_DESCRIPTION,
   SEARCH_ERROR,
   SEARCH_ERROR_HINT,
-  SEARCH_GROUP_CODE_PROJECTS,
   SEARCH_GROUP_WORKSPACES,
   SEARCH_HINT_GLOBAL,
   SEARCH_HINT_WORKSPACE,
@@ -35,8 +34,9 @@ describe("search empty vs error copy", () => {
     expect(SEARCH_HINT_GLOBAL).toMatch(/сущност/i);
     expect(SEARCH_HINT_GLOBAL).toMatch(/артефакт/i);
     expect(SEARCH_DESCRIPTION).toMatch(/документ/i);
-    expect(SEARCH_HINT_GLOBAL).toMatch(/код-проект/i);
-    expect(SEARCH_GROUP_CODE_PROJECTS).toMatch(/код/i);
-    expect(SEARCH_GROUP_WORKSPACES).not.toBe(SEARCH_GROUP_CODE_PROJECTS);
+    expect(SEARCH_HINT_GLOBAL).toMatch(/воркспейс/i);
+    expect(SEARCH_HINT_GLOBAL).not.toMatch(/код-проект/i);
+    expect(SEARCH_DESCRIPTION).not.toMatch(/код-проект/i);
+    expect(SEARCH_GROUP_WORKSPACES).toMatch(/воркспейс/i);
   });
 });

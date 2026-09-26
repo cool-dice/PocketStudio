@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Composer / chat-header chip for a bound studio vs a Next.js code app.
- * Workspace chips are `/w/{id}` links; code chips call openProject.
+ * Composer / chat-header chip for a bound studio.
+ * The chip opens /w/{id}.
  */
 
 import { FolderGit2 } from "lucide-react";
@@ -24,7 +24,6 @@ export function BoundThreadChip({
   className?: string;
 }) {
   const openWorkspace = useAppUi((s) => s.openWorkspace);
-  const openProject = useAppUi((s) => s.openProject);
   const inner = (
     <>
       <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
@@ -52,7 +51,7 @@ export function BoundThreadChip({
   return (
     <button
       type="button"
-      onClick={() => openProject(id)}
+      onClick={() => openWorkspace(id)}
       aria-label={`${chip.label} — открыть`}
       title={chip.label}
       className={cn(CHIP_CLASS, className)}

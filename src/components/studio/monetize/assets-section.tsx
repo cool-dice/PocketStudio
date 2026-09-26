@@ -57,7 +57,7 @@ const COUNTER_GROUPS: CounterGroup[] = [
   { id: "audio", label: "Аудио", icon: AudioLines, types: ["audio", "track"] },
   { id: "documents", label: "Документы", icon: FileText, types: ["document"] },
   { id: "video", label: "Видео", icon: Clapperboard, types: ["video", "scene"] },
-  { id: "files", label: "Файлы", icon: Paperclip, types: ["file", "note", "app", "deploy"] },
+  { id: "files", label: "Файлы", icon: Paperclip, types: ["file", "note"] },
 ];
 
 export function AssetsSection({
@@ -80,7 +80,8 @@ export function AssetsSection({
     );
   }
 
-  const ready = artifacts.filter((a) => Boolean(a.url));
+  const visible = artifacts.filter((a) => a.type !== "app" && a.type !== "deploy");
+  const ready = visible.filter((a) => Boolean(a.url));
 
   return (
     <section
@@ -94,7 +95,7 @@ export function AssetsSection({
 
       <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-5">
         {COUNTER_GROUPS.map((group) => {
-          const count = artifacts.filter((a) =>
+          const count = visible.filter((a) =>
             group.types.includes(a.type),
           ).length;
           const Icon = group.icon;
@@ -134,7 +135,7 @@ export function AssetsSection({
             aria-hidden="true"
           />
           <p className="text-sm text-muted-foreground">
-            {artifacts.length === 0
+            {visible.length === 0
               ? MONETIZE_ASSETS_EMPTY
               : MONETIZE_ASSETS_NO_FILE}
           </p>

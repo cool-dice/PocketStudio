@@ -139,8 +139,6 @@ export const LIBRARY_TYPE_ORDER: ArtifactType[] = [
   "document",
   "note",
   "file",
-  "app",
-  "deploy",
 ];
 
 /** Градиент артефакта: meta.gradient или фолбэк по типу. */

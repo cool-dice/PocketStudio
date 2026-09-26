@@ -20,15 +20,15 @@ const geistMono = Geist_Mono({
 // Guest `/` is the public landing — do not set robots.index false here.
 // Authenticated `/w/*` uses appRouteMetadata from `src/app/w/layout.tsx`.
 export const metadata: Metadata = {
-  title: "PocketStudio — идея → продукт → доход",
+  title: "PocketStudio — киностудия от А до Я",
   description: LANDING_META_DESCRIPTION,
-  keywords: ["PocketStudio", "ИИ", "творческая студия", "генерация", "аудио", "видео", "деплой", "агент"],
+  keywords: ["PocketStudio", "киностудия", "ИИ", "сценарий", "раскадровка", "озвучка", "монтаж", "фильм"],
   icons: {
     icon: "/logo.svg",
   },
   openGraph: {
     title: "PocketStudio",
-    description: "Идея → продукт → доход",
+    description: "Замысел → фильм → выпуск",
     siteName: "PocketStudio",
     type: "website",
   },

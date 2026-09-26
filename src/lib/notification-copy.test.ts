@@ -22,7 +22,8 @@ describe("bell empty vs error copy", () => {
     expect(BELL_EMPTY).toMatch(/[А-Яа-яЁё]/);
     expect(BELL_EMPTY_HINT).toMatch(/[А-Яа-яЁё]/);
     expect(BELL_EMPTY_HINT).toMatch(/воркспейс/i);
-    expect(BELL_EMPTY_HINT).toMatch(/код-проект/i);
+    expect(BELL_EMPTY_HINT).toMatch(/чекпоинт/i);
+    expect(BELL_EMPTY_HINT).not.toMatch(/код-проект/i);
     expect(BELL_LOAD_ERROR).toMatch(/[А-Яа-яЁё]/);
     expect(BELL_RETRY).toMatch(/повторить/i);
     expect(BELL_MARK_ALL_READ).toMatch(/прочитанн/i);

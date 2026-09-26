@@ -37,8 +37,8 @@ const TAIL = 12;
 /** Стартовые подсказки для пустого треда — клик сразу отправляет. */
 const STARTERS = [
   "Что ты умеешь?",
-  "Помоги придумать книгу",
-  "Собери лендинг",
+  "Набросай короткометражку",
+  "Собери раскадровку",
 ];
 
 export function HomeChatWidget() {
@@ -256,7 +256,7 @@ function EmptyThread({
       <div className="space-y-1">
         <p className="text-sm font-medium">Начните с мысли</p>
         <p className="mx-auto max-w-64 text-balance text-xs leading-relaxed text-muted-foreground">
-          Студия слушает: превратим идею в книгу, трек, фильм или продукт
+          Киностудия слушает: от замысла до фильма — сценарий, кадры, звук и монтаж
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-1.5">

@@ -3,12 +3,11 @@
 /**
  * Composer — auto-growing textarea. Enter sends, Shift+Enter inserts a
  * newline. Disabled while the agent is thinking/streaming (busy).
- * When the active thread is bound to a project or studio, a small chip
- * sits above the input (click → project screen or workspace).
+ * When the active thread is bound to a studio, a small chip sits above
+ * the input (click → workspace).
  *
- * Slash commands (Stage 4): typing "/" opens a command menu above the input —
- * mode switches, quick note prefix, create project, notebook, global search,
- * checkpoint and zip export (last two need a bound project).
+ * Slash commands: typing "/" opens a command menu above the input —
+ * mode switches, quick note, film/book/music studios, notebook, search.
  *
  * Voice (Stage 2): compact mic next to the send button — records via
  * useVoiceRecorder, the backend transcribes (POST /api/notes/voice → { text })
@@ -44,12 +43,12 @@ import {
   type VoiceClip,
 } from "@/hooks/use-voice-recorder";
 import { BoundThreadChip } from "@/components/app/bound-thread-chip";
-import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { api, ApiError } from "@/lib/api";
 import { boundChipFromLists } from "@/lib/composer-binding";
-import { CODE_PROJECT_SLASH, WORKSPACE_SLASH_COMMANDS } from "@/lib/slash-catalog";
+import { WORKSPACE_SLASH_COMMANDS } from "@/lib/slash-catalog";
+import { isOffFlowWorkspace } from "@/lib/workspace-data";
 import { useAppUi } from "@/lib/store";
 import { ASR_GENERIC, MIC_START_FAILED, voiceResultCopy } from "@/lib/voice-copy";
 import {
@@ -70,13 +69,10 @@ export function Composer({
 }) {
   const { busy, sendMessage, abortTurn, activeThread, updateThreadMode, sendError, clearSendError } =
     useThreads();
-  const { getById } = useProjects();
   const { workspaces } = useWorkspaces();
   const setMainArea = useAppUi((s) => s.setMainArea);
   const setSearchOpen = useAppUi((s) => s.setSearchOpen);
-  const openCreateProject = useAppUi((s) => s.openCreateProject);
   const openCreateWorkspace = useAppUi((s) => s.openCreateWorkspace);
-  const bumpProjectFiles = useAppUi((s) => s.bumpProjectFiles);
   const composerDraft = useAppUi((s) => s.composerDraft);
   const composerAutoSendProjectId = useAppUi((s) => s.composerAutoSendProjectId);
   const setComposerDraft = useAppUi((s) => s.setComposerDraft);
@@ -123,13 +119,14 @@ export function Composer({
     scopeProjectId === undefined || threadProjectId === scopeProjectId;
   const boundWorkspace =
     scoped && threadProjectId
-      ? workspaces.find((w) => w.id === threadProjectId) ?? null
+      ? workspaces.find(
+          (w) => w.id === threadProjectId && !isOffFlowWorkspace(w.type),
+        ) ?? null
       : null;
-  const boundProject = scoped ? getById(threadProjectId) : null;
   const boundChip = boundChipFromLists({
     id: threadProjectId,
     workspace: boundWorkspace,
-    project: boundProject,
+    project: null,
   });
 
   // Guards the manual-stop vs 90s-auto-stop race — only one upload runs.
@@ -167,13 +164,6 @@ export function Composer({
         run: () => openCreateWorkspace(spec.type),
       })),
       {
-        name: CODE_PROJECT_SLASH.name,
-        label: CODE_PROJECT_SLASH.label,
-        description: CODE_PROJECT_SLASH.description,
-        icon: SLASH_MISC_ICONS.project,
-        run: () => openCreateProject(),
-      },
-      {
         name: "блокнот",
         label: "Блокнот",
         description: "Открыть все заметки",
@@ -183,7 +173,7 @@ export function Composer({
       {
         name: "поиск",
         label: "Поиск",
-        description: "Искать по диалогам, заметкам, воркспейсам и код-проектам",
+        description: "Искать по диалогам, заметкам и воркспейсам",
         icon: SLASH_MISC_ICONS.search,
         run: () => setSearchOpen(true),
       },
@@ -215,72 +205,9 @@ export function Composer({
       }
     }
 
-    if (boundProject) {
-      list.push(
-        {
-          name: "чекпоинт",
-          label: "Чекпоинт",
-          description: `Сохранить изменения проекта «${boundProject.name}»`,
-          icon: SLASH_MISC_ICONS.checkpoint,
-          run: async () => {
-            try {
-              const checkpoint = await api.createProjectCheckpoint(
-                boundProject.id,
-                `Чекпоинт из диалога · ${new Date().toLocaleString("ru-RU")}`,
-              );
-              if (checkpoint.noop) {
-                toast.info("Изменений нет — чекпоинт не нужен");
-              } else {
-                toast.success("Чекпоинт создан", {
-                  description: `${checkpoint.commit?.short ?? ""} · ${checkpoint.filesChanged} файл(ов)`,
-                });
-                bumpProjectFiles();
-              }
-            } catch (err) {
-              toast.error(
-                err instanceof ApiError ? err.message : "Не удалось создать чекпоинт",
-              );
-            }
-          },
-        },
-        {
-          name: "скачать",
-          label: "Скачать zip",
-          description: `Скачать «${boundProject.name}» архивом`,
-          icon: SLASH_MISC_ICONS.download,
-          run: async () => {
-            try {
-              const res = await fetch(api.projectExportUrl(boundProject.id), {
-                credentials: "same-origin",
-              });
-              if (!res.ok) {
-                const body = (await res.json().catch(() => ({}))) as { error?: string };
-                throw new Error(body.error ?? "Не удалось упаковать проект");
-              }
-              const blob = await res.blob();
-              const objectUrl = URL.createObjectURL(blob);
-              const anchor = document.createElement("a");
-              anchor.href = objectUrl;
-              anchor.download = `pocketstudio-${boundProject.name}.zip`;
-              document.body.append(anchor);
-              anchor.click();
-              anchor.remove();
-              URL.revokeObjectURL(objectUrl);
-              toast.success("Архив проекта готов");
-            } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Не удалось упаковать проект");
-            }
-          },
-        },
-      );
-    }
-
     return list;
   }, [
     activeThread,
-    boundProject,
-    bumpProjectFiles,
-    openCreateProject,
     openCreateWorkspace,
     setMainArea,
     setSearchOpen,

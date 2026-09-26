@@ -5,7 +5,7 @@
  *
  * Popover with the persistent history (latest 50): per-type icons, unread
  * markers, relative timestamps, click-through navigation (analysis → note,
- * project events → project screen) and mark-all-read / clear actions.
+ * studio events → workspace) and mark-all-read / clear actions.
  * Live updates arrive through the notifications store (WS notification:new).
  *
  * side: "right" (desktop aside) | "bottom" (mobile Sheet — a right-side
@@ -44,6 +44,7 @@ import {
   bellListView,
 } from "@/lib/notification-copy";
 import { notificationOpensWorkspace } from "@/lib/composer-binding";
+import { isOffFlowWorkspace } from "@/lib/workspace-data";
 import { useNotifications } from "@/lib/notifications-store";
 import { useAppUi } from "@/lib/store";
 import type { Notification, NotificationType } from "@/lib/types";
@@ -81,18 +82,21 @@ const TYPE_META: Record<
   },
 };
 
-function openStudioOrCodeProject(
+function openStudioNotification(
   id: string,
   title: string,
   body: string | null,
 ) {
   const ui = useAppUi.getState();
-  if (peekOwnedWorkspace(id)) {
-    ui.openWorkspace(id);
+  const cached = peekOwnedWorkspace(id);
+  if (cached) {
+    if (!isOffFlowWorkspace(cached.type)) ui.openWorkspace(id);
     return;
   }
   void api.getWorkspace(id).then(
-    () => ui.openWorkspace(id),
+    (workspace) => {
+      if (!isOffFlowWorkspace(workspace.type)) ui.openWorkspace(id);
+    },
     () => {
       if (
         notificationOpensWorkspace({
@@ -103,9 +107,7 @@ function openStudioOrCodeProject(
         })
       ) {
         ui.openWorkspace(id);
-        return;
       }
-      ui.openProject(id);
     },
   );
 }
@@ -143,7 +145,7 @@ export function NotificationsBell({ side = "right" }: { side?: "right" | "bottom
           ui.setMainArea("notebook");
         });
     } else if ((n.type === "project_created" || n.type === "checkpoint") && n.entityId) {
-      openStudioOrCodeProject(n.entityId, n.title, n.body);
+      openStudioNotification(n.entityId, n.title, n.body);
     }
     setOpen(false);
   };

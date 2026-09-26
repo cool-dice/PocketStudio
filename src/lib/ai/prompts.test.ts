@@ -68,11 +68,12 @@ describe("prompt library", () => {
     expect(RAG_GLOBAL_BLOCK).toContain("Цитируй имя воркспейса");
     expect(RAG_GLOBAL_BLOCK).toContain("только если в этом треде открыт проект");
     expect(RAG_WORKSPACE_BLOCK).toContain("только ЭТОТ воркспейс");
-    expect(RAG_WORKSPACE_BLOCK).toContain("личный кодер");
+    expect(RAG_WORKSPACE_BLOCK).toContain("этой студии в продукте нет");
     expect(RAG_WORKSPACE_BLOCK).toContain("открыть её или спросить в главном чате");
     expect(IDENTITY_BLOCK).toContain("не выдумывай");
     expect(IDENTITY_BLOCK).toContain("create_workspace");
-    expect(IDENTITY_BLOCK).toContain("create_project — ТОЛЬКО код Next.js");
+    expect(IDENTITY_BLOCK).not.toContain("create_project — ТОЛЬКО код Next.js");
+    expect(IDENTITY_BLOCK).toContain("киностудии от А до Я");
     expect(IDENTITY_BLOCK).toContain("предложи или вызови create_workspace");
     expect(RAG_WORKSPACE_BLOCK).toContain("Текст трека");
   });

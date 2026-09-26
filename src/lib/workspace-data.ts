@@ -33,6 +33,21 @@ import {
 
 export type WorkspaceType = "film" | "book" | "music" | "app" | "universal";
 
+/**
+ * Types offered in the product flow. `app` (dev studio) stays in the
+ * data model for existing rows, but creation, lists, and navigation hide it.
+ */
+export const FLOW_WORKSPACE_TYPES: readonly WorkspaceType[] = [
+  "film",
+  "book",
+  "music",
+  "universal",
+];
+
+export function isOffFlowWorkspace(type: string): boolean {
+  return type === "app";
+}
+
 export type WorkspaceTab =
   | "overview"
   | "chat"
@@ -155,7 +170,7 @@ export const WORKSPACE_TABS_BY_TYPE: Record<WorkspaceType, WorkspaceTab[]> = {
   music: ["chat", "overview", "notes", "documents", "audio", "design", "monetize"],
   app: ["chat", "overview", "notes", "code", "design", "deploy", "monetize"],
   universal: [
-    "chat", "overview", "notes", "documents", "images", "audio", "video", "design", "deploy", "monetize",
+    "chat", "overview", "notes", "documents", "images", "audio", "video", "design", "monetize",
   ],
 };
 

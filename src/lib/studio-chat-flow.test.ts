@@ -153,19 +153,20 @@ describe("boundThreadChip", () => {
 describe("notebook linked targets", () => {
   test("copy does not call a studio a project", () => {
     expect(LINKED_TARGETS_TITLE).toMatch(/воркспейс/i);
-    expect(LINKED_TARGETS_TITLE).toMatch(/код-проект/i);
+    expect(LINKED_TARGETS_TITLE).not.toMatch(/код-проект/i);
     expect(LINKED_TARGETS_TITLE).not.toBe("Связанные проекты");
     expect(LINKED_TARGETS_TITLE).not.toMatch(/связанные студии и проекты/i);
     expect(LINKED_TARGETS_EMPTY).toMatch(/воркспейс/i);
     expect(LINKED_TARGETS_EMPTY).toMatch(/трек/i);
-    expect(LINKED_TARGETS_EMPTY).toMatch(/код-проект/i);
+    expect(LINKED_TARGETS_EMPTY).not.toMatch(/код-проект/i);
     expect(LINKED_TARGETS_EMPTY).not.toBe("Пока нет связанных проектов.");
     expect(LINKED_TARGETS_LOAD_ERROR).toMatch(/не удалось загрузить/i);
     expect(LINKED_TARGETS_LOAD_ERROR).not.toBe(LINKED_TARGETS_EMPTY);
     expect(WORKSPACE_OR_CODE_NOT_FOUND).toMatch(/воркспейс/i);
-    expect(WORKSPACE_OR_CODE_NOT_FOUND).toMatch(/код-проект/i);
+    expect(WORKSPACE_OR_CODE_NOT_FOUND).not.toMatch(/код-проект/i);
     expect(WORKSPACE_OR_CODE_NOT_FOUND).not.toMatch(/студия или проект/i);
     expect(WORKSPACE_OR_CODE_PICK).toMatch(/воркспейс/i);
+    expect(WORKSPACE_OR_CODE_PICK).not.toMatch(/код-проект/i);
     expect(WORKSPACE_OR_CODE_PICK).not.toMatch(/студию или проект/i);
     expect(isStudioOrigin("workspace")).toBe(true);
     expect(isStudioOrigin("template")).toBe(false);

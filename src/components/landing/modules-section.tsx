@@ -14,14 +14,12 @@ import {
   Coins,
   ImagePlus,
   PenTool,
-  Rocket,
   Wand2,
   type LucideIcon,
 } from "lucide-react";
 
 import { Reveal, SectionHeader } from "@/components/landing/landing-shared";
 import {
-  LANDING_DEPLOY_BLURB,
   LANDING_MCP_BLURB,
   LANDING_MONETIZE_BLURB,
 } from "@/lib/landing-copy";
@@ -39,12 +37,12 @@ const MODULES: {
   {
     icon: BookOpenText,
     title: "Документы",
-    description: "Книги, статьи и сценарии со структурой глав и ИИ-редактором.",
+    description: "Сценарии, синопсисы и исходные тексты со структурой глав и ИИ-редактором.",
   },
   {
     icon: ImagePlus,
     title: "Изображения",
-    description: "Обложки и концепты по текстовому описанию.",
+    description: "Раскадровка, концепты и постеры по текстовому описанию.",
   },
   {
     icon: PenTool,
@@ -60,11 +58,6 @@ const MODULES: {
     icon: Clapperboard,
     title: "Видео",
     description: VIDEO_LANDING_BLURB,
-  },
-  {
-    icon: Rocket,
-    title: "Деплой",
-    description: LANDING_DEPLOY_BLURB,
   },
   {
     icon: Blocks,
@@ -89,8 +82,8 @@ export function ModulesSection() {
       <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
         <SectionHeader
           overline="Модули"
-          title="Всё творчество — в одном окне"
-          description="Девять модулей студии работают над одной задачей: превратить идею в готовый продукт, не выпуская её из диалога."
+          title="Киностудия — в одном окне"
+          description="Модули закрывают путь от замысла до выпуска: сценарий, кадры, звук, монтаж и оффер, не выпуская картину из диалога."
         />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {MODULES.map((module, i) => (

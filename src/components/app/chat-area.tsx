@@ -2,7 +2,7 @@
 
 /**
  * ChatArea — center zone: header (mobile nav, thread title, mode selector
- * dropdown, project chip, context toggle), scrollable messages with smart
+ * dropdown, context toggle), scrollable messages with smart
  * auto-scroll and a «к новым» pill, welcome screen for empty threads,
  * composer. `embedded` прячет мобильный хедер, когда ChatArea встроен
  * в другой экран со своим хедером (например, на Главной).
@@ -38,10 +38,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useProjects } from "@/hooks/use-projects";
 import { useThreads } from "@/hooks/use-threads";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import { boundChipFromLists } from "@/lib/composer-binding";
+import { isOffFlowWorkspace } from "@/lib/workspace-data";
 import { formatPrefetchHint } from "@/lib/rag/prefetch";
 import {
   MODE_DESCRIPTIONS,
@@ -86,15 +86,17 @@ export function ChatArea({
     canonHint,
   } = useThreads();
 
-  const { getById } = useProjects();
   const { workspaces } = useWorkspaces();
   const boundId = activeThread?.projectId ?? null;
+  const boundWorkspace = boundId
+    ? workspaces.find(
+        (w) => w.id === boundId && !isOffFlowWorkspace(w.type),
+      ) ?? null
+    : null;
   const boundChip = boundChipFromLists({
     id: boundId,
-    workspace: boundId
-      ? workspaces.find((w) => w.id === boundId) ?? null
-      : null,
-    project: getById(boundId),
+    workspace: boundWorkspace,
+    project: null,
   });
 
   const scrollRef = useRef<HTMLDivElement>(null);

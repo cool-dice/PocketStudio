@@ -40,7 +40,7 @@ const BULLETS: {
     icon: Layers,
     title: "Контекст всей студии — в одном чате",
     description:
-      "Книга, проект и последние правки уже в памяти: не пересказывайте каждый раз заново.",
+      "Сценарий, кадры и последние правки уже в памяти: не пересказывайте каждый раз заново.",
   },
   {
     icon: MousePointerClick,
@@ -52,7 +52,7 @@ const BULLETS: {
     icon: Mic,
     title: "Голосом и на ходу",
     description:
-      "Надиктуйте мысль на прогулке — она станет главой, треком или раскадровкой.",
+      "Надиктуйте мысль на прогулке — она станет сценой, репликой или раскадровкой.",
   },
 ];
 
@@ -131,7 +131,7 @@ function ChatMock() {
           <MockRow delay={0.15}>
             <div className="flex justify-end">
               <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-sm text-primary-foreground">
-                Сделай трейлер для книги — 30 секунд, эмбиент
+                Сделай трейлер на 30 секунд, эмбиент
               </div>
             </div>
           </MockRow>
@@ -179,11 +179,11 @@ function ChatMock() {
               <div className="w-full max-w-[85%] rounded-xl rounded-bl-md border bg-muted/40 px-3 py-2 text-xs">
                 <div className="flex items-center gap-2 font-medium text-muted-foreground">
                   <Check className="size-3.5 shrink-0 text-primary" />
-                  Изображение · обложка главы 4 сгенерирована
+                  Изображение · постер ключевой сцены готов
                 </div>
                 <div className="mt-2 flex h-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary/25 via-primary/10 to-transparent">
                   <span className="rounded-md bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground">
-                    глава 4 · тёмный лес
+                    сцена · тёмный лес
                   </span>
                 </div>
               </div>
